@@ -1,0 +1,2376 @@
+{
+  "teams": [
+    {
+      "id": "rheinstadt",
+      "city": "Rheinstadt",
+      "name": "Ritter",
+      "abbr": "RHR",
+      "colors": {
+        "primary": "#c8102e",
+        "secondary": "#f2c14e",
+        "helmet": "#c8102e",
+        "pants": "#f4efe1"
+      },
+      "roster": [
+        {
+          "id": "rheinstadt-1",
+          "name": "Felix Kaya",
+          "number": 1,
+          "position": "QB",
+          "age": 23,
+          "ratings": {
+            "speed": 67,
+            "strength": 65,
+            "awareness": 84,
+            "catching": 51,
+            "throwPower": 91,
+            "throwAccuracy": 79,
+            "blocking": 42,
+            "passRush": 42,
+            "tackling": 38,
+            "coverage": 35
+          }
+        },
+        {
+          "id": "rheinstadt-2",
+          "name": "Jonas Roth",
+          "number": 35,
+          "position": "RB",
+          "age": 24,
+          "ratings": {
+            "speed": 96,
+            "strength": 68,
+            "awareness": 62,
+            "catching": 67,
+            "throwPower": 39,
+            "throwAccuracy": 30,
+            "blocking": 62,
+            "passRush": 43,
+            "tackling": 48,
+            "coverage": 45
+          }
+        },
+        {
+          "id": "rheinstadt-3",
+          "name": "Paul Becker",
+          "number": 83,
+          "position": "WR",
+          "age": 30,
+          "ratings": {
+            "speed": 99,
+            "strength": 62,
+            "awareness": 66,
+            "catching": 80,
+            "throwPower": 31,
+            "throwAccuracy": 40,
+            "blocking": 40,
+            "passRush": 41,
+            "tackling": 42,
+            "coverage": 40
+          }
+        },
+        {
+          "id": "rheinstadt-4",
+          "name": "Felix Wolf",
+          "number": 11,
+          "position": "WR",
+          "age": 22,
+          "ratings": {
+            "speed": 92,
+            "strength": 61,
+            "awareness": 65,
+            "catching": 79,
+            "throwPower": 37,
+            "throwAccuracy": 28,
+            "blocking": 44,
+            "passRush": 50,
+            "tackling": 39,
+            "coverage": 37
+          }
+        },
+        {
+          "id": "rheinstadt-5",
+          "name": "Mika Williams",
+          "number": 85,
+          "position": "WR",
+          "age": 33,
+          "ratings": {
+            "speed": 98,
+            "strength": 59,
+            "awareness": 66,
+            "catching": 78,
+            "throwPower": 40,
+            "throwAccuracy": 33,
+            "blocking": 43,
+            "passRush": 37,
+            "tackling": 39,
+            "coverage": 44
+          }
+        },
+        {
+          "id": "rheinstadt-6",
+          "name": "Kofi Hartmann",
+          "number": 45,
+          "position": "TE",
+          "age": 26,
+          "ratings": {
+            "speed": 81,
+            "strength": 79,
+            "awareness": 63,
+            "catching": 74,
+            "throwPower": 39,
+            "throwAccuracy": 36,
+            "blocking": 70,
+            "passRush": 50,
+            "tackling": 37,
+            "coverage": 34
+          }
+        },
+        {
+          "id": "rheinstadt-7",
+          "name": "Dennis Hartmann",
+          "number": 72,
+          "position": "OL",
+          "age": 27,
+          "ratings": {
+            "speed": 61,
+            "strength": 93,
+            "awareness": 73,
+            "catching": 41,
+            "throwPower": 29,
+            "throwAccuracy": 28,
+            "blocking": 89,
+            "passRush": 45,
+            "tackling": 48,
+            "coverage": 38
+          }
+        },
+        {
+          "id": "rheinstadt-8",
+          "name": "Andre Krüger",
+          "number": 62,
+          "position": "OL",
+          "age": 26,
+          "ratings": {
+            "speed": 55,
+            "strength": 93,
+            "awareness": 63,
+            "catching": 46,
+            "throwPower": 28,
+            "throwAccuracy": 37,
+            "blocking": 78,
+            "passRush": 43,
+            "tackling": 46,
+            "coverage": 36
+          }
+        },
+        {
+          "id": "rheinstadt-9",
+          "name": "Luca Hoffmann",
+          "number": 54,
+          "position": "OL",
+          "age": 25,
+          "ratings": {
+            "speed": 49,
+            "strength": 86,
+            "awareness": 72,
+            "catching": 49,
+            "throwPower": 38,
+            "throwAccuracy": 30,
+            "blocking": 76,
+            "passRush": 45,
+            "tackling": 44,
+            "coverage": 33
+          }
+        },
+        {
+          "id": "rheinstadt-10",
+          "name": "Jamal Werner",
+          "number": 66,
+          "position": "OL",
+          "age": 19,
+          "ratings": {
+            "speed": 53,
+            "strength": 82,
+            "awareness": 68,
+            "catching": 51,
+            "throwPower": 32,
+            "throwAccuracy": 35,
+            "blocking": 81,
+            "passRush": 41,
+            "tackling": 46,
+            "coverage": 42
+          }
+        },
+        {
+          "id": "rheinstadt-11",
+          "name": "Ole Koch",
+          "number": 70,
+          "position": "OL",
+          "age": 23,
+          "ratings": {
+            "speed": 60,
+            "strength": 88,
+            "awareness": 65,
+            "catching": 40,
+            "throwPower": 34,
+            "throwAccuracy": 39,
+            "blocking": 88,
+            "passRush": 39,
+            "tackling": 40,
+            "coverage": 36
+          }
+        },
+        {
+          "id": "rheinstadt-12",
+          "name": "Darius Okafor",
+          "number": 98,
+          "position": "DL",
+          "age": 23,
+          "ratings": {
+            "speed": 64,
+            "strength": 80,
+            "awareness": 66,
+            "catching": 40,
+            "throwPower": 34,
+            "throwAccuracy": 30,
+            "blocking": 49,
+            "passRush": 74,
+            "tackling": 74,
+            "coverage": 43
+          }
+        },
+        {
+          "id": "rheinstadt-13",
+          "name": "Deniz Koch",
+          "number": 91,
+          "position": "DL",
+          "age": 29,
+          "ratings": {
+            "speed": 77,
+            "strength": 80,
+            "awareness": 67,
+            "catching": 38,
+            "throwPower": 35,
+            "throwAccuracy": 39,
+            "blocking": 47,
+            "passRush": 74,
+            "tackling": 82,
+            "coverage": 42
+          }
+        },
+        {
+          "id": "rheinstadt-14",
+          "name": "Ole Maier",
+          "number": 93,
+          "position": "DL",
+          "age": 24,
+          "ratings": {
+            "speed": 74,
+            "strength": 81,
+            "awareness": 67,
+            "catching": 41,
+            "throwPower": 32,
+            "throwAccuracy": 39,
+            "blocking": 45,
+            "passRush": 81,
+            "tackling": 76,
+            "coverage": 40
+          }
+        },
+        {
+          "id": "rheinstadt-15",
+          "name": "Niklas Koch",
+          "number": 97,
+          "position": "DL",
+          "age": 24,
+          "ratings": {
+            "speed": 76,
+            "strength": 85,
+            "awareness": 59,
+            "catching": 47,
+            "throwPower": 34,
+            "throwAccuracy": 36,
+            "blocking": 46,
+            "passRush": 79,
+            "tackling": 75,
+            "coverage": 41
+          }
+        },
+        {
+          "id": "rheinstadt-16",
+          "name": "Leon Roth",
+          "number": 55,
+          "position": "LB",
+          "age": 25,
+          "ratings": {
+            "speed": 76,
+            "strength": 79,
+            "awareness": 77,
+            "catching": 50,
+            "throwPower": 37,
+            "throwAccuracy": 31,
+            "blocking": 40,
+            "passRush": 70,
+            "tackling": 82,
+            "coverage": 61
+          }
+        },
+        {
+          "id": "rheinstadt-17",
+          "name": "Can Koch",
+          "number": 40,
+          "position": "LB",
+          "age": 28,
+          "ratings": {
+            "speed": 86,
+            "strength": 77,
+            "awareness": 78,
+            "catching": 46,
+            "throwPower": 36,
+            "throwAccuracy": 40,
+            "blocking": 44,
+            "passRush": 66,
+            "tackling": 88,
+            "coverage": 61
+          }
+        },
+        {
+          "id": "rheinstadt-18",
+          "name": "Ben Schulz",
+          "number": 23,
+          "position": "CB",
+          "age": 20,
+          "ratings": {
+            "speed": 94,
+            "strength": 69,
+            "awareness": 77,
+            "catching": 63,
+            "throwPower": 30,
+            "throwAccuracy": 39,
+            "blocking": 41,
+            "passRush": 45,
+            "tackling": 60,
+            "coverage": 81
+          }
+        },
+        {
+          "id": "rheinstadt-19",
+          "name": "Finn Okafor",
+          "number": 25,
+          "position": "CB",
+          "age": 29,
+          "ratings": {
+            "speed": 98,
+            "strength": 58,
+            "awareness": 71,
+            "catching": 68,
+            "throwPower": 32,
+            "throwAccuracy": 31,
+            "blocking": 40,
+            "passRush": 47,
+            "tackling": 73,
+            "coverage": 90
+          }
+        },
+        {
+          "id": "rheinstadt-20",
+          "name": "Niklas Nowak",
+          "number": 31,
+          "position": "CB",
+          "age": 33,
+          "ratings": {
+            "speed": 96,
+            "strength": 70,
+            "awareness": 73,
+            "catching": 63,
+            "throwPower": 28,
+            "throwAccuracy": 37,
+            "blocking": 40,
+            "passRush": 39,
+            "tackling": 70,
+            "coverage": 82
+          }
+        },
+        {
+          "id": "rheinstadt-21",
+          "name": "Lukas Lange",
+          "number": 26,
+          "position": "S",
+          "age": 32,
+          "ratings": {
+            "speed": 90,
+            "strength": 70,
+            "awareness": 79,
+            "catching": 64,
+            "throwPower": 31,
+            "throwAccuracy": 39,
+            "blocking": 43,
+            "passRush": 46,
+            "tackling": 77,
+            "coverage": 82
+          }
+        },
+        {
+          "id": "rheinstadt-22",
+          "name": "Erik Zimmermann",
+          "number": 39,
+          "position": "S",
+          "age": 20,
+          "ratings": {
+            "speed": 93,
+            "strength": 62,
+            "awareness": 82,
+            "catching": 61,
+            "throwPower": 33,
+            "throwAccuracy": 36,
+            "blocking": 39,
+            "passRush": 43,
+            "tackling": 84,
+            "coverage": 78
+          }
+        },
+        {
+          "id": "rheinstadt-23",
+          "name": "Marvin Neumann",
+          "number": 7,
+          "position": "QB",
+          "age": 31,
+          "ratings": {
+            "speed": 71,
+            "strength": 55,
+            "awareness": 68,
+            "catching": 42,
+            "throwPower": 79,
+            "throwAccuracy": 75,
+            "blocking": 32,
+            "passRush": 34,
+            "tackling": 39,
+            "coverage": 37
+          }
+        },
+        {
+          "id": "rheinstadt-24",
+          "name": "Moritz Schwarz",
+          "number": 27,
+          "position": "RB",
+          "age": 21,
+          "ratings": {
+            "speed": 84,
+            "strength": 70,
+            "awareness": 54,
+            "catching": 60,
+            "throwPower": 30,
+            "throwAccuracy": 30,
+            "blocking": 53,
+            "passRush": 38,
+            "tackling": 36,
+            "coverage": 29
+          }
+        },
+        {
+          "id": "rheinstadt-25",
+          "name": "Marvin Schwarz",
+          "number": 84,
+          "position": "WR",
+          "age": 32,
+          "ratings": {
+            "speed": 81,
+            "strength": 56,
+            "awareness": 68,
+            "catching": 79,
+            "throwPower": 25,
+            "throwAccuracy": 31,
+            "blocking": 45,
+            "passRush": 34,
+            "tackling": 32,
+            "coverage": 34
+          }
+        },
+        {
+          "id": "rheinstadt-26",
+          "name": "Moritz Lehmann",
+          "number": 60,
+          "position": "OL",
+          "age": 32,
+          "ratings": {
+            "speed": 57,
+            "strength": 88,
+            "awareness": 65,
+            "catching": 34,
+            "throwPower": 29,
+            "throwAccuracy": 25,
+            "blocking": 80,
+            "passRush": 36,
+            "tackling": 45,
+            "coverage": 34
+          }
+        },
+        {
+          "id": "rheinstadt-27",
+          "name": "Tyrell Roth",
+          "number": 95,
+          "position": "DL",
+          "age": 30,
+          "ratings": {
+            "speed": 67,
+            "strength": 87,
+            "awareness": 53,
+            "catching": 45,
+            "throwPower": 34,
+            "throwAccuracy": 28,
+            "blocking": 32,
+            "passRush": 81,
+            "tackling": 64,
+            "coverage": 30
+          }
+        },
+        {
+          "id": "rheinstadt-28",
+          "name": "Elias Roth",
+          "number": 48,
+          "position": "LB",
+          "age": 21,
+          "ratings": {
+            "speed": 73,
+            "strength": 75,
+            "awareness": 73,
+            "catching": 45,
+            "throwPower": 31,
+            "throwAccuracy": 32,
+            "blocking": 37,
+            "passRush": 60,
+            "tackling": 78,
+            "coverage": 64
+          }
+        },
+        {
+          "id": "rheinstadt-29",
+          "name": "Ben Lehmann",
+          "number": 37,
+          "position": "CB",
+          "age": 32,
+          "ratings": {
+            "speed": 87,
+            "strength": 61,
+            "awareness": 60,
+            "catching": 57,
+            "throwPower": 32,
+            "throwAccuracy": 27,
+            "blocking": 40,
+            "passRush": 32,
+            "tackling": 59,
+            "coverage": 74
+          }
+        }
+      ],
+      "depthChart": {
+        "offense": {
+          "QB": "rheinstadt-1",
+          "RB": "rheinstadt-2",
+          "WR1": "rheinstadt-3",
+          "WR2": "rheinstadt-4",
+          "WR3": "rheinstadt-5",
+          "TE": "rheinstadt-6",
+          "LT": "rheinstadt-7",
+          "LG": "rheinstadt-8",
+          "C": "rheinstadt-9",
+          "RG": "rheinstadt-10",
+          "RT": "rheinstadt-11"
+        },
+        "defense": {
+          "DE1": "rheinstadt-12",
+          "DT1": "rheinstadt-13",
+          "DT2": "rheinstadt-14",
+          "DE2": "rheinstadt-15",
+          "LB1": "rheinstadt-16",
+          "LB2": "rheinstadt-17",
+          "CB1": "rheinstadt-18",
+          "CB2": "rheinstadt-19",
+          "NB": "rheinstadt-20",
+          "FS": "rheinstadt-21",
+          "SS": "rheinstadt-22"
+        }
+      }
+    },
+    {
+      "id": "elbtal",
+      "city": "Elbtal",
+      "name": "Sturmvögel",
+      "abbr": "ELS",
+      "colors": {
+        "primary": "#1d3557",
+        "secondary": "#4ecdc4",
+        "helmet": "#1d3557",
+        "pants": "#e9edf2"
+      },
+      "roster": [
+        {
+          "id": "elbtal-1",
+          "name": "Darius Williams",
+          "number": 8,
+          "position": "QB",
+          "age": 25,
+          "ratings": {
+            "speed": 62,
+            "strength": 62,
+            "awareness": 74,
+            "catching": 40,
+            "throwPower": 85,
+            "throwAccuracy": 80,
+            "blocking": 38,
+            "passRush": 40,
+            "tackling": 38,
+            "coverage": 32
+          }
+        },
+        {
+          "id": "elbtal-2",
+          "name": "Felix Mensah",
+          "number": 21,
+          "position": "RB",
+          "age": 20,
+          "ratings": {
+            "speed": 84,
+            "strength": 70,
+            "awareness": 62,
+            "catching": 67,
+            "throwPower": 25,
+            "throwAccuracy": 28,
+            "blocking": 53,
+            "passRush": 44,
+            "tackling": 40,
+            "coverage": 42
+          }
+        },
+        {
+          "id": "elbtal-3",
+          "name": "Deniz Becker",
+          "number": 85,
+          "position": "WR",
+          "age": 33,
+          "ratings": {
+            "speed": 87,
+            "strength": 61,
+            "awareness": 67,
+            "catching": 83,
+            "throwPower": 25,
+            "throwAccuracy": 30,
+            "blocking": 39,
+            "passRush": 34,
+            "tackling": 40,
+            "coverage": 36
+          }
+        },
+        {
+          "id": "elbtal-4",
+          "name": "Noah Schulz",
+          "number": 11,
+          "position": "WR",
+          "age": 25,
+          "ratings": {
+            "speed": 83,
+            "strength": 55,
+            "awareness": 70,
+            "catching": 82,
+            "throwPower": 29,
+            "throwAccuracy": 30,
+            "blocking": 46,
+            "passRush": 44,
+            "tackling": 46,
+            "coverage": 37
+          }
+        },
+        {
+          "id": "elbtal-5",
+          "name": "Ben Jung",
+          "number": 84,
+          "position": "WR",
+          "age": 24,
+          "ratings": {
+            "speed": 96,
+            "strength": 55,
+            "awareness": 70,
+            "catching": 84,
+            "throwPower": 25,
+            "throwAccuracy": 35,
+            "blocking": 37,
+            "passRush": 41,
+            "tackling": 37,
+            "coverage": 39
+          }
+        },
+        {
+          "id": "elbtal-6",
+          "name": "Aaron Wagner",
+          "number": 47,
+          "position": "TE",
+          "age": 23,
+          "ratings": {
+            "speed": 73,
+            "strength": 73,
+            "awareness": 58,
+            "catching": 76,
+            "throwPower": 33,
+            "throwAccuracy": 31,
+            "blocking": 63,
+            "passRush": 43,
+            "tackling": 34,
+            "coverage": 39
+          }
+        },
+        {
+          "id": "elbtal-7",
+          "name": "Noah Petrović",
+          "number": 72,
+          "position": "OL",
+          "age": 33,
+          "ratings": {
+            "speed": 46,
+            "strength": 82,
+            "awareness": 67,
+            "catching": 42,
+            "throwPower": 32,
+            "throwAccuracy": 34,
+            "blocking": 73,
+            "passRush": 38,
+            "tackling": 46,
+            "coverage": 36
+          }
+        },
+        {
+          "id": "elbtal-8",
+          "name": "Tim Schwarz",
+          "number": 66,
+          "position": "OL",
+          "age": 30,
+          "ratings": {
+            "speed": 51,
+            "strength": 91,
+            "awareness": 65,
+            "catching": 33,
+            "throwPower": 27,
+            "throwAccuracy": 37,
+            "blocking": 83,
+            "passRush": 42,
+            "tackling": 36,
+            "coverage": 34
+          }
+        },
+        {
+          "id": "elbtal-9",
+          "name": "Marvin Fischer",
+          "number": 57,
+          "position": "OL",
+          "age": 23,
+          "ratings": {
+            "speed": 49,
+            "strength": 91,
+            "awareness": 67,
+            "catching": 34,
+            "throwPower": 30,
+            "throwAccuracy": 27,
+            "blocking": 73,
+            "passRush": 38,
+            "tackling": 34,
+            "coverage": 30
+          }
+        },
+        {
+          "id": "elbtal-10",
+          "name": "Jannik Lange",
+          "number": 64,
+          "position": "OL",
+          "age": 28,
+          "ratings": {
+            "speed": 52,
+            "strength": 78,
+            "awareness": 63,
+            "catching": 36,
+            "throwPower": 25,
+            "throwAccuracy": 34,
+            "blocking": 77,
+            "passRush": 41,
+            "tackling": 40,
+            "coverage": 29
+          }
+        },
+        {
+          "id": "elbtal-11",
+          "name": "Felix Jensen",
+          "number": 77,
+          "position": "OL",
+          "age": 32,
+          "ratings": {
+            "speed": 46,
+            "strength": 85,
+            "awareness": 71,
+            "catching": 39,
+            "throwPower": 31,
+            "throwAccuracy": 32,
+            "blocking": 79,
+            "passRush": 42,
+            "tackling": 38,
+            "coverage": 41
+          }
+        },
+        {
+          "id": "elbtal-12",
+          "name": "Darius Graf",
+          "number": 96,
+          "position": "DL",
+          "age": 21,
+          "ratings": {
+            "speed": 60,
+            "strength": 77,
+            "awareness": 57,
+            "catching": 42,
+            "throwPower": 25,
+            "throwAccuracy": 28,
+            "blocking": 35,
+            "passRush": 81,
+            "tackling": 77,
+            "coverage": 38
+          }
+        },
+        {
+          "id": "elbtal-13",
+          "name": "Tobias Graf",
+          "number": 93,
+          "position": "DL",
+          "age": 24,
+          "ratings": {
+            "speed": 72,
+            "strength": 77,
+            "awareness": 63,
+            "catching": 36,
+            "throwPower": 29,
+            "throwAccuracy": 25,
+            "blocking": 35,
+            "passRush": 71,
+            "tackling": 73,
+            "coverage": 42
+          }
+        },
+        {
+          "id": "elbtal-14",
+          "name": "Aaron Becker",
+          "number": 97,
+          "position": "DL",
+          "age": 22,
+          "ratings": {
+            "speed": 69,
+            "strength": 87,
+            "awareness": 58,
+            "catching": 44,
+            "throwPower": 37,
+            "throwAccuracy": 26,
+            "blocking": 43,
+            "passRush": 73,
+            "tackling": 74,
+            "coverage": 29
+          }
+        },
+        {
+          "id": "elbtal-15",
+          "name": "Ole Richter",
+          "number": 92,
+          "position": "DL",
+          "age": 33,
+          "ratings": {
+            "speed": 60,
+            "strength": 86,
+            "awareness": 57,
+            "catching": 38,
+            "throwPower": 29,
+            "throwAccuracy": 30,
+            "blocking": 45,
+            "passRush": 73,
+            "tackling": 74,
+            "coverage": 31
+          }
+        },
+        {
+          "id": "elbtal-16",
+          "name": "Deniz Wagner",
+          "number": 58,
+          "position": "LB",
+          "age": 26,
+          "ratings": {
+            "speed": 80,
+            "strength": 79,
+            "awareness": 74,
+            "catching": 35,
+            "throwPower": 29,
+            "throwAccuracy": 30,
+            "blocking": 40,
+            "passRush": 56,
+            "tackling": 79,
+            "coverage": 55
+          }
+        },
+        {
+          "id": "elbtal-17",
+          "name": "Anton Zimmermann",
+          "number": 40,
+          "position": "LB",
+          "age": 21,
+          "ratings": {
+            "speed": 78,
+            "strength": 74,
+            "awareness": 64,
+            "catching": 45,
+            "throwPower": 33,
+            "throwAccuracy": 33,
+            "blocking": 47,
+            "passRush": 66,
+            "tackling": 84,
+            "coverage": 60
+          }
+        },
+        {
+          "id": "elbtal-18",
+          "name": "Moritz Fischer",
+          "number": 22,
+          "position": "CB",
+          "age": 30,
+          "ratings": {
+            "speed": 89,
+            "strength": 57,
+            "awareness": 72,
+            "catching": 66,
+            "throwPower": 27,
+            "throwAccuracy": 25,
+            "blocking": 37,
+            "passRush": 34,
+            "tackling": 57,
+            "coverage": 77
+          }
+        },
+        {
+          "id": "elbtal-19",
+          "name": "Tyrell Nowak",
+          "number": 23,
+          "position": "CB",
+          "age": 28,
+          "ratings": {
+            "speed": 96,
+            "strength": 65,
+            "awareness": 69,
+            "catching": 67,
+            "throwPower": 33,
+            "throwAccuracy": 25,
+            "blocking": 40,
+            "passRush": 37,
+            "tackling": 62,
+            "coverage": 86
+          }
+        },
+        {
+          "id": "elbtal-20",
+          "name": "Noah Weber",
+          "number": 32,
+          "position": "CB",
+          "age": 29,
+          "ratings": {
+            "speed": 89,
+            "strength": 64,
+            "awareness": 67,
+            "catching": 60,
+            "throwPower": 25,
+            "throwAccuracy": 26,
+            "blocking": 36,
+            "passRush": 36,
+            "tackling": 64,
+            "coverage": 77
+          }
+        },
+        {
+          "id": "elbtal-21",
+          "name": "Joel Haas",
+          "number": 36,
+          "position": "S",
+          "age": 20,
+          "ratings": {
+            "speed": 89,
+            "strength": 60,
+            "awareness": 68,
+            "catching": 65,
+            "throwPower": 33,
+            "throwAccuracy": 35,
+            "blocking": 42,
+            "passRush": 45,
+            "tackling": 69,
+            "coverage": 71
+          }
+        },
+        {
+          "id": "elbtal-22",
+          "name": "Kevin Maier",
+          "number": 26,
+          "position": "S",
+          "age": 32,
+          "ratings": {
+            "speed": 84,
+            "strength": 55,
+            "awareness": 70,
+            "catching": 55,
+            "throwPower": 33,
+            "throwAccuracy": 35,
+            "blocking": 34,
+            "passRush": 42,
+            "tackling": 73,
+            "coverage": 82
+          }
+        },
+        {
+          "id": "elbtal-23",
+          "name": "Anton Maier",
+          "number": 19,
+          "position": "QB",
+          "age": 23,
+          "ratings": {
+            "speed": 55,
+            "strength": 47,
+            "awareness": 71,
+            "catching": 30,
+            "throwPower": 74,
+            "throwAccuracy": 74,
+            "blocking": 36,
+            "passRush": 30,
+            "tackling": 32,
+            "coverage": 30
+          }
+        },
+        {
+          "id": "elbtal-24",
+          "name": "Kofi Haas",
+          "number": 37,
+          "position": "RB",
+          "age": 30,
+          "ratings": {
+            "speed": 80,
+            "strength": 69,
+            "awareness": 60,
+            "catching": 60,
+            "throwPower": 27,
+            "throwAccuracy": 25,
+            "blocking": 48,
+            "passRush": 41,
+            "tackling": 37,
+            "coverage": 25
+          }
+        },
+        {
+          "id": "elbtal-25",
+          "name": "Anton Becker",
+          "number": 83,
+          "position": "WR",
+          "age": 20,
+          "ratings": {
+            "speed": 80,
+            "strength": 58,
+            "awareness": 66,
+            "catching": 68,
+            "throwPower": 31,
+            "throwAccuracy": 27,
+            "blocking": 35,
+            "passRush": 36,
+            "tackling": 34,
+            "coverage": 27
+          }
+        },
+        {
+          "id": "elbtal-26",
+          "name": "Deniz Roth",
+          "number": 65,
+          "position": "OL",
+          "age": 22,
+          "ratings": {
+            "speed": 45,
+            "strength": 76,
+            "awareness": 56,
+            "catching": 32,
+            "throwPower": 25,
+            "throwAccuracy": 26,
+            "blocking": 71,
+            "passRush": 41,
+            "tackling": 37,
+            "coverage": 28
+          }
+        },
+        {
+          "id": "elbtal-27",
+          "name": "Jamal Becker",
+          "number": 99,
+          "position": "DL",
+          "age": 27,
+          "ratings": {
+            "speed": 65,
+            "strength": 83,
+            "awareness": 57,
+            "catching": 30,
+            "throwPower": 25,
+            "throwAccuracy": 25,
+            "blocking": 28,
+            "passRush": 72,
+            "tackling": 72,
+            "coverage": 25
+          }
+        },
+        {
+          "id": "elbtal-28",
+          "name": "Andre Haas",
+          "number": 46,
+          "position": "LB",
+          "age": 25,
+          "ratings": {
+            "speed": 79,
+            "strength": 61,
+            "awareness": 64,
+            "catching": 35,
+            "throwPower": 27,
+            "throwAccuracy": 25,
+            "blocking": 37,
+            "passRush": 48,
+            "tackling": 70,
+            "coverage": 60
+          }
+        },
+        {
+          "id": "elbtal-29",
+          "name": "Darius Roth",
+          "number": 33,
+          "position": "CB",
+          "age": 29,
+          "ratings": {
+            "speed": 86,
+            "strength": 50,
+            "awareness": 57,
+            "catching": 59,
+            "throwPower": 25,
+            "throwAccuracy": 30,
+            "blocking": 39,
+            "passRush": 35,
+            "tackling": 53,
+            "coverage": 73
+          }
+        }
+      ],
+      "depthChart": {
+        "offense": {
+          "QB": "elbtal-1",
+          "RB": "elbtal-2",
+          "WR1": "elbtal-3",
+          "WR2": "elbtal-4",
+          "WR3": "elbtal-5",
+          "TE": "elbtal-6",
+          "LT": "elbtal-7",
+          "LG": "elbtal-8",
+          "C": "elbtal-9",
+          "RG": "elbtal-10",
+          "RT": "elbtal-11"
+        },
+        "defense": {
+          "DE1": "elbtal-12",
+          "DT1": "elbtal-13",
+          "DT2": "elbtal-14",
+          "DE2": "elbtal-15",
+          "LB1": "elbtal-16",
+          "LB2": "elbtal-17",
+          "CB1": "elbtal-18",
+          "CB2": "elbtal-19",
+          "NB": "elbtal-20",
+          "FS": "elbtal-21",
+          "SS": "elbtal-22"
+        }
+      }
+    },
+    {
+      "id": "spreewald",
+      "city": "Spreewald",
+      "name": "Wölfe",
+      "abbr": "SPW",
+      "colors": {
+        "primary": "#2d6a4f",
+        "secondary": "#c0c7cf",
+        "helmet": "#c0c7cf",
+        "pants": "#2d6a4f"
+      },
+      "roster": [
+        {
+          "id": "spreewald-1",
+          "name": "Emil Schwarz",
+          "number": 11,
+          "position": "QB",
+          "age": 31,
+          "ratings": {
+            "speed": 70,
+            "strength": 63,
+            "awareness": 80,
+            "catching": 44,
+            "throwPower": 82,
+            "throwAccuracy": 84,
+            "blocking": 36,
+            "passRush": 39,
+            "tackling": 42,
+            "coverage": 32
+          }
+        },
+        {
+          "id": "spreewald-2",
+          "name": "Kofi Zimmermann",
+          "number": 30,
+          "position": "RB",
+          "age": 25,
+          "ratings": {
+            "speed": 87,
+            "strength": 73,
+            "awareness": 66,
+            "catching": 67,
+            "throwPower": 35,
+            "throwAccuracy": 30,
+            "blocking": 57,
+            "passRush": 44,
+            "tackling": 42,
+            "coverage": 43
+          }
+        },
+        {
+          "id": "spreewald-3",
+          "name": "Felix Klein",
+          "number": 85,
+          "position": "WR",
+          "age": 31,
+          "ratings": {
+            "speed": 93,
+            "strength": 64,
+            "awareness": 61,
+            "catching": 76,
+            "throwPower": 33,
+            "throwAccuracy": 35,
+            "blocking": 46,
+            "passRush": 39,
+            "tackling": 46,
+            "coverage": 36
+          }
+        },
+        {
+          "id": "spreewald-4",
+          "name": "Joel Krause",
+          "number": 15,
+          "position": "WR",
+          "age": 27,
+          "ratings": {
+            "speed": 96,
+            "strength": 65,
+            "awareness": 65,
+            "catching": 76,
+            "throwPower": 37,
+            "throwAccuracy": 27,
+            "blocking": 42,
+            "passRush": 37,
+            "tackling": 39,
+            "coverage": 33
+          }
+        },
+        {
+          "id": "spreewald-5",
+          "name": "Max Petrović",
+          "number": 87,
+          "position": "WR",
+          "age": 22,
+          "ratings": {
+            "speed": 92,
+            "strength": 66,
+            "awareness": 69,
+            "catching": 83,
+            "throwPower": 36,
+            "throwAccuracy": 29,
+            "blocking": 36,
+            "passRush": 41,
+            "tackling": 45,
+            "coverage": 35
+          }
+        },
+        {
+          "id": "spreewald-6",
+          "name": "Tyrell Graf",
+          "number": 49,
+          "position": "TE",
+          "age": 27,
+          "ratings": {
+            "speed": 84,
+            "strength": 72,
+            "awareness": 66,
+            "catching": 78,
+            "throwPower": 35,
+            "throwAccuracy": 33,
+            "blocking": 70,
+            "passRush": 37,
+            "tackling": 45,
+            "coverage": 30
+          }
+        },
+        {
+          "id": "spreewald-7",
+          "name": "Noah Wolf",
+          "number": 75,
+          "position": "OL",
+          "age": 31,
+          "ratings": {
+            "speed": 58,
+            "strength": 82,
+            "awareness": 68,
+            "catching": 48,
+            "throwPower": 31,
+            "throwAccuracy": 33,
+            "blocking": 85,
+            "passRush": 45,
+            "tackling": 35,
+            "coverage": 30
+          }
+        },
+        {
+          "id": "spreewald-8",
+          "name": "Emil Graf",
+          "number": 66,
+          "position": "OL",
+          "age": 24,
+          "ratings": {
+            "speed": 50,
+            "strength": 80,
+            "awareness": 61,
+            "catching": 45,
+            "throwPower": 27,
+            "throwAccuracy": 29,
+            "blocking": 83,
+            "passRush": 43,
+            "tackling": 40,
+            "coverage": 40
+          }
+        },
+        {
+          "id": "spreewald-9",
+          "name": "Moritz Weber",
+          "number": 54,
+          "position": "OL",
+          "age": 28,
+          "ratings": {
+            "speed": 51,
+            "strength": 83,
+            "awareness": 68,
+            "catching": 41,
+            "throwPower": 30,
+            "throwAccuracy": 38,
+            "blocking": 76,
+            "passRush": 49,
+            "tackling": 43,
+            "coverage": 41
+          }
+        },
+        {
+          "id": "spreewald-10",
+          "name": "Marvin Braun",
+          "number": 61,
+          "position": "OL",
+          "age": 19,
+          "ratings": {
+            "speed": 60,
+            "strength": 81,
+            "awareness": 64,
+            "catching": 48,
+            "throwPower": 28,
+            "throwAccuracy": 34,
+            "blocking": 81,
+            "passRush": 45,
+            "tackling": 44,
+            "coverage": 43
+          }
+        },
+        {
+          "id": "spreewald-11",
+          "name": "Leon Mensah",
+          "number": 74,
+          "position": "OL",
+          "age": 32,
+          "ratings": {
+            "speed": 47,
+            "strength": 81,
+            "awareness": 68,
+            "catching": 42,
+            "throwPower": 36,
+            "throwAccuracy": 37,
+            "blocking": 86,
+            "passRush": 40,
+            "tackling": 43,
+            "coverage": 31
+          }
+        },
+        {
+          "id": "spreewald-12",
+          "name": "Tyrell Neumann",
+          "number": 95,
+          "position": "DL",
+          "age": 24,
+          "ratings": {
+            "speed": 70,
+            "strength": 86,
+            "awareness": 56,
+            "catching": 45,
+            "throwPower": 31,
+            "throwAccuracy": 38,
+            "blocking": 43,
+            "passRush": 75,
+            "tackling": 71,
+            "coverage": 37
+          }
+        },
+        {
+          "id": "spreewald-13",
+          "name": "Tim Krüger",
+          "number": 97,
+          "position": "DL",
+          "age": 28,
+          "ratings": {
+            "speed": 73,
+            "strength": 89,
+            "awareness": 67,
+            "catching": 36,
+            "throwPower": 25,
+            "throwAccuracy": 38,
+            "blocking": 40,
+            "passRush": 76,
+            "tackling": 78,
+            "coverage": 41
+          }
+        },
+        {
+          "id": "spreewald-14",
+          "name": "Niklas Maier",
+          "number": 93,
+          "position": "DL",
+          "age": 31,
+          "ratings": {
+            "speed": 62,
+            "strength": 85,
+            "awareness": 56,
+            "catching": 36,
+            "throwPower": 39,
+            "throwAccuracy": 31,
+            "blocking": 42,
+            "passRush": 84,
+            "tackling": 70,
+            "coverage": 39
+          }
+        },
+        {
+          "id": "spreewald-15",
+          "name": "Hannes Roth",
+          "number": 99,
+          "position": "DL",
+          "age": 24,
+          "ratings": {
+            "speed": 73,
+            "strength": 89,
+            "awareness": 59,
+            "catching": 42,
+            "throwPower": 31,
+            "throwAccuracy": 31,
+            "blocking": 47,
+            "passRush": 85,
+            "tackling": 74,
+            "coverage": 35
+          }
+        },
+        {
+          "id": "spreewald-16",
+          "name": "Deniz Kaya",
+          "number": 55,
+          "position": "LB",
+          "age": 22,
+          "ratings": {
+            "speed": 79,
+            "strength": 73,
+            "awareness": 66,
+            "catching": 35,
+            "throwPower": 35,
+            "throwAccuracy": 36,
+            "blocking": 48,
+            "passRush": 64,
+            "tackling": 78,
+            "coverage": 61
+          }
+        },
+        {
+          "id": "spreewald-17",
+          "name": "Mika Williams",
+          "number": 42,
+          "position": "LB",
+          "age": 21,
+          "ratings": {
+            "speed": 76,
+            "strength": 73,
+            "awareness": 65,
+            "catching": 41,
+            "throwPower": 38,
+            "throwAccuracy": 38,
+            "blocking": 38,
+            "passRush": 65,
+            "tackling": 85,
+            "coverage": 62
+          }
+        },
+        {
+          "id": "spreewald-18",
+          "name": "Can Mensah",
+          "number": 26,
+          "position": "CB",
+          "age": 22,
+          "ratings": {
+            "speed": 89,
+            "strength": 61,
+            "awareness": 74,
+            "catching": 66,
+            "throwPower": 37,
+            "throwAccuracy": 31,
+            "blocking": 47,
+            "passRush": 44,
+            "tackling": 67,
+            "coverage": 79
+          }
+        },
+        {
+          "id": "spreewald-19",
+          "name": "Marcus Wagner",
+          "number": 20,
+          "position": "CB",
+          "age": 22,
+          "ratings": {
+            "speed": 98,
+            "strength": 58,
+            "awareness": 71,
+            "catching": 59,
+            "throwPower": 38,
+            "throwAccuracy": 27,
+            "blocking": 40,
+            "passRush": 38,
+            "tackling": 70,
+            "coverage": 89
+          }
+        },
+        {
+          "id": "spreewald-20",
+          "name": "Tobias Haas",
+          "number": 37,
+          "position": "CB",
+          "age": 20,
+          "ratings": {
+            "speed": 96,
+            "strength": 62,
+            "awareness": 74,
+            "catching": 58,
+            "throwPower": 29,
+            "throwAccuracy": 33,
+            "blocking": 35,
+            "passRush": 40,
+            "tackling": 59,
+            "coverage": 77
+          }
+        },
+        {
+          "id": "spreewald-21",
+          "name": "Tim Krüger",
+          "number": 27,
+          "position": "S",
+          "age": 31,
+          "ratings": {
+            "speed": 91,
+            "strength": 58,
+            "awareness": 69,
+            "catching": 60,
+            "throwPower": 26,
+            "throwAccuracy": 36,
+            "blocking": 45,
+            "passRush": 41,
+            "tackling": 81,
+            "coverage": 77
+          }
+        },
+        {
+          "id": "spreewald-22",
+          "name": "Paul Kaya",
+          "number": 28,
+          "position": "S",
+          "age": 29,
+          "ratings": {
+            "speed": 93,
+            "strength": 60,
+            "awareness": 75,
+            "catching": 63,
+            "throwPower": 39,
+            "throwAccuracy": 25,
+            "blocking": 37,
+            "passRush": 41,
+            "tackling": 79,
+            "coverage": 77
+          }
+        },
+        {
+          "id": "spreewald-23",
+          "name": "Lukas Neumann",
+          "number": 12,
+          "position": "QB",
+          "age": 31,
+          "ratings": {
+            "speed": 63,
+            "strength": 60,
+            "awareness": 72,
+            "catching": 37,
+            "throwPower": 85,
+            "throwAccuracy": 70,
+            "blocking": 39,
+            "passRush": 33,
+            "tackling": 35,
+            "coverage": 34
+          }
+        },
+        {
+          "id": "spreewald-24",
+          "name": "Mika Roth",
+          "number": 29,
+          "position": "RB",
+          "age": 20,
+          "ratings": {
+            "speed": 79,
+            "strength": 66,
+            "awareness": 56,
+            "catching": 69,
+            "throwPower": 25,
+            "throwAccuracy": 25,
+            "blocking": 49,
+            "passRush": 37,
+            "tackling": 37,
+            "coverage": 25
+          }
+        },
+        {
+          "id": "spreewald-25",
+          "name": "Kevin Krause",
+          "number": 81,
+          "position": "WR",
+          "age": 22,
+          "ratings": {
+            "speed": 90,
+            "strength": 52,
+            "awareness": 60,
+            "catching": 72,
+            "throwPower": 26,
+            "throwAccuracy": 31,
+            "blocking": 30,
+            "passRush": 33,
+            "tackling": 38,
+            "coverage": 25
+          }
+        },
+        {
+          "id": "spreewald-26",
+          "name": "Anton Wolf",
+          "number": 69,
+          "position": "OL",
+          "age": 21,
+          "ratings": {
+            "speed": 43,
+            "strength": 78,
+            "awareness": 69,
+            "catching": 31,
+            "throwPower": 25,
+            "throwAccuracy": 30,
+            "blocking": 73,
+            "passRush": 30,
+            "tackling": 35,
+            "coverage": 29
+          }
+        },
+        {
+          "id": "spreewald-27",
+          "name": "David Roth",
+          "number": 94,
+          "position": "DL",
+          "age": 23,
+          "ratings": {
+            "speed": 67,
+            "strength": 77,
+            "awareness": 49,
+            "catching": 31,
+            "throwPower": 25,
+            "throwAccuracy": 25,
+            "blocking": 34,
+            "passRush": 76,
+            "tackling": 69,
+            "coverage": 32
+          }
+        },
+        {
+          "id": "spreewald-28",
+          "name": "Marvin Schulz",
+          "number": 47,
+          "position": "LB",
+          "age": 26,
+          "ratings": {
+            "speed": 73,
+            "strength": 69,
+            "awareness": 65,
+            "catching": 31,
+            "throwPower": 30,
+            "throwAccuracy": 26,
+            "blocking": 42,
+            "passRush": 57,
+            "tackling": 68,
+            "coverage": 56
+          }
+        },
+        {
+          "id": "spreewald-29",
+          "name": "Paul Yilmaz",
+          "number": 31,
+          "position": "CB",
+          "age": 24,
+          "ratings": {
+            "speed": 83,
+            "strength": 52,
+            "awareness": 65,
+            "catching": 64,
+            "throwPower": 25,
+            "throwAccuracy": 29,
+            "blocking": 33,
+            "passRush": 42,
+            "tackling": 54,
+            "coverage": 83
+          }
+        }
+      ],
+      "depthChart": {
+        "offense": {
+          "QB": "spreewald-1",
+          "RB": "spreewald-2",
+          "WR1": "spreewald-3",
+          "WR2": "spreewald-4",
+          "WR3": "spreewald-5",
+          "TE": "spreewald-6",
+          "LT": "spreewald-7",
+          "LG": "spreewald-8",
+          "C": "spreewald-9",
+          "RG": "spreewald-10",
+          "RT": "spreewald-11"
+        },
+        "defense": {
+          "DE1": "spreewald-12",
+          "DT1": "spreewald-13",
+          "DT2": "spreewald-14",
+          "DE2": "spreewald-15",
+          "LB1": "spreewald-16",
+          "LB2": "spreewald-17",
+          "CB1": "spreewald-18",
+          "CB2": "spreewald-19",
+          "NB": "spreewald-20",
+          "FS": "spreewald-21",
+          "SS": "spreewald-22"
+        }
+      }
+    },
+    {
+      "id": "schwarzwald",
+      "city": "Schwarzwald",
+      "name": "Hirsche",
+      "abbr": "SWH",
+      "colors": {
+        "primary": "#5c3d2e",
+        "secondary": "#f28c28",
+        "helmet": "#f28c28",
+        "pants": "#2b2b2b"
+      },
+      "roster": [
+        {
+          "id": "schwarzwald-1",
+          "name": "Emil Neumann",
+          "number": 13,
+          "position": "QB",
+          "age": 25,
+          "ratings": {
+            "speed": 57,
+            "strength": 55,
+            "awareness": 78,
+            "catching": 36,
+            "throwPower": 80,
+            "throwAccuracy": 80,
+            "blocking": 33,
+            "passRush": 39,
+            "tackling": 37,
+            "coverage": 29
+          }
+        },
+        {
+          "id": "schwarzwald-2",
+          "name": "Dennis Okafor",
+          "number": 37,
+          "position": "RB",
+          "age": 29,
+          "ratings": {
+            "speed": 88,
+            "strength": 70,
+            "awareness": 54,
+            "catching": 61,
+            "throwPower": 32,
+            "throwAccuracy": 34,
+            "blocking": 49,
+            "passRush": 32,
+            "tackling": 42,
+            "coverage": 28
+          }
+        },
+        {
+          "id": "schwarzwald-3",
+          "name": "Tobias Fischer",
+          "number": 83,
+          "position": "WR",
+          "age": 22,
+          "ratings": {
+            "speed": 85,
+            "strength": 54,
+            "awareness": 67,
+            "catching": 83,
+            "throwPower": 29,
+            "throwAccuracy": 28,
+            "blocking": 44,
+            "passRush": 35,
+            "tackling": 39,
+            "coverage": 32
+          }
+        },
+        {
+          "id": "schwarzwald-4",
+          "name": "Luca Braun",
+          "number": 15,
+          "position": "WR",
+          "age": 22,
+          "ratings": {
+            "speed": 88,
+            "strength": 61,
+            "awareness": 67,
+            "catching": 75,
+            "throwPower": 25,
+            "throwAccuracy": 27,
+            "blocking": 45,
+            "passRush": 35,
+            "tackling": 32,
+            "coverage": 40
+          }
+        },
+        {
+          "id": "schwarzwald-5",
+          "name": "Leon Becker",
+          "number": 89,
+          "position": "WR",
+          "age": 20,
+          "ratings": {
+            "speed": 84,
+            "strength": 54,
+            "awareness": 70,
+            "catching": 84,
+            "throwPower": 31,
+            "throwAccuracy": 25,
+            "blocking": 43,
+            "passRush": 34,
+            "tackling": 36,
+            "coverage": 37
+          }
+        },
+        {
+          "id": "schwarzwald-6",
+          "name": "Anton Klein",
+          "number": 44,
+          "position": "TE",
+          "age": 26,
+          "ratings": {
+            "speed": 73,
+            "strength": 72,
+            "awareness": 58,
+            "catching": 65,
+            "throwPower": 31,
+            "throwAccuracy": 34,
+            "blocking": 66,
+            "passRush": 36,
+            "tackling": 45,
+            "coverage": 32
+          }
+        },
+        {
+          "id": "schwarzwald-7",
+          "name": "Deniz Jung",
+          "number": 74,
+          "position": "OL",
+          "age": 19,
+          "ratings": {
+            "speed": 45,
+            "strength": 81,
+            "awareness": 68,
+            "catching": 43,
+            "throwPower": 33,
+            "throwAccuracy": 29,
+            "blocking": 69,
+            "passRush": 31,
+            "tackling": 37,
+            "coverage": 35
+          }
+        },
+        {
+          "id": "schwarzwald-8",
+          "name": "Niklas Jung",
+          "number": 62,
+          "position": "OL",
+          "age": 25,
+          "ratings": {
+            "speed": 55,
+            "strength": 80,
+            "awareness": 59,
+            "catching": 42,
+            "throwPower": 25,
+            "throwAccuracy": 33,
+            "blocking": 82,
+            "passRush": 33,
+            "tackling": 37,
+            "coverage": 35
+          }
+        },
+        {
+          "id": "schwarzwald-9",
+          "name": "Ben Graf",
+          "number": 50,
+          "position": "OL",
+          "age": 30,
+          "ratings": {
+            "speed": 56,
+            "strength": 76,
+            "awareness": 67,
+            "catching": 44,
+            "throwPower": 32,
+            "throwAccuracy": 25,
+            "blocking": 74,
+            "passRush": 38,
+            "tackling": 40,
+            "coverage": 35
+          }
+        },
+        {
+          "id": "schwarzwald-10",
+          "name": "Andre Zimmermann",
+          "number": 61,
+          "position": "OL",
+          "age": 23,
+          "ratings": {
+            "speed": 54,
+            "strength": 88,
+            "awareness": 60,
+            "catching": 40,
+            "throwPower": 33,
+            "throwAccuracy": 34,
+            "blocking": 75,
+            "passRush": 35,
+            "tackling": 35,
+            "coverage": 35
+          }
+        },
+        {
+          "id": "schwarzwald-11",
+          "name": "Paul Neumann",
+          "number": 76,
+          "position": "OL",
+          "age": 19,
+          "ratings": {
+            "speed": 52,
+            "strength": 80,
+            "awareness": 68,
+            "catching": 44,
+            "throwPower": 27,
+            "throwAccuracy": 30,
+            "blocking": 73,
+            "passRush": 39,
+            "tackling": 36,
+            "coverage": 39
+          }
+        },
+        {
+          "id": "schwarzwald-12",
+          "name": "Joel Mensah",
+          "number": 91,
+          "position": "DL",
+          "age": 30,
+          "ratings": {
+            "speed": 59,
+            "strength": 85,
+            "awareness": 52,
+            "catching": 45,
+            "throwPower": 34,
+            "throwAccuracy": 34,
+            "blocking": 44,
+            "passRush": 77,
+            "tackling": 74,
+            "coverage": 36
+          }
+        },
+        {
+          "id": "schwarzwald-13",
+          "name": "Jannik Krause",
+          "number": 99,
+          "position": "DL",
+          "age": 29,
+          "ratings": {
+            "speed": 66,
+            "strength": 84,
+            "awareness": 54,
+            "catching": 40,
+            "throwPower": 25,
+            "throwAccuracy": 25,
+            "blocking": 44,
+            "passRush": 76,
+            "tackling": 63,
+            "coverage": 31
+          }
+        },
+        {
+          "id": "schwarzwald-14",
+          "name": "Jonas Hartmann",
+          "number": 90,
+          "position": "DL",
+          "age": 31,
+          "ratings": {
+            "speed": 58,
+            "strength": 77,
+            "awareness": 61,
+            "catching": 37,
+            "throwPower": 25,
+            "throwAccuracy": 25,
+            "blocking": 40,
+            "passRush": 74,
+            "tackling": 74,
+            "coverage": 28
+          }
+        },
+        {
+          "id": "schwarzwald-15",
+          "name": "Elias Wolf",
+          "number": 98,
+          "position": "DL",
+          "age": 21,
+          "ratings": {
+            "speed": 68,
+            "strength": 80,
+            "awareness": 63,
+            "catching": 34,
+            "throwPower": 26,
+            "throwAccuracy": 33,
+            "blocking": 45,
+            "passRush": 69,
+            "tackling": 74,
+            "coverage": 40
+          }
+        },
+        {
+          "id": "schwarzwald-16",
+          "name": "Emil Braun",
+          "number": 59,
+          "position": "LB",
+          "age": 24,
+          "ratings": {
+            "speed": 78,
+            "strength": 71,
+            "awareness": 64,
+            "catching": 36,
+            "throwPower": 27,
+            "throwAccuracy": 25,
+            "blocking": 35,
+            "passRush": 57,
+            "tackling": 79,
+            "coverage": 61
+          }
+        },
+        {
+          "id": "schwarzwald-17",
+          "name": "Ben Kaya",
+          "number": 42,
+          "position": "LB",
+          "age": 29,
+          "ratings": {
+            "speed": 76,
+            "strength": 75,
+            "awareness": 72,
+            "catching": 36,
+            "throwPower": 35,
+            "throwAccuracy": 25,
+            "blocking": 44,
+            "passRush": 52,
+            "tackling": 71,
+            "coverage": 65
+          }
+        },
+        {
+          "id": "schwarzwald-18",
+          "name": "Kevin Neumann",
+          "number": 22,
+          "position": "CB",
+          "age": 32,
+          "ratings": {
+            "speed": 83,
+            "strength": 63,
+            "awareness": 71,
+            "catching": 55,
+            "throwPower": 31,
+            "throwAccuracy": 25,
+            "blocking": 44,
+            "passRush": 40,
+            "tackling": 58,
+            "coverage": 76
+          }
+        },
+        {
+          "id": "schwarzwald-19",
+          "name": "Niklas Kaya",
+          "number": 28,
+          "position": "CB",
+          "age": 33,
+          "ratings": {
+            "speed": 85,
+            "strength": 62,
+            "awareness": 68,
+            "catching": 60,
+            "throwPower": 26,
+            "throwAccuracy": 25,
+            "blocking": 45,
+            "passRush": 44,
+            "tackling": 65,
+            "coverage": 83
+          }
+        },
+        {
+          "id": "schwarzwald-20",
+          "name": "Mika Petrović",
+          "number": 35,
+          "position": "CB",
+          "age": 26,
+          "ratings": {
+            "speed": 89,
+            "strength": 64,
+            "awareness": 62,
+            "catching": 61,
+            "throwPower": 32,
+            "throwAccuracy": 25,
+            "blocking": 36,
+            "passRush": 33,
+            "tackling": 65,
+            "coverage": 82
+          }
+        },
+        {
+          "id": "schwarzwald-21",
+          "name": "Luca Petrović",
+          "number": 36,
+          "position": "S",
+          "age": 25,
+          "ratings": {
+            "speed": 81,
+            "strength": 56,
+            "awareness": 70,
+            "catching": 57,
+            "throwPower": 28,
+            "throwAccuracy": 29,
+            "blocking": 37,
+            "passRush": 38,
+            "tackling": 69,
+            "coverage": 67
+          }
+        },
+        {
+          "id": "schwarzwald-22",
+          "name": "Dennis Johnson",
+          "number": 23,
+          "position": "S",
+          "age": 30,
+          "ratings": {
+            "speed": 80,
+            "strength": 52,
+            "awareness": 71,
+            "catching": 52,
+            "throwPower": 28,
+            "throwAccuracy": 25,
+            "blocking": 44,
+            "passRush": 39,
+            "tackling": 67,
+            "coverage": 68
+          }
+        },
+        {
+          "id": "schwarzwald-23",
+          "name": "Ole Petrović",
+          "number": 2,
+          "position": "QB",
+          "age": 31,
+          "ratings": {
+            "speed": 64,
+            "strength": 51,
+            "awareness": 65,
+            "catching": 31,
+            "throwPower": 73,
+            "throwAccuracy": 78,
+            "blocking": 39,
+            "passRush": 38,
+            "tackling": 35,
+            "coverage": 25
+          }
+        },
+        {
+          "id": "schwarzwald-24",
+          "name": "Tim Kaya",
+          "number": 27,
+          "position": "RB",
+          "age": 27,
+          "ratings": {
+            "speed": 84,
+            "strength": 56,
+            "awareness": 59,
+            "catching": 62,
+            "throwPower": 27,
+            "throwAccuracy": 25,
+            "blocking": 50,
+            "passRush": 30,
+            "tackling": 34,
+            "coverage": 33
+          }
+        },
+        {
+          "id": "schwarzwald-25",
+          "name": "Mika Weber",
+          "number": 86,
+          "position": "WR",
+          "age": 27,
+          "ratings": {
+            "speed": 87,
+            "strength": 46,
+            "awareness": 57,
+            "catching": 77,
+            "throwPower": 25,
+            "throwAccuracy": 25,
+            "blocking": 27,
+            "passRush": 33,
+            "tackling": 28,
+            "coverage": 33
+          }
+        },
+        {
+          "id": "schwarzwald-26",
+          "name": "Elias Neumann",
+          "number": 79,
+          "position": "OL",
+          "age": 23,
+          "ratings": {
+            "speed": 42,
+            "strength": 82,
+            "awareness": 51,
+            "catching": 26,
+            "throwPower": 25,
+            "throwAccuracy": 27,
+            "blocking": 73,
+            "passRush": 33,
+            "tackling": 31,
+            "coverage": 26
+          }
+        },
+        {
+          "id": "schwarzwald-27",
+          "name": "Moritz Okafor",
+          "number": 96,
+          "position": "DL",
+          "age": 27,
+          "ratings": {
+            "speed": 63,
+            "strength": 68,
+            "awareness": 57,
+            "catching": 30,
+            "throwPower": 25,
+            "throwAccuracy": 25,
+            "blocking": 29,
+            "passRush": 66,
+            "tackling": 59,
+            "coverage": 25
+          }
+        },
+        {
+          "id": "schwarzwald-28",
+          "name": "Mika Hoffmann",
+          "number": 58,
+          "position": "LB",
+          "age": 27,
+          "ratings": {
+            "speed": 63,
+            "strength": 72,
+            "awareness": 68,
+            "catching": 28,
+            "throwPower": 28,
+            "throwAccuracy": 25,
+            "blocking": 31,
+            "passRush": 53,
+            "tackling": 76,
+            "coverage": 50
+          }
+        },
+        {
+          "id": "schwarzwald-29",
+          "name": "Malte Braun",
+          "number": 20,
+          "position": "CB",
+          "age": 30,
+          "ratings": {
+            "speed": 76,
+            "strength": 51,
+            "awareness": 58,
+            "catching": 53,
+            "throwPower": 25,
+            "throwAccuracy": 28,
+            "blocking": 34,
+            "passRush": 37,
+            "tackling": 60,
+            "coverage": 72
+          }
+        }
+      ],
+      "depthChart": {
+        "offense": {
+          "QB": "schwarzwald-1",
+          "RB": "schwarzwald-2",
+          "WR1": "schwarzwald-3",
+          "WR2": "schwarzwald-4",
+          "WR3": "schwarzwald-5",
+          "TE": "schwarzwald-6",
+          "LT": "schwarzwald-7",
+          "LG": "schwarzwald-8",
+          "C": "schwarzwald-9",
+          "RG": "schwarzwald-10",
+          "RT": "schwarzwald-11"
+        },
+        "defense": {
+          "DE1": "schwarzwald-12",
+          "DT1": "schwarzwald-13",
+          "DT2": "schwarzwald-14",
+          "DE2": "schwarzwald-15",
+          "LB1": "schwarzwald-16",
+          "LB2": "schwarzwald-17",
+          "CB1": "schwarzwald-18",
+          "CB2": "schwarzwald-19",
+          "NB": "schwarzwald-20",
+          "FS": "schwarzwald-21",
+          "SS": "schwarzwald-22"
+        }
+      }
+    }
+  ]
+}

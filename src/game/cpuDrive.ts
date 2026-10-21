@@ -1,0 +1,124 @@
+/**
+ * Simulated CPU offensive drives (Phase 1 placeholder: the user does not play
+ * defense yet). Each play is resolved from team grades + difficulty with the
+ * seeded RNG, and runs through the same rules/clock code as user plays, so
+ * Phase 2 can swap this for an interactive defensive PlaySim per snap.
+ */
+import type { Rng } from '../core/rng';
+import { clamp } from '../core/vec';
+import { getTeam, teamGrades } from '../data';
+import type { DifficultyConfig } from '../data/types';
+import { snapClock, tickClock } from './clock';
+import { afterPlay, checkQuarter, type Break } from './flow';
+import { applyPlay, attemptFieldGoal, fieldGoalDistance, punt, type RulesResult } from './rules';
+import { ballOnText, downText, other, type GameState } from './state';
+
+export interface DriveEntry {
+  clock: string;
+  situation: string;
+  text: string;
+}
+
+export interface DriveSummary {
+  state: GameState;
+  entries: DriveEntry[];
+  headline: string;
+  brk: Break;
+}
+
+export function simulateCpuDrive(start: GameState, diff: DifficultyConfig, rng: Rng): DriveSummary {
+  let s = start;
+  const cpu = s.possession;
+  const off = teamGrades(getTeam(s.teams[cpu]));
+  const def = teamGrades(getTeam(s.teams[other(cpu)]));
+  const passEdge = clamp((off.passing / def.passDefense) * diff.cpuOffense, 0.6, 1.5);
+  const runEdge = clamp((off.rushing / def.runDefense) * diff.cpuOffense, 0.6, 1.5);
+  const entries: DriveEntry[] = [];
+  let headline = '';
+  let brk: Break = 'none';
+
+  const run = (secs: number) => {
+    s = { ...s, clock: tickClock(s.clock, secs).clock };
+  };
+
+  for (let guard = 0; guard < 40; guard++) {
+    const situation = `${downText(s)} at ${ballOnText(s.ballY)}`;
+    const clock = `Q${s.clock.quarter} ${Math.floor(s.clock.remaining / 60)}:${String(Math.floor(s.clock.remaining % 60)).padStart(2, '0')}`;
+    // Huddle / play clock time when the clock is running.
+    if (s.clock.running) run(rng.range(22, 34));
+    const qc = checkQuarter(s);
+    if (qc.brk !== 'none') {
+      s = qc.state;
+      if (qc.brk !== 'quarter') {
+        brk = qc.brk;
+        headline = qc.brk === 'halftime' ? 'END OF HALF' : 'END OF GAME';
+        break;
+      }
+    }
+    s = { ...s, clock: snapClock(s.clock) };
+
+    let r: RulesResult;
+    let text: string;
+    if (s.down === 4 && !(s.toGo <= 1 && s.ballY > 40 && s.ballY < 65)) {
+      run(rng.range(5, 7));
+      if (fieldGoalDistance(s.ballY) <= 52) {
+        const fg = attemptFieldGoal(s, rng);
+        r = fg;
+        text = fg.headline;
+      } else {
+        r = punt(s, rng);
+        text = r.headline;
+      }
+    } else {
+      const passP = clamp(0.5 + (s.toGo > 7 ? 0.25 : 0) - (s.toGo <= 2 ? 0.25 : 0), 0.15, 0.9);
+      let outcome: 'tackle' | 'incomplete' | 'interception' | 'touchdown' | 'sack' | 'outOfBounds';
+      let gain = 0;
+      if (rng.chance(passP)) {
+        const roll = rng.next();
+        if (roll < 0.06 / passEdge) {
+          outcome = 'sack';
+          gain = -rng.int(3, 9);
+          text = `Sacked, loss of ${-gain}`;
+        } else if (roll < 0.06 / passEdge + 0.03 / passEdge) {
+          outcome = 'interception';
+          gain = rng.int(5, 25);
+          text = 'Pass intercepted!';
+        } else if (rng.chance(clamp(0.6 * passEdge, 0.35, 0.85))) {
+          gain = Math.round(clamp(6 + rng.normal() * 6 * passEdge + (rng.chance(0.08 * passEdge) ? 25 : 0), 0, 80));
+          outcome = rng.chance(0.25) ? 'outOfBounds' : 'tackle';
+          text = `Pass complete for ${gain}`;
+        } else {
+          outcome = 'incomplete';
+          text = 'Pass incomplete';
+        }
+        run(outcome === 'incomplete' ? rng.range(3, 6) : rng.range(5, 9));
+      } else {
+        gain = Math.round(clamp(3.8 * runEdge + rng.normal() * 3.5 + (rng.chance(0.05 * runEdge) ? 20 : 0), -4, 80));
+        outcome = rng.chance(0.1) ? 'outOfBounds' : 'tackle';
+        text = `Run for ${gain}`;
+        run(rng.range(4, 7));
+      }
+      const endY = s.ballY + gain;
+      if (outcome !== 'interception' && outcome !== 'incomplete' && endY >= 100) {
+        outcome = 'touchdown';
+        text = `${text.split(' for')[0]}: TOUCHDOWN`;
+      }
+      r = applyPlay(s, { outcome, endY: Math.min(endY, 100), endX: 0 });
+      if (r.headline && outcome !== 'touchdown') text += ` — ${r.headline.toLowerCase()}`;
+    }
+    entries.push({ clock, situation, text });
+    const ap = afterPlay(r.state, r.stop);
+    s = ap.state;
+    if (r.possessionChanged || r.scored) {
+      headline = r.headline;
+      if (ap.brk === 'halftime' || ap.brk === 'gameover') brk = ap.brk;
+      break;
+    }
+    if (ap.brk === 'halftime' || ap.brk === 'gameover') {
+      brk = ap.brk;
+      headline = ap.brk === 'halftime' ? 'END OF HALF' : 'END OF GAME';
+      break;
+    }
+  }
+  return { state: s, entries, headline, brk };
+}

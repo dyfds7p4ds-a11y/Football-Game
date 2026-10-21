@@ -1,0 +1,122 @@
+{
+  "plays": [
+    {
+      "id": "hb_dive", "name": "HB Dive", "category": "run", "formation": "under_center",
+      "description": "Quick handoff straight into the right A-gap.",
+      "run": { "aim": 1.3, "style": "handoff" },
+      "routes": { "WR1": { "route": "block" }, "WR2": { "route": "block" }, "WR3": { "route": "block" },
+                  "TE": { "route": "block" }, "RB": { "route": "block" } }
+    },
+    {
+      "id": "hb_stretch", "name": "Outside Zone", "category": "run", "formation": "under_center",
+      "description": "Stretch run to the right edge; cut up when a lane opens.",
+      "run": { "aim": 6.5, "style": "handoff" },
+      "routes": { "WR1": { "route": "block" }, "WR2": { "route": "block" }, "WR3": { "route": "block" },
+                  "TE": { "route": "block" }, "RB": { "route": "block" } }
+    },
+    {
+      "id": "hb_toss", "name": "Toss Sweep", "category": "run", "formation": "under_center",
+      "description": "Pitch to the RB racing for the left sideline.",
+      "run": { "aim": -10, "style": "toss" },
+      "routes": { "WR1": { "route": "block" }, "WR2": { "route": "block" }, "WR3": { "route": "block" },
+                  "TE": { "route": "block" }, "RB": { "route": "block" } }
+    },
+    {
+      "id": "counter", "name": "Pistol Counter", "category": "run", "formation": "pistol",
+      "description": "Downhill run into the left B-gap behind pulling blockers.",
+      "run": { "aim": -2.6, "style": "handoff" },
+      "routes": { "WR1": { "route": "block" }, "WR2": { "route": "block" }, "WR3": { "route": "block" },
+                  "TE": { "route": "block" }, "RB": { "route": "block" } }
+    },
+    {
+      "id": "hb_draw", "name": "HB Draw", "category": "run", "formation": "shotgun",
+      "description": "Sell the pass, then hand off late up the middle. Great vs. blitz.",
+      "run": { "aim": 0.6, "style": "handoff" },
+      "routes": { "WR1": { "route": "go" }, "WR2": { "route": "go" }, "WR3": { "route": "block" },
+                  "TE": { "route": "block" }, "RB": { "route": "block", "delay": 0.7 } }
+    },
+    {
+      "id": "slants", "name": "Double Slants", "category": "short", "formation": "shotgun", "primary": "WR1",
+      "description": "Both outside receivers slant inside. Get it out fast.",
+      "routes": { "WR1": { "route": "slant", "depth": 2 }, "WR2": { "route": "slant", "depth": 2 },
+                  "WR3": { "route": "flat" }, "TE": { "route": "hitch", "depth": 5 }, "RB": { "route": "check" } }
+    },
+    {
+      "id": "quick_outs", "name": "Quick Outs", "category": "short", "formation": "shotgun", "primary": "WR2",
+      "description": "Speed outs at 5 yards. Stops the clock at the sideline.",
+      "routes": { "WR1": { "route": "out", "depth": 5 }, "WR2": { "route": "out", "depth": 5 },
+                  "WR3": { "route": "hitch", "depth": 5 }, "TE": { "route": "flat", "dir": 1 }, "RB": { "route": "check" } }
+    },
+    {
+      "id": "mesh", "name": "Mesh", "category": "short", "formation": "shotgun", "primary": "WR3",
+      "description": "Shallow crossers rub through the middle; RB swings right.",
+      "routes": { "WR1": { "route": "go" }, "WR2": { "route": "curl", "depth": 10 },
+                  "WR3": { "route": "drag", "depth": 2 }, "TE": { "route": "drag", "depth": 4 },
+                  "RB": { "route": "swing", "dir": 1 } }
+    },
+    {
+      "id": "curl_flat", "name": "Curl Flat", "category": "short", "formation": "trips", "primary": "WR2",
+      "description": "Outside curls with flats underneath. High-low the flat defender.",
+      "routes": { "WR1": { "route": "curl", "depth": 10 }, "WR2": { "route": "curl", "depth": 10 },
+                  "WR3": { "route": "flat" }, "TE": { "route": "hitch", "depth": 6 }, "RB": { "route": "check" } }
+    },
+    {
+      "id": "levels", "name": "Levels Dig", "category": "medium", "formation": "shotgun", "primary": "WR1",
+      "description": "Dig at 14 over a shallow in. Read the hook defender.",
+      "routes": { "WR1": { "route": "in", "depth": 14 }, "WR2": { "route": "comeback", "depth": 15 },
+                  "WR3": { "route": "in", "depth": 6 }, "TE": { "route": "seam" }, "RB": { "route": "check" } }
+    },
+    {
+      "id": "smash", "name": "Smash", "category": "medium", "formation": "trips", "primary": "WR3",
+      "description": "Corner over a hitch. Beats Cover 2.",
+      "routes": { "WR1": { "route": "post", "depth": 12 }, "WR2": { "route": "hitch", "depth": 6 },
+                  "WR3": { "route": "corner", "depth": 12 }, "TE": { "route": "in", "depth": 8 }, "RB": { "route": "check" } }
+    },
+    {
+      "id": "y_cross", "name": "Y-Cross", "category": "medium", "formation": "shotgun", "primary": "TE",
+      "description": "Tight end crosses the field at 13 yards behind clearing routes.",
+      "routes": { "WR1": { "route": "go" }, "WR2": { "route": "post", "depth": 12 },
+                  "WR3": { "route": "curl", "depth": 8 }, "TE": { "route": "drag", "depth": 13 },
+                  "RB": { "route": "flat", "dir": 1 } }
+    },
+    {
+      "id": "four_verts", "name": "Four Verticals", "category": "deep", "formation": "shotgun", "primary": "WR3",
+      "description": "Everyone goes deep. Stresses single-high safeties.",
+      "routes": { "WR1": { "route": "go" }, "WR2": { "route": "go" }, "WR3": { "route": "seam" },
+                  "TE": { "route": "seam" }, "RB": { "route": "check" } }
+    },
+    {
+      "id": "deep_post", "name": "Max Protect Post", "category": "deep", "formation": "under_center", "primary": "WR1",
+      "description": "Seven-man protection, two deep shots.",
+      "routes": { "WR1": { "route": "post", "depth": 14 }, "WR2": { "route": "go" },
+                  "WR3": { "route": "corner", "depth": 14 }, "TE": { "route": "block" }, "RB": { "route": "block" } }
+    },
+    {
+      "id": "bubble", "name": "Bubble Screen", "category": "screen", "formation": "trips", "primary": "WR3",
+      "description": "Throw it right away to the slot; the outside WR and TE block.",
+      "routes": { "WR1": { "route": "go" }, "WR2": { "route": "block" }, "WR3": { "route": "bubble" },
+                  "TE": { "route": "block" }, "RB": { "route": "check" } }
+    },
+    {
+      "id": "rb_screen", "name": "RB Screen", "category": "screen", "formation": "shotgun", "primary": "RB",
+      "description": "Let the rush in, then dump it to the RB with blockers in front.",
+      "routes": { "WR1": { "route": "go" }, "WR2": { "route": "go" }, "WR3": { "route": "curl", "depth": 8 },
+                  "TE": { "route": "hitch", "depth": 4 }, "RB": { "route": "screen", "delay": 1.0, "dir": -1 } }
+    },
+    {
+      "id": "pa_boot", "name": "PA Bootleg", "category": "playaction", "formation": "under_center", "primary": "TE",
+      "playAction": true,
+      "description": "Fake the dive, roll right. TE leaks to the flat, WR3 drags across.",
+      "routes": { "WR1": { "route": "post", "depth": 14 }, "WR2": { "route": "comeback", "depth": 14 },
+                  "WR3": { "route": "drag", "depth": 6 }, "TE": { "route": "flat", "dir": 1, "delay": 0.6 },
+                  "RB": { "route": "fake" } }
+    },
+    {
+      "id": "pa_shot", "name": "PA Deep Shot", "category": "playaction", "formation": "under_center", "primary": "WR2",
+      "playAction": true,
+      "description": "Sell the run, then go over the top of biting safeties.",
+      "routes": { "WR1": { "route": "go" }, "WR2": { "route": "post", "depth": 15 }, "WR3": { "route": "seam" },
+                  "TE": { "route": "block" }, "RB": { "route": "fake" } }
+    }
+  ]
+}
