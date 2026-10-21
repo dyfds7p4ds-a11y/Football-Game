@@ -1,0 +1,135 @@
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: #07090e;
+  color: #fff;
+  font-family: "Press Start 2P", monospace;
+  overflow: hidden;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+#wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+}
+
+body.touch #wrap {
+  height: calc(100% - 190px);
+}
+
+canvas {
+  display: block;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  box-shadow: 0 0 0 4px #1a2030, 0 0 40px rgba(0, 0, 0, 0.8);
+}
+
+#touch {
+  display: none;
+}
+
+body.touch #touch {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  height: 190px;
+  padding: 0 28px 20px;
+}
+
+#stick {
+  position: relative;
+  width: 130px;
+  height: 130px;
+  border-radius: 50%;
+  background: #1a2030;
+  border: 4px solid #3a435a;
+}
+
+#knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 54px;
+  height: 54px;
+  margin: -27px 0 0 -27px;
+  border-radius: 50%;
+  background: #ffd23f;
+  box-shadow: 0 4px 0 #a8861c;
+}
+
+#btns {
+  display: flex;
+  gap: 18px;
+  align-items: flex-end;
+}
+
+#btns button {
+  width: 76px;
+  height: 76px;
+  border-radius: 50%;
+  border: 4px solid #000;
+  font: 20px "Press Start 2P", monospace;
+  color: #fff;
+  background: #b8322a;
+  box-shadow: 0 5px 0 #6e1d18;
+  touch-action: none;
+}
+
+#btns #btnB {
+  width: 58px;
+  height: 58px;
+  font-size: 14px;
+  background: #3a435a;
+  box-shadow: 0 5px 0 #1a2030;
+  margin-bottom: 30px;
+}
+
+#btns button:active {
+  transform: translateY(3px);
+  box-shadow: none;
+}
+
+/* Querformat: Steuerung seitlich über dem Rand, Spielfeld nutzt die volle Höhe */
+@media (orientation: landscape) {
+  body.touch #wrap {
+    height: 100%;
+  }
+
+  body.touch #touch {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: auto;
+    padding: 0 12px 12px;
+    align-items: flex-end;
+    pointer-events: none;
+  }
+
+  body.touch #stick,
+  body.touch #btns {
+    pointer-events: auto;
+    opacity: 0.85;
+  }
+
+  body.touch #stick {
+    width: 110px;
+    height: 110px;
+  }
+
+  body.touch #btns {
+    flex-direction: column-reverse;
+    align-items: center;
+    gap: 10px;
+  }
+
+  body.touch #btns #btnB {
+    margin-bottom: 0;
+  }
+}

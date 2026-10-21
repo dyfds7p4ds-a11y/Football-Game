@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>Retro Gridiron</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <main id="wrap">
+    <canvas id="screen" width="480" height="360" aria-label="Retro Gridiron Spielfeld"></canvas>
+  </main>
+  <div id="touch" aria-hidden="true">
+    <div id="stick"><div id="knob"></div></div>
+    <div id="btns">
+      <button id="btnB" type="button">B</button>
+      <button id="btnA" type="button">A</button>
+    </div>
+  </div>
+  <script src="js/data.js"></script>
+  <script src="js/plays.js"></script>
+  <script src="js/engine.js"></script>
+  <script src="js/audio.js"></script>
+  <script src="js/render.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
