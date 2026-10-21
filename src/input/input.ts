@@ -97,7 +97,13 @@ export class InputManager {
     let primary = this.touchPrimary || k.has('Space') || k.has('Enter');
     this.lookYaw += ((k.has('KeyE') ? 1 : 0) - (k.has('KeyQ') ? 1 : 0)) * 2.2 * dt * this.lookSensitivity;
 
-    const pads = typeof navigator.getGamepads === 'function' ? navigator.getGamepads() : [];
+    let pads: (Gamepad | null)[] = [];
+    try {
+      // Some embedded contexts block the Gamepad API via permissions policy.
+      pads = typeof navigator.getGamepads === 'function' ? navigator.getGamepads() : [];
+    } catch {
+      pads = [];
+    }
     for (const pad of pads) {
       if (!pad) continue;
       const dz = (v: number) => (Math.abs(v) < 0.18 ? 0 : v);
