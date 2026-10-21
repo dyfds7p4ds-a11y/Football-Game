@@ -103,6 +103,8 @@ scripts/     data/icon generators and balance-probe tools
 `python3 scripts/gen-icons.py` regenerates the PWA icons (needs Pillow).
 `BALANCE=balance npx vitest run` prints average yards and outcomes per play
 against every coverage, which is useful when tuning the simulation.
+`BALANCE=trace TRACE=slants,cover3,1.0,WR1,1 npx vitest run --silent=false`
+prints a timeline for a single play (play, defense, throw time, target, seed).
 
 ## Defaults chosen (and where to change them)
 
