@@ -497,6 +497,7 @@ export class PlaySim {
 
   private handoff(rb: Actor) {
     this.ball.holder = rb.id;
+    this.controlledId = rb.id;
     this.handedOff = true;
     this.runRecognizedAt = this.t;
     this.carrierIdx = 0;
@@ -712,7 +713,7 @@ export class PlaySim {
     const flight = this.ball.state === 'air' && this.ball.flight && !this.ball.flight.lateral ? this.ball.flight : null;
     const runMode = carrier && carrier.side === 'off' && (carrier !== qb || this.runRecognizedAt < Infinity);
     for (const d of this.actors) {
-      if (d.side !== 'def' || d.down) continue;
+      if (d.side !== 'def' || d.down || desired.has(d.id)) continue;
       const asg = d.assignment!;
       const isDeep = asg.kind === 'zone' && ZONES[asg.zone].deep;
       let goal: Vec2;
@@ -921,6 +922,7 @@ export class PlaySim {
         b.state = 'held';
         b.holder = tgt.id;
         b.flight = null;
+        if (tgt.slot !== 'QB') this.controlledId = tgt.id;
         if (tgt.slot === 'RB' && this.play.run) {
           this.handedOff = true;
           this.runRecognizedAt = this.t;
@@ -977,6 +979,7 @@ export class PlaySim {
         b.flight = null;
         r.pos = lerp(r.pos, f.landing, 0.5);
         this.runRecognizedAt = this.t;
+        this.controlledId = r.id;
         this.emit('catch', r.id);
         this.syncHeldBall();
         return;
@@ -1087,11 +1090,14 @@ export class PlaySim {
       return;
     }
     let p = 0;
+    const picked = new Set(this.passBlock.values());
     for (const d of this.actors) {
-      if (d.side !== 'def' || d.down) continue;
+      if (d.side !== 'def' || d.down || d.assignment?.kind !== 'rush') continue;
       const dd = dist(d.pos, qb.pos);
       const engaged = this.engagements.some((e) => e.defender === d.id);
-      const v = engaged ? clamp(1 - (dd - 1) / 3.5, 0, 1) * 0.55 : clamp(1 - (dd - 1.2) / 5, 0, 1);
+      const free = clamp(1 - (dd - 1.2) / 5, 0, 1);
+      // Blocked rushers only count once they are pushing the pocket into the QB.
+      const v = engaged ? clamp(1 - (dd - 1) / 3.5, 0, 1) * 0.55 : picked.has(d.id) && this.t < 1 ? free * 0.3 : free;
       p = Math.max(p, v);
     }
     this.pressure = this.pressure + (p - this.pressure) * 0.2;

@@ -1,0 +1,150 @@
+/**
+ * InputManager merges touch, keyboard and gamepad into one InputFrame per
+ * frame. Game code never looks at raw events.
+ */
+import type { EligibleSlot } from '../data/types';
+import type { Vec2 } from '../core/vec';
+
+export interface InputFrame {
+  /** Movement, x = right, y = forward/downfield. Length <= 1. */
+  move: Vec2;
+  /** Look deltas since last frame (radians). */
+  lookYaw: number;
+  lookPitch: number;
+  /** Big action button (Snap / Throw-hold / Juke). */
+  primaryHeld: boolean;
+  primaryPressed: boolean;
+  slotPressed: EligibleSlot | null;
+  pausePressed: boolean;
+  timeoutPressed: boolean;
+}
+
+const KEY_SLOTS: Record<string, EligibleSlot> = {
+  Digit1: 'WR1', Digit2: 'WR2', Digit3: 'WR3', Digit4: 'RB', KeyR: 'RB', Digit5: 'TE', KeyT: 'TE',
+};
+// Standard gamepad mapping.
+const PAD_SLOTS: [number, EligibleSlot][] = [[2, 'WR1'], [3, 'WR2'], [1, 'WR3'], [4, 'RB'], [5, 'TE']];
+
+export class InputManager {
+  private touchMove: Vec2 = { x: 0, y: 0 };
+  private touchPrimary = false;
+  private keys = new Set<string>();
+  private lookYaw = 0;
+  private lookPitch = 0;
+  private primaryWasHeld = false;
+  private pendingSlot: EligibleSlot | null = null;
+  /** Latched so a tap shorter than one frame is never lost. */
+  private pendingPrimary = false;
+  private pendingPause = false;
+  private pendingTimeout = false;
+  private padPrev: boolean[] = [];
+  lookSensitivity = 1;
+  /** Which device was used last: lets the UI hide touch buttons for keyboard/pad players. */
+  lastDevice: 'touch' | 'keyboard' | 'gamepad' = 'touch';
+
+  constructor() {
+    window.addEventListener('keydown', (e) => {
+      if (e.repeat) return;
+      this.lastDevice = 'keyboard';
+      this.keys.add(e.code);
+      const slot = KEY_SLOTS[e.code];
+      if (slot) this.pendingSlot = slot;
+      if (e.code === 'Escape' || e.code === 'KeyP') this.pendingPause = true;
+      if (e.code === 'KeyO') this.pendingTimeout = true;
+      if (e.code === 'Space' || e.code === 'Enter') this.pendingPrimary = true;
+      if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
+    });
+    window.addEventListener('keyup', (e) => this.keys.delete(e.code));
+    window.addEventListener('blur', () => this.keys.clear());
+  }
+
+  // --- touch UI hooks
+  setTouchMove(x: number, y: number) {
+    this.lastDevice = 'touch';
+    this.touchMove = { x, y };
+  }
+  addLook(yaw: number, pitch: number) {
+    this.lookYaw += yaw * this.lookSensitivity;
+    this.lookPitch += pitch * this.lookSensitivity;
+  }
+  setTouchPrimary(held: boolean) {
+    this.lastDevice = 'touch';
+    this.touchPrimary = held;
+    if (held) this.pendingPrimary = true;
+  }
+  pressSlot(slot: EligibleSlot) {
+    this.pendingSlot = slot;
+  }
+  pressPause() {
+    this.pendingPause = true;
+  }
+  pressTimeout() {
+    this.pendingTimeout = true;
+  }
+
+  /** Build this frame's input; call once per animation frame. */
+  poll(dt: number): InputFrame {
+    let mx = this.touchMove.x;
+    let my = this.touchMove.y;
+    const k = this.keys;
+    const kx = (k.has('KeyD') || k.has('ArrowRight') ? 1 : 0) - (k.has('KeyA') || k.has('ArrowLeft') ? 1 : 0);
+    const ky = (k.has('KeyW') || k.has('ArrowUp') ? 1 : 0) - (k.has('KeyS') || k.has('ArrowDown') ? 1 : 0);
+    if (kx || ky) {
+      const l = Math.hypot(kx, ky);
+      mx = kx / l;
+      my = ky / l;
+    }
+    let primary = this.touchPrimary || k.has('Space') || k.has('Enter');
+    this.lookYaw += ((k.has('KeyE') ? 1 : 0) - (k.has('KeyQ') ? 1 : 0)) * 2.2 * dt * this.lookSensitivity;
+
+    const pads = typeof navigator.getGamepads === 'function' ? navigator.getGamepads() : [];
+    for (const pad of pads) {
+      if (!pad) continue;
+      const dz = (v: number) => (Math.abs(v) < 0.18 ? 0 : v);
+      const lx = dz(pad.axes[0] ?? 0);
+      const ly = dz(pad.axes[1] ?? 0);
+      if (lx || ly) {
+        this.lastDevice = 'gamepad';
+        mx = lx;
+        my = -ly;
+        const l = Math.hypot(mx, my);
+        if (l > 1) {
+          mx /= l;
+          my /= l;
+        }
+      }
+      this.lookYaw += dz(pad.axes[2] ?? 0) * 2.4 * dt * this.lookSensitivity;
+      this.lookPitch -= dz(pad.axes[3] ?? 0) * 1.2 * dt * this.lookSensitivity;
+      const btn = (i: number) => !!pad.buttons[i]?.pressed;
+      const edge = (i: number) => btn(i) && !this.padPrev[i];
+      if (btn(0) || btn(7)) {
+        primary = true;
+        this.lastDevice = 'gamepad';
+      }
+      for (const [i, slot] of PAD_SLOTS) if (edge(i)) this.pendingSlot = slot;
+      if (edge(9)) this.pendingPause = true;
+      if (edge(8)) this.pendingTimeout = true;
+      this.padPrev = pad.buttons.map((b) => b.pressed);
+      break;
+    }
+
+    const frame: InputFrame = {
+      move: { x: mx, y: my },
+      lookYaw: this.lookYaw,
+      lookPitch: this.lookPitch,
+      primaryHeld: primary,
+      primaryPressed: this.pendingPrimary || (primary && !this.primaryWasHeld),
+      slotPressed: this.pendingSlot,
+      pausePressed: this.pendingPause,
+      timeoutPressed: this.pendingTimeout,
+    };
+    this.primaryWasHeld = primary;
+    this.lookYaw = 0;
+    this.lookPitch = 0;
+    this.pendingSlot = null;
+    this.pendingPrimary = false;
+    this.pendingPause = false;
+    this.pendingTimeout = false;
+    return frame;
+  }
+}

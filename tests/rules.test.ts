@@ -104,3 +104,25 @@ describe('play resolution rules', () => {
     }
   });
 });
+
+describe('simulated CPU drives', () => {
+  it('always end with a possession change, score or end of half, and use game time', async () => {
+    const { simulateCpuDrive } = await import('../src/game/cpuDrive');
+    const { DIFFICULTY } = await import('../src/data');
+    for (let i = 0; i < 40; i++) {
+      const start = { ...g0(), possession: 'away' as const, ballY: 25 };
+      const r = simulateCpuDrive(start, DIFFICULTY.normal, new Rng(i));
+      const ended = r.state.possession === 'home' || r.state.score.away > 0 || r.brk !== 'none';
+      expect(ended, JSON.stringify(r.entries)).toBe(true);
+      expect(r.state.clock.remaining).toBeLessThan(start.clock.remaining);
+      expect(r.entries.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('is deterministic for a seed', async () => {
+    const { simulateCpuDrive } = await import('../src/game/cpuDrive');
+    const { DIFFICULTY } = await import('../src/data');
+    const start = { ...g0(), possession: 'away' as const };
+    expect(simulateCpuDrive(start, DIFFICULTY.hard, new Rng(5))).toEqual(simulateCpuDrive(start, DIFFICULTY.hard, new Rng(5)));
+  });
+});

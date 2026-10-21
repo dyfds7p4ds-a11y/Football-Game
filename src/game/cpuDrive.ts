@@ -37,6 +37,7 @@ export function simulateCpuDrive(start: GameState, diff: DifficultyConfig, rng: 
   let headline = '';
   let brk: Break = 'none';
 
+  const stats = { ...s.stats[cpu] };
   const run = (secs: number) => {
     s = { ...s, clock: tickClock(s.clock, secs).clock };
   };
@@ -75,17 +76,22 @@ export function simulateCpuDrive(start: GameState, diff: DifficultyConfig, rng: 
       let gain = 0;
       if (rng.chance(passP)) {
         const roll = rng.next();
+        if (roll >= 0.06 / passEdge) stats.passAtt++;
         if (roll < 0.06 / passEdge) {
+          stats.sacks++;
           outcome = 'sack';
           gain = -rng.int(3, 9);
           text = `Sacked, loss of ${-gain}`;
         } else if (roll < 0.06 / passEdge + 0.03 / passEdge) {
           outcome = 'interception';
+          stats.turnovers++;
           gain = rng.int(5, 25);
           text = 'Pass intercepted!';
         } else if (rng.chance(clamp(0.6 * passEdge, 0.35, 0.85))) {
           gain = Math.round(clamp(6 + rng.normal() * 6 * passEdge + (rng.chance(0.08 * passEdge) ? 25 : 0), 0, 80));
           outcome = rng.chance(0.25) ? 'outOfBounds' : 'tackle';
+          stats.passComp++;
+          stats.passYds += Math.min(gain, 100 - s.ballY);
           text = `Pass complete for ${gain}`;
         } else {
           outcome = 'incomplete';
@@ -95,6 +101,8 @@ export function simulateCpuDrive(start: GameState, diff: DifficultyConfig, rng: 
       } else {
         gain = Math.round(clamp(3.8 * runEdge + rng.normal() * 3.5 + (rng.chance(0.05 * runEdge) ? 20 : 0), -4, 80));
         outcome = rng.chance(0.1) ? 'outOfBounds' : 'tackle';
+        stats.rushAtt++;
+        stats.rushYds += Math.min(gain, 100 - s.ballY);
         text = `Run for ${gain}`;
         run(rng.range(4, 7));
       }
@@ -104,7 +112,7 @@ export function simulateCpuDrive(start: GameState, diff: DifficultyConfig, rng: 
         text = `${text.split(' for')[0]}: TOUCHDOWN`;
       }
       r = applyPlay(s, { outcome, endY: Math.min(endY, 100), endX: 0 });
-      if (r.headline && outcome !== 'touchdown') text += ` — ${r.headline.toLowerCase()}`;
+      if (r.headline && outcome !== 'touchdown' && outcome !== 'incomplete') text += ` — ${r.headline.toLowerCase()}`;
     }
     entries.push({ clock, situation, text });
     const ap = afterPlay(r.state, r.stop);
@@ -120,5 +128,5 @@ export function simulateCpuDrive(start: GameState, diff: DifficultyConfig, rng: 
       break;
     }
   }
-  return { state: s, entries, headline, brk };
+  return { state: { ...s, stats: { ...s.stats, [cpu]: stats } }, entries, headline, brk };
 }
