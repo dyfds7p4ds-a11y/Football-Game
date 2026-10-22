@@ -1,12 +1,13 @@
 {
+  "_doc": "chance = base chance per opportunity, scaled by difficulty penaltyRate and the crowd edge. severity decides which foul is called when several happen on one play (higher wins; ties keep the first).",
   "types": {
-    "falseStart": { "label": "False Start", "side": "off", "yards": 5, "dead": true, "chance": 0.012 },
-    "offside": { "label": "Offside", "side": "def", "yards": 5, "chance": 0.012 },
-    "holdingOffense": { "label": "Holding", "side": "off", "yards": 10, "chance": 0.06 },
-    "holdingDefense": { "label": "Defensive Holding", "side": "def", "yards": 5, "autoFirst": true, "chance": 0.05 },
-    "passInterference": { "label": "Pass Interference", "side": "def", "yards": 0, "spotFoul": true, "autoFirst": true, "chance": 0.08 },
-    "roughingPasser": { "label": "Roughing the Passer", "side": "def", "yards": 15, "autoFirst": true, "chance": 0.12 },
-    "facemask": { "label": "Face Mask", "side": "def", "yards": 15, "autoFirst": true, "chance": 0.012 }
+    "falseStart": { "label": "False Start", "side": "off", "yards": 5, "dead": true, "severity": 1, "chance": 0.012 },
+    "offside": { "label": "Offside", "side": "def", "yards": 5, "severity": 1, "chance": 0.012 },
+    "holdingOffense": { "label": "Holding", "side": "off", "yards": 10, "severity": 2, "chance": 0.03 },
+    "holdingDefense": { "label": "Defensive Holding", "side": "def", "yards": 5, "autoFirst": true, "severity": 2, "chance": 0.05 },
+    "passInterference": { "label": "Pass Interference", "side": "def", "yards": 0, "spotFoul": true, "autoFirst": true, "severity": 4, "chance": 0.08 },
+    "roughingPasser": { "label": "Roughing the Passer", "side": "def", "yards": 15, "autoFirst": true, "severity": 3, "chance": 0.12 },
+    "facemask": { "label": "Face Mask", "side": "def", "yards": 15, "autoFirst": true, "severity": 3, "chance": 0.012 }
   },
   "flag": {
     "throwDelay": 0.2,

@@ -23,7 +23,7 @@ import { inPhase, throwingWindow } from './windows';
 import { TACKLE, resolveTackle, type ContactKind } from './tackle';
 import { SCREEN, screenTiming, type ScreenTiming } from './screen';
 import { nearestOfficial, setupOfficials, updateOfficials, type Official } from './officials';
-import { PENALTIES, makeFoul, rollFoul, type Flag, type Foul, type FoulType, type PenaltyBias } from './penalties';
+import { PENALTIES, callFoul, makeFoul, rollFoul, type Flag, type Foul, type FoulType, type PenaltyBias } from './penalties';
 import pocketJson from '../data/pocket.json';
 
 export const POCKET = pocketJson.pocket;
@@ -252,7 +252,8 @@ export class PlaySim {
     this.setupDefense(opts.defenseTeam);
     this.coverage = new CoverageReader(this.diff.coverageRead, this.rng.fork());
     this.penRng = this.rng.fork();
-    this.penaltyBias = opts.penaltyBias ?? { off: 1, def: 1 };
+    const bias = opts.penaltyBias ?? { off: 1, def: 1 };
+    this.penaltyBias = { off: bias.off * this.diff.penaltyRate, def: bias.def * this.diff.penaltyRate };
     this.officials = setupOfficials(this.los, this.ballX);
     const qb = this.get('QB');
     this.controlledId = qb.id;
@@ -514,10 +515,20 @@ export class PlaySim {
 
   // ---------------------------------------------------------------- penalties
 
+  /**
+   * At most one flag per play: the first foul throws it; a later, more severe
+   * foul replaces the call (the flag already on the field stands for it), a
+   * lesser one is not called. `fouls` therefore never holds more than one.
+   */
   private addFoul(type: FoulType, spot: Vec2) {
-    if (this.fouls.some((f) => f.type === type)) return;
-    const foul = makeFoul(type, spot, this.t);
-    this.fouls.push(foul);
+    const current = this.fouls[0] ?? null;
+    const foul = callFoul(current, makeFoul(type, spot, this.t));
+    if (foul === current) return;
+    this.fouls[0] = foul;
+    if (this.flags.length) {
+      this.flags[0].foul = foul;
+      return;
+    }
     const official = nearestOfficial(this.officials, spot);
     const o = this.officials[official];
     this.flags.push({ foul, official, from: { ...o.pos }, to: { ...spot }, t0: this.t + PENALTIES.flag.throwDelay, T: PENALTIES.flag.flightTime });

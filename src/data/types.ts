@@ -141,4 +141,6 @@ export interface DifficultyConfig {
   pocketPressure: number;
   /** Width multiplier of the special-teams timing zones (punt, field goal, kickoff). */
   kickWindow: number;
+  /** Multiplier on every foul chance (data/penalties.json); keeps flags rare. */
+  penaltyRate: number;
 }

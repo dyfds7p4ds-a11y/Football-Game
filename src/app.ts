@@ -18,9 +18,9 @@ import { Cutscene } from './render/cutscene';
 import { PlaySim, SIM_DT, type PlayEvent, type SimInput } from './play/sim';
 import { ReturnSim } from './play/returnSim';
 import { chooseDefense, recordTendency } from './play/defenseCalls';
-import { PENALTIES, calloutText, type Foul } from './play/penalties';
+import { PENALTIES, calloutText, type Flag } from './play/penalties';
 import { ST, cpuRelease, judgeFieldGoal, kickFlight, kickZone, meterAngle, meterPower, releaseKick, type KickFlight, type KickKind } from './play/kicking';
-import { callTimeoutClock, snapClock, tickClock } from './game/clock';
+import { PLAY_CLOCK, callTimeoutClock, snapClock, tickClock } from './game/clock';
 import { afterPlay, checkQuarter, type Break } from './game/flow';
 import { attemptFieldGoal, delayOfGame, fieldGoalDistance, punt, type RulesResult } from './game/rules';
 import { enforcePenalties } from './game/penalties';
@@ -86,7 +86,9 @@ export class App {
   private bannerTimer = 0;
   private lastTime = 0;
   private playsRun = 0;
-  private callouts: { at: number; foul: Foul }[] = [];
+  private callouts: { at: number; flag: Flag }[] = [];
+  /** A flag was thrown since the last snap: the next play-clock expiry is not a second penalty. */
+  private waiveDelayOfGame = false;
 
   constructor(canvas: HTMLCanvasElement, ui: HTMLElement) {
     this.view = new SceneView(canvas);
@@ -297,6 +299,7 @@ export class App {
     const g = this.game!;
     this.game = { ...g, clock: snapClock(g.clock), tendencies: recordTendency(g.tendencies, this.play!.category) };
     this.view.showRoutes(null);
+    this.waiveDelayOfGame = false;
     this.acc = 0;
     this.playsRun++;
     this.setPhase('live');
@@ -320,6 +323,7 @@ export class App {
     const res = this.sim!.result!;
     // Flags stayed on the field during the play; now the penalty is applied.
     const enf = enforcePenalties(g, res, res.fouls);
+    if (res.fouls.length) this.waiveDelayOfGame = true;
     const r = enf.result;
     const st = { ...r.state, stats: { ...r.state.stats } };
     const side = g.userSide;
@@ -670,7 +674,12 @@ export class App {
       this.game = q.state;
       if (q.brk !== 'none') return this.handleBreak(q.brk);
     }
-    if (t.playClockExpired) {
+    if (t.playClockExpired && this.waiveDelayOfGame) {
+      // No penalty chains: the first expiry after a flagged play only resets the play clock.
+      this.waiveDelayOfGame = false;
+      this.game = { ...this.game, clock: { ...this.game.clock, playClock: PLAY_CLOCK } };
+    } else if (t.playClockExpired) {
+      this.waiveDelayOfGame = true;
       const r = delayOfGame(this.game);
       const ap = afterPlay(r.state, r.stop);
       this.game = ap.state;
@@ -785,7 +794,7 @@ export class App {
       if (e.type === 'interception') this.audio.roar(0.4);
       if (e.type === 'flag' && this.sim) {
         const fl = this.sim.flags[this.sim.flags.length - 1];
-        this.callouts.push({ at: fl.t0 + fl.T + PENALTIES.flag.calloutDelay, foul: fl.foul });
+        this.callouts.push({ at: fl.t0 + fl.T + PENALTIES.flag.calloutDelay, flag: fl });
       }
     }
   }
@@ -798,7 +807,7 @@ export class App {
     for (const c of this.callouts.filter((x) => sim.t >= x.at)) {
       const off = getTeam(g.teams[g.possession]).name;
       const def = getTeam(g.teams[other(g.possession)]).name;
-      const t = calloutText(c.foul, off, def);
+      const t = calloutText(c.flag.foul, off, def);
       this.hud.showCallout(t.title, t.sub);
     }
     this.callouts = this.callouts.filter((x) => sim.t < x.at);
