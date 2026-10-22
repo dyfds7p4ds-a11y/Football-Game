@@ -29,6 +29,7 @@ import {
   BLOCKING, assignProtection, blockQuality, holdTime, laneCandidates, pickLane, planRunBlocks, progressRate,
   type BlockAssignment, type BlockMode, type BlockRole, type LaneDefender, type Unit,
 } from './blocking';
+import { BLITZ, blitzDesign, blitzPath, classifyBlitz, recognizeChance, type BlitzFacts, type BlitzOutcome, type BlitzPath } from './blitz';
 import pocketJson from '../data/pocket.json';
 
 export const POCKET = pocketJson.pocket;
@@ -148,7 +149,7 @@ export interface Ball {
 export type PlayEventType =
   | 'snap' | 'handoff' | 'pitch' | 'throw' | 'catch' | 'interception' | 'deflection' | 'drop'
   | 'incomplete' | 'tackle' | 'sack' | 'touchdown' | 'outOfBounds' | 'brokenTackle' | 'juke' | 'safety'
-  | 'scramble' | 'shed' | 'slide' | 'flag' | 'jump' | 'timing' | 'chip';
+  | 'scramble' | 'shed' | 'slide' | 'flag' | 'jump' | 'timing' | 'chip' | 'hurry' | 'pickup';
 
 export interface PlayEvent {
   t: number;
@@ -203,6 +204,22 @@ interface Engagement {
   progress: number;
 }
 
+/** A blitzing non-lineman: his path, where he is on it, and what has happened to him. */
+interface BlitzRun {
+  path: BlitzPath;
+  delay: number;
+  points: Vec2[];
+  idx: number;
+  facts: BlitzFacts;
+}
+
+export interface BlitzReport {
+  id: number;
+  slot: DefSlot;
+  path: BlitzPath;
+  outcome: BlitzOutcome;
+}
+
 /** Read-only view of a block for the renderer, HUD and tests. */
 export interface BlockState {
   blocker: number;
@@ -250,6 +267,7 @@ export class PlaySim {
   /** Chip-and-release backs who already let go of their chip. */
   private chipDone = new Set<number>();
   private laneX: number | null = null;
+  private blitzers = new Map<number, BlitzRun>();
   private laneEvalAt = 0;
   private shedFrom = new Map<number, { blocker: number; until: number }>();
   private throwArmed = false;
@@ -307,6 +325,7 @@ export class PlaySim {
       looseVel: { x: 0, y: 0, h: 0 },
     };
     if (!underCenter) this.launchLateral(center.pos, qb, 0.4);
+    this.setupBlitzes();
     this.assignPassProtection();
     this.emit('snap');
   }
@@ -435,9 +454,48 @@ export class PlaySim {
       const a = this.get(s);
       if (a.route?.blocks && a.route.type !== 'fake') blockers.push(unit(a, a.route.type === 'check' ? 'check' : 'block'));
     }
-    for (const a of assignProtection(blockers, rushers, qb.pos, this.ballX)) {
+    // The protection may not see every blitz (path, line awareness): an unseen blitzer comes free.
+    const ol = OL_SLOTS.map((s) => this.get(s));
+    const awareness = ol.reduce((t, a) => t + a.player.ratings.awareness, 0) / ol.length;
+    const seen = new Set<number>();
+    for (const [id, bz] of this.blitzers) if (this.blockRng.chance(recognizeChance(bz.path, awareness))) seen.add(id);
+    const recognized = (r: Unit) => !this.blitzers.has(r.id) || seen.has(r.id);
+    for (const a of assignProtection(blockers, rushers, qb.pos, this.ballX, recognized)) {
       this.blockRoles.set(a.blocker, a);
       if (a.target !== null) this.passBlock.set(a.blocker, a.target);
+    }
+  }
+
+  private setupBlitzes() {
+    const qb = this.get('QB');
+    const launch = v2(qb.pos.x, Math.min(qb.pos.y, this.los - 1) - 2);
+    for (const d of this.actors) {
+      if (d.side !== 'def' || d.assignment?.kind !== 'rush' || d.position === 'DL') continue;
+      const design = blitzDesign(this.defense.id, d.slot as DefSlot, d.pos.x, this.ballX);
+      this.blitzers.set(d.id, {
+        ...design, points: blitzPath(design.path, d.pos, this.ballX, this.los, launch), idx: 0,
+        facts: { sacked: false, closest: Infinity, atRelease: Infinity, engaged: false },
+      });
+    }
+  }
+
+  /** One outcome per blitzer (sack, hurry, blocked, late); final once the play is over. */
+  blitzReport(): BlitzReport[] {
+    return [...this.blitzers.entries()].map(([id, b]) => ({
+      id, slot: this.actors[id].slot as DefSlot, path: b.path, outcome: classifyBlitz(b.facts),
+    }));
+  }
+
+  private trackBlitzes() {
+    const qb = this.get('QB');
+    if (this.ball.holder !== qb.id || this.passThrown) return;
+    for (const [id, b] of this.blitzers) {
+      const d = this.actors[id];
+      b.facts.closest = Math.min(b.facts.closest, dist(d.pos, qb.pos));
+      if (!b.facts.engaged && this.engagersOf(d) > 0) {
+        b.facts.engaged = true;
+        this.emit('pickup', id);
+      }
     }
   }
 
@@ -530,6 +588,7 @@ export class PlaySim {
     this.updateReads();
     this.defenseAI(desired);
     this.updateEngagements(dt, desired);
+    this.trackBlitzes();
     this.integrate(dt, desired);
     this.separate();
     this.keepInBounds();
@@ -806,6 +865,19 @@ export class PlaySim {
 
   private throwBall(qb: Actor, input: SimInput) {
     const target = input.target ? this.get(input.target) : null;
+    // A free rusher in the QB's face at the release hurries the throw.
+    let hurrier: Actor | null = null;
+    for (const d of this.actors) {
+      if (d.side !== 'def' || d.down || !this.isRushing(d) || this.engagersOf(d) > 0) continue;
+      const dd = dist(d.pos, qb.pos);
+      const bz = this.blitzers.get(d.id);
+      if (bz) bz.facts.atRelease = dd;
+      if (dd <= BLITZ.hurryRadius && (!hurrier || dd < dist(hurrier.pos, qb.pos))) hurrier = d;
+    }
+    if (hurrier) {
+      this.pressure = Math.max(this.pressure, BLITZ.hurryPressure);
+      this.emit('hurry', hurrier.id);
+    }
     const tgtPos = target ? target.pos : add(qb.pos, fromHeading(input.gazeYaw, 8 + this.charge * 40));
     const sol = computeThrow({
       from: qb.pos,
@@ -910,7 +982,10 @@ export class PlaySim {
         const role = this.blockRoles.get(a.id);
         const chipping = role?.role === 'chip' && !this.chipDone.has(a.id);
         if (chipping && this.t > BLOCKING.protection.chipMax && !this.isEngaged(a)) this.chipDone.add(a.id);
-        const checkRelease = a.route.type === 'check' && !this.isEngaged(a) &&
+        // Check-release: a back with a blitzer to pick up stays in while that man is still coming.
+        const man = role?.role === 'passSet' && role.target !== null ? this.actors[role.target] : null;
+        const manComing = !!man && !man.down && this.isRushing(man) && man.pos.y > this.get('QB').pos.y - 1;
+        const checkRelease = a.route.type === 'check' && !this.isEngaged(a) && !manComing &&
           (role?.role === 'chip' ? this.chipDone.has(a.id) : this.t > 1.5);
         if (checkRelease) {
           a.route = buildRoute({ route: 'flat' }, a.pos, this.ballX);
@@ -1073,6 +1148,11 @@ export class PlaySim {
     const quality = blockQuality(b.player.ratings, d.player.ratings, mode);
     const holdT = holdTime(quality, { mode, passRush: this.diff.passRush * (mode === 'pass' ? this.diff.pocketPressure : 1), rng: this.blockRng });
     this.engagements.push({ blocker: b.id, defender: d.id, t: 0, mode, quality, holdT, progress: 0 });
+    if (mode !== 'run' && this.blitzers.has(d.id)) {
+      // Blitz pickup: both lose most of their momentum, so a fast blitzer can't slide past the block.
+      d.vel = scale(d.vel, 0.35);
+      b.vel = scale(b.vel, 0.35);
+    }
   }
 
   private passRushing(): boolean {
@@ -1142,6 +1222,12 @@ export class PlaySim {
    * around the tackle and come at him from the side and from behind.
    */
   private rushGoal(d: Actor, qb: Actor): Vec2 {
+    const bz = this.blitzers.get(d.id);
+    if (bz && !this.scrambling) {
+      if (this.t < bz.delay) return d.pos; // disguise: hold the alignment until the delay
+      while (bz.idx < bz.points.length - 1 && (dist(d.pos, bz.points[bz.idx]) < BLITZ.waypointRadius || bz.points[bz.idx].y > d.pos.y + 0.5)) bz.idx++;
+      return bz.idx < bz.points.length - 1 ? bz.points[bz.idx] : qb.pos;
+    }
     const startX = d.history.length ? d.history[0].x : d.pos.x;
     const side = Math.sign(startX - this.ballX);
     if (Math.abs(startX - this.ballX) < POCKET.edgeStartWidth || this.scrambling) return qb.pos;
@@ -1433,7 +1519,7 @@ export class PlaySim {
       }
       desired.set(d.id, dv);
       const front = add(d.pos, scale(norm(sub(rushing ? qb.pos : carrier.pos, d.pos)), 0.85));
-      desired.set(b.id, scale(sub(front, b.pos), 8));
+      desired.set(b.id, add(scale(sub(front, b.pos), 8), d.vel));
     }
     this.engagements = keep;
   }
@@ -1656,6 +1742,7 @@ export class PlaySim {
         d.vel = c.vel;
         const sack = c.slot === 'QB' && c.pos.y < this.los && !this.passThrown && !this.handedOff;
         this.contact = { carrier: c.id, tackler: d.id, whistleAt: this.t + out.contactTime, sack };
+        if (sack) { const bz = this.blitzers.get(d.id); if (bz) bz.facts.sacked = true; }
         if (rollFoul('facemask', this.penaltyBias, this.penRng)) this.addFoul('facemask', c.pos);
         return;
       }

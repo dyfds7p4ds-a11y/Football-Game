@@ -1,0 +1,52 @@
+{
+  "_doc": "Blitz paths and outcomes (play/blitz.ts). Per defense call: which non-linemen blitz, along which path, after which delay (s). Paths: edge (wide arc around the tackle), aGap / bGap (through the line next to the center / guard), delayed (wait, then the A gap). Who can pick a blitzer up: blocking.json protection.olReach / backReach. hurryRadius: an unblocked rusher this close to the QB at the release hurries the throw. recognize: chance per path that the protection identifies the blitzer at the snap (scaled by the line's awareness, recognizeAwareness = weight); an unidentified blitzer comes free.",
+  "calls": {
+    "firezone": {
+      "NB": {
+        "path": "edge",
+        "delay": 0.1
+      }
+    },
+    "cover1blitz": {
+      "LB1": {
+        "path": "aGap",
+        "delay": 0.0
+      }
+    },
+    "cover0": {
+      "LB1": {
+        "path": "bGap",
+        "delay": 0.0
+      },
+      "FS": {
+        "path": "delayed",
+        "delay": 0.55
+      }
+    }
+  },
+  "paths": {
+    "edge": {
+      "width": 5.2,
+      "depth": 0.6
+    },
+    "aGap": {
+      "x": 0.65
+    },
+    "bGap": {
+      "x": 1.9
+    },
+    "delayed": {
+      "x": 0.65
+    }
+  },
+  "hurryRadius": 2.2,
+  "hurryPressure": 0.85,
+  "waypointRadius": 1.0,
+  "recognize": {
+    "edge": 0.75,
+    "aGap": 0.6,
+    "bGap": 0.65,
+    "delayed": 0.4
+  },
+  "recognizeAwareness": 0.6
+}

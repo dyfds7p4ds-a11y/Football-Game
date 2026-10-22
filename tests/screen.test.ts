@@ -23,7 +23,8 @@ describe('screen plays', () => {
   const tally = (throwAt: number) => {
     let comp = 0;
     let int = 0;
-    for (let s = 0; s < 40; s++) {
+    // 80 snaps: picks are rare events, 40 left the late-vs-on-time comparison at the noise level.
+    for (let s = 0; s < 80; s++) {
       const r = runPlay('rb_screen', ['cover3', 'cover2', 'cover1', 'firezone'][s % 4], s, { throwAt, target: 'RB', dropFor: 0.6 });
       if (r.result!.completion) comp++;
       if (r.result!.outcome === 'interception') int++;

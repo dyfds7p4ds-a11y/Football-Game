@@ -102,36 +102,62 @@ const near = (a: Unit, b: Unit) => Math.hypot(a.x - b.x, a.y - b.y);
 
 /**
  * Pass protection. Rushers are taken inside-out by the nearest free lineman
- * (pass set), then by the backs who stay in. Free linemen double the
+ * within `olReach` (pass set). A blitzer the protection recognized is picked
+ * up by a back on his side, else by sliding the line toward him (the spare
+ * lineman starts the slide), else by a back crossing the formation. A
+ * blitzer the protection did not see comes free. Free linemen double the
  * nearest rusher close to the QB. A back on a `check` route with no one to
  * pick up chips the nearest edge rusher on his side, then releases.
  */
-export function assignProtection(blockers: Unit[], rushers: Unit[], qb: { x: number; y: number }, ballX: number): BlockAssignment[] {
+export function assignProtection(
+  blockers: Unit[], rushers: Unit[], qb: { x: number; y: number }, ballX: number,
+  /** Rushers the protection has identified (blitzers it did not see stay free). Default: all. */
+  recognized: (r: Unit) => boolean = () => true,
+): BlockAssignment[] {
   const p = BLOCKING.protection;
   const out: BlockAssignment[] = [];
   const free = new Set(blockers.map((b) => b.id));
   const byId = new Map(blockers.map((b) => [b.id, b]));
   const order = [...rushers].sort((a, b) => Math.abs(a.x - ballX) - Math.abs(b.x - ballX));
   const taken = new Set<number>();
-  const pick = (r: Unit, kinds: Unit['kind'][]) => {
+  const assign = (b: Unit, r: Unit) => {
+    out.push({ blocker: b.id, role: 'passSet', target: r.id });
+    free.delete(b.id);
+    taken.add(r.id);
+  };
+  const pick = (r: Unit, kinds: Unit['kind'][], reach?: number) => {
     let best: Unit | null = null;
     for (const id of free) {
       const b = byId.get(id)!;
       if (!kinds.includes(b.kind)) continue;
+      // A lineman can only slide so far; wide blitzers belong to the backs.
+      if (Math.abs(b.x - r.x) > (reach ?? (b.kind === 'ol' ? p.olReach : p.backReach))) continue;
       if (!best || near(b, r) < near(best, r)) best = b;
     }
     return best;
   };
-  // Linemen first, then backs who are pure blockers, then check-release backs.
-  for (const kinds of [['ol'], ['block'], ['check']] as Unit['kind'][][]) {
-    for (const r of order) {
-      if (taken.has(r.id)) continue;
-      const b = pick(r, kinds);
-      if (!b) continue;
-      out.push({ blocker: b.id, role: 'passSet', target: r.id });
-      free.delete(b.id);
-      taken.add(r.id);
+  // 1. Linemen take the rushers in front of them, inside-out.
+  for (const r of order) {
+    const b = pick(r, ['ol']);
+    if (b) assign(b, r);
+  }
+  // 2. Rushers nobody in front can reach: a back on that side, then a slide of the line, then any back.
+  for (const r of order) {
+    if (taken.has(r.id) || !recognized(r)) continue;
+    const side = Math.sign(r.x - ballX) || 1;
+    const sameSide = pick(r, ['block', 'check'], p.backReach * 0.5);
+    if (sameSide && Math.sign(sameSide.x - ballX) !== -side) {
+      assign(sameSide, r);
+      continue;
     }
+    const spare = [...free].map((id) => byId.get(id)!).find((b) => b.kind === 'ol');
+    if (spare && slide(out, byId, rushers, r, spare, side)) {
+      free.delete(spare.id);
+      taken.add(r.id);
+      continue;
+    }
+    const back = pick(r, ['block', 'check']);
+    if (back) assign(back, r);
   }
   for (const id of free) {
     const b = byId.get(id)!;
@@ -149,6 +175,28 @@ export function assignProtection(blockers: Unit[], rushers: Unit[], qb: { x: num
     out.push({ blocker: id, role: r ? 'double' : 'passSet', target: r?.id ?? null });
   }
   return out;
+}
+
+/**
+ * Slide protection toward `blitzer`: the linemen from the spare man out to
+ * the edge each take the next rusher toward the blitz side, the outside man
+ * takes the blitzer. Returns false when the spare man is on the wrong side.
+ */
+function slide(out: BlockAssignment[], byId: Map<number, Unit>, rushers: Unit[], blitzer: Unit, spare: Unit, side: number): boolean {
+  const rById = new Map(rushers.map((r) => [r.id, r]));
+  const chain = out
+    .filter((a) => byId.get(a.blocker)?.kind === 'ol' && a.target !== null)
+    .filter((a) => (byId.get(a.blocker)!.x - spare.x) * side > 0)
+    .sort((a, b) => (byId.get(a.blocker)!.x - byId.get(b.blocker)!.x) * side);
+  if (!chain.length) {
+    out.push({ blocker: spare.id, role: 'passSet', target: blitzer.id });
+    return true;
+  }
+  // Spare takes the first man's rusher, each lineman takes the next one's, the last takes the blitzer.
+  const targets = chain.map((a) => a.target!);
+  out.push({ blocker: spare.id, role: 'passSet', target: targets[0] });
+  chain.forEach((a, i) => (a.target = i + 1 < targets.length ? targets[i + 1] : blitzer.id));
+  return rById.has(blitzer.id);
 }
 
 /** Scheme of a run design (older data without `scheme` is derived from style and aim). */

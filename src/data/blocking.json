@@ -38,7 +38,9 @@
     "chipRange": 8.0,
     "chipEdgeWidth": 3.0,
     "chipSlow": 0.45,
-    "chipMax": 1.3
+    "chipMax": 1.3,
+    "olReach": 3.6,
+    "backReach": 16
   },
   "run": {
     "gapWidth": 2.4,
