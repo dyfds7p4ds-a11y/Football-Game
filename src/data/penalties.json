@@ -1,0 +1,20 @@
+{
+  "types": {
+    "falseStart": { "label": "False Start", "side": "off", "yards": 5, "dead": true, "chance": 0.012 },
+    "offside": { "label": "Offside", "side": "def", "yards": 5, "chance": 0.012 },
+    "holdingOffense": { "label": "Holding", "side": "off", "yards": 10, "chance": 0.06 },
+    "holdingDefense": { "label": "Defensive Holding", "side": "def", "yards": 5, "autoFirst": true, "chance": 0.05 },
+    "passInterference": { "label": "Pass Interference", "side": "def", "yards": 0, "spotFoul": true, "autoFirst": true, "chance": 0.08 },
+    "roughingPasser": { "label": "Roughing the Passer", "side": "def", "yards": 15, "autoFirst": true, "chance": 0.12 },
+    "facemask": { "label": "Face Mask", "side": "def", "yards": 15, "autoFirst": true, "chance": 0.012 }
+  },
+  "flag": {
+    "throwDelay": 0.2,
+    "flightTime": 0.8,
+    "peakHeight": 4.5,
+    "calloutDelay": 0.3
+  },
+  "lateHitWindow": 0.6,
+  "holdingContactRange": 1.0,
+  "dpiReach": 1.4
+}

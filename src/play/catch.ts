@@ -18,6 +18,8 @@ export interface CatchCandidate {
   catching: number;
   /** coverage rating 0..100 (defenders) */
   coverage: number;
+  /** Defender was in phase with the targeted receiver when the ball arrived. */
+  inPhase?: boolean;
 }
 
 export interface CatchInput {
@@ -30,6 +32,13 @@ export interface CatchInput {
   defense: CatchCandidate[];
   /** Difficulty multiplier on defender ball skills. */
   ballSkills: number;
+  /** Extra breakup / interception chance for an in-phase defender. */
+  inPhaseBreakup?: number;
+  inPhaseInt?: number;
+  /** Timing multiplier on the catch chance (screens thrown early/late). */
+  catchFactor?: number;
+  /** Extra interception chance (screens thrown late). */
+  intBonus?: number;
   rng: Rng;
 }
 
@@ -66,16 +75,17 @@ export function resolveCatch(inp: CatchInput): CatchOutcome {
   // Defender gets a hand on the ball first?
   if (def && defIn) {
     const leverage = off ? clamp((off.d - def.d) * 0.25, -0.3, 0.4) : 0.4;
-    const p = clamp((0.3 + 0.35 * (1 - def.d / CATCH.reach) + leverage) * (def.c.coverage / 85) * inp.ballSkills, 0.03, 0.92);
+    const phase = def.c.inPhase ? 1 : 0;
+    const p = clamp((0.3 + 0.35 * (1 - def.d / CATCH.reach) + leverage + phase * (inp.inPhaseBreakup ?? 0)) * (def.c.coverage / 85) * inp.ballSkills, 0.03, 0.92);
     if (inp.rng.chance(p)) {
-      const pInt = clamp(0.3 * (def.c.catching / 70) * inp.ballSkills + (off && offIn ? 0 : 0.2), 0.05, 0.75);
+      const pInt = clamp(0.3 * (def.c.catching / 70) * inp.ballSkills + (off && offIn ? 0 : 0.2) + phase * (inp.inPhaseInt ?? 0) + (inp.intBonus ?? 0), 0.05, 0.75);
       if (inp.rng.chance(pInt)) return { kind: 'interception', id: def.c.id, probability: p * pInt };
       return { kind: 'deflection', id: def.c.id, probability: p };
     }
   }
 
   if (off && offIn) {
-    let p = catchProbability(off.c.catching, off.d, inp.quality, inp.speed);
+    let p = catchProbability(off.c.catching, off.d, inp.quality, inp.speed) * (inp.catchFactor ?? 1);
     if (def && def.d <= CATCH.reach + CATCH.contest) p *= 0.8; // contested catch
     if (inp.rng.chance(p)) return { kind: 'catch', id: off.c.id, probability: p };
     return { kind: 'drop', id: off.c.id, probability: p };

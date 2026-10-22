@@ -130,3 +130,41 @@ button:disabled { opacity: 0.45; }
 @media (max-height: 600px) {
   #actions { transform: scale(0.82); transform-origin: bottom right; }
 }
+
+/* ---------- Phase 2 HUD */
+#btn-secondary { right: 136px; bottom: 150px; width: 84px; height: 84px; font-size: 12px; background: #e9c46a; }
+#crowd { position: fixed; top: calc(52px + var(--safe-t)); right: calc(14px + var(--safe-r)); z-index: 4; pointer-events: none;
+  display: flex; align-items: center; gap: 6px; font-family: var(--font); font-size: 8px; text-shadow: 1px 1px 0 #000; }
+#crowd .bar { width: 90px; height: 10px; border: 2px solid var(--ink); background: #2a2f38; border-radius: 3px; overflow: hidden; }
+#crowd .fill { height: 100%; width: 50%; background: #8ecae6; transition: width 0.4s ease; }
+.cue { position: fixed; z-index: 2; pointer-events: none; opacity: 0; transition: opacity 0.15s linear; }
+.cue.left { left: 0; top: 0; bottom: 0; width: 22vw; background: radial-gradient(ellipse at 0% 50%, rgba(230, 57, 70, 0.55), transparent 70%); }
+.cue.right { right: 0; top: 0; bottom: 0; width: 22vw; background: radial-gradient(ellipse at 100% 50%, rgba(230, 57, 70, 0.55), transparent 70%); }
+.cue.back { left: 0; right: 0; bottom: 0; height: 22vh; background: radial-gradient(ellipse at 50% 100%, rgba(230, 57, 70, 0.6), transparent 70%); }
+#edges { position: fixed; inset: 0; pointer-events: none; z-index: 3; }
+#edges .edge { position: fixed; transform: translate(-50%, -50%); font-family: var(--font); font-size: 11px; color: #111; padding: 6px 8px;
+  border: 2px solid #111; border-radius: 14px; box-shadow: 0 2px 0 #111; white-space: nowrap; }
+#edges .edge.selected { outline: 3px solid #fff; transform: translate(-50%, -50%) scale(1.15); }
+#callout { position: fixed; top: calc(92px + var(--safe-t)); left: 50%; transform: translateX(-50%); z-index: 7; pointer-events: none;
+  background: #ffd400; color: #111; border: 3px solid #111; border-radius: 6px; padding: 8px 14px; text-align: center; box-shadow: 0 4px 0 #111;
+  font-family: var(--font); font-size: 14px; animation: drop-in 0.25s ease-out; }
+#callout small { display: block; font-family: var(--font-body); font-size: 13px; margin-top: 6px; font-weight: 700; }
+@keyframes drop-in { from { transform: translate(-50%, -20px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
+#kickmeter { position: fixed; right: calc(170px + var(--safe-r)); bottom: calc(24px + var(--safe-b)); z-index: 5; pointer-events: none;
+  background: var(--panel); border: 3px solid var(--ink); border-radius: 8px; padding: 10px; font-family: var(--font); font-size: 10px; }
+#kickmeter .row { display: flex; gap: 14px; align-items: flex-end; margin: 8px 0; }
+#kickmeter .power { position: relative; width: 26px; height: 150px; border: 3px solid var(--ink); background: #2a2f38; border-radius: 4px; overflow: hidden; }
+#kickmeter .power .zone { position: absolute; left: 0; right: 0; background: rgba(82, 183, 136, 0.55); border-top: 2px solid #52b788; border-bottom: 2px solid #52b788; }
+#kickmeter .power .fill { position: absolute; left: 0; right: 0; bottom: 0; opacity: 0.9; }
+#kickmeter .angle { position: relative; width: 110px; height: 110px; border-left: 3px solid var(--paper); border-bottom: 3px solid var(--paper); }
+#kickmeter .angle .azone { position: absolute; inset: 0; }
+#kickmeter .angle .needle { position: absolute; left: 0; bottom: 0; width: 104px; height: 4px; background: #ffd23f; transform-origin: 0% 50%; border-radius: 2px; }
+#kickmeter .sub { font-family: var(--font-body); font-size: 12px; opacity: 0.85; max-width: 200px; }
+#intro { position: fixed; inset: 0; z-index: 30; pointer-events: auto; display: flex; flex-direction: column; justify-content: flex-end; align-items: center;
+  padding-bottom: calc(40px + var(--safe-b)); background: linear-gradient(to bottom, rgba(0,0,0,0.35), transparent 22%, transparent 70%, rgba(0,0,0,0.6)); }
+#intro .cap { font-family: var(--font); color: var(--accent); font-size: 22px; text-shadow: 3px 3px 0 #000; text-align: center; max-width: 90vw; line-height: 1.5; position: relative; z-index: 1; }
+#intro .sub { font-size: 15px; color: var(--paper); margin-top: 10px; text-align: center; text-shadow: 1px 1px 0 #000; max-width: 80vw; position: relative; z-index: 1; }
+#intro .skip { position: fixed; top: calc(14px + var(--safe-t)); right: calc(16px + var(--safe-r)); font-family: var(--font); font-size: 11px;
+  background: rgba(0,0,0,0.5); padding: 8px 12px; border-radius: 6px; z-index: 1; }
+#intro .bars { position: fixed; left: 0; right: 0; height: 7vh; background: #000; }
+#intro .bars.top { top: 0; } #intro .bars.bottom { bottom: 0; }

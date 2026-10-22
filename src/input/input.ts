@@ -14,7 +14,14 @@ export interface InputFrame {
   /** Big action button (Snap / Throw-hold / Juke). */
   primaryHeld: boolean;
   primaryPressed: boolean;
+  /** Receiver button pressed this frame (edge). */
   slotPressed: EligibleSlot | null;
+  /** Receiver button currently held (Madden-style: hold = charge the throw to him). */
+  slotHeld: EligibleSlot | null;
+  /** Secondary action: slide (QB) / dash (returner). */
+  secondaryPressed: boolean;
+  /** Any button, key or tap this frame (skips cutscenes). */
+  anyPressed: boolean;
   pausePressed: boolean;
   timeoutPressed: boolean;
 }
@@ -22,8 +29,10 @@ export interface InputFrame {
 const KEY_SLOTS: Record<string, EligibleSlot> = {
   Digit1: 'WR1', Digit2: 'WR2', Digit3: 'WR3', Digit4: 'RB', KeyR: 'RB', Digit5: 'TE', KeyT: 'TE',
 };
+const SECONDARY_KEYS = new Set(['KeyX', 'ShiftLeft', 'ShiftRight']);
 // Standard gamepad mapping.
 const PAD_SLOTS: [number, EligibleSlot][] = [[2, 'WR1'], [3, 'WR2'], [1, 'WR3'], [4, 'RB'], [5, 'TE']];
+const PAD_SECONDARY = [6, 10];
 
 export class InputManager {
   private touchMove: Vec2 = { x: 0, y: 0 };
@@ -33,6 +42,12 @@ export class InputManager {
   private lookPitch = 0;
   private primaryWasHeld = false;
   private pendingSlot: EligibleSlot | null = null;
+  /** Receiver buttons held per device (touch / keyboard). */
+  private touchSlot: EligibleSlot | null = null;
+  private keySlots: EligibleSlot[] = [];
+  private padSlot: EligibleSlot | null = null;
+  private pendingSecondary = false;
+  private pendingAny = false;
   /** Latched so a tap shorter than one frame is never lost. */
   private pendingPrimary = false;
   private pendingPause = false;
@@ -47,15 +62,29 @@ export class InputManager {
       if (e.repeat) return;
       this.lastDevice = 'keyboard';
       this.keys.add(e.code);
+      this.pendingAny = true;
       const slot = KEY_SLOTS[e.code];
-      if (slot) this.pendingSlot = slot;
+      if (slot) {
+        this.pendingSlot = slot;
+        this.keySlots = [...this.keySlots.filter((x) => x !== slot), slot];
+      }
+      if (SECONDARY_KEYS.has(e.code)) this.pendingSecondary = true;
       if (e.code === 'Escape' || e.code === 'KeyP') this.pendingPause = true;
       if (e.code === 'KeyO') this.pendingTimeout = true;
       if (e.code === 'Space' || e.code === 'Enter') this.pendingPrimary = true;
       if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
     });
-    window.addEventListener('keyup', (e) => this.keys.delete(e.code));
-    window.addEventListener('blur', () => this.keys.clear());
+    window.addEventListener('keyup', (e) => {
+      this.keys.delete(e.code);
+      const slot = KEY_SLOTS[e.code];
+      if (slot) this.keySlots = this.keySlots.filter((x) => x !== slot);
+    });
+    window.addEventListener('blur', () => {
+      this.keys.clear();
+      this.keySlots = [];
+      this.touchSlot = null;
+    });
+    window.addEventListener('pointerdown', () => (this.pendingAny = true), { capture: true });
   }
 
   // --- touch UI hooks
@@ -74,6 +103,19 @@ export class InputManager {
   }
   pressSlot(slot: EligibleSlot) {
     this.pendingSlot = slot;
+  }
+  /** Touch receiver button held / released. */
+  setTouchSlot(slot: EligibleSlot, held: boolean) {
+    this.lastDevice = 'touch';
+    if (held) {
+      this.touchSlot = slot;
+      this.pendingSlot = slot;
+    } else if (this.touchSlot === slot) {
+      this.touchSlot = null;
+    }
+  }
+  pressSecondary() {
+    this.pendingSecondary = true;
   }
   pressPause() {
     this.pendingPause = true;
@@ -128,6 +170,9 @@ export class InputManager {
         this.lastDevice = 'gamepad';
       }
       for (const [i, slot] of PAD_SLOTS) if (edge(i)) this.pendingSlot = slot;
+      this.padSlot = PAD_SLOTS.find(([i]) => btn(i))?.[1] ?? null;
+      if (PAD_SECONDARY.some(edge)) this.pendingSecondary = true;
+      if (pad.buttons.some((_, i) => edge(i))) this.pendingAny = true;
       if (edge(9)) this.pendingPause = true;
       if (edge(8)) this.pendingTimeout = true;
       this.padPrev = pad.buttons.map((b) => b.pressed);
@@ -141,6 +186,9 @@ export class InputManager {
       primaryHeld: primary,
       primaryPressed: this.pendingPrimary || (primary && !this.primaryWasHeld),
       slotPressed: this.pendingSlot,
+      slotHeld: this.touchSlot ?? this.keySlots[this.keySlots.length - 1] ?? this.padSlot,
+      secondaryPressed: this.pendingSecondary,
+      anyPressed: this.pendingAny,
       pausePressed: this.pendingPause,
       timeoutPressed: this.pendingTimeout,
     };
@@ -148,6 +196,8 @@ export class InputManager {
     this.lookYaw = 0;
     this.lookPitch = 0;
     this.pendingSlot = null;
+    this.pendingSecondary = false;
+    this.pendingAny = false;
     this.pendingPrimary = false;
     this.pendingPause = false;
     this.pendingTimeout = false;

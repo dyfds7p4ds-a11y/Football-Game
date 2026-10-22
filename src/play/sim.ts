@@ -18,10 +18,19 @@ import { ZONES, type DefAssignment, type DefenseCall } from './defenseCalls';
 import { computeThrow, ballHeightAt, THROW, throwWindow, type ThrowWindow } from './throw';
 import { resolveCatch, type CatchCandidate } from './catch';
 import { FIELD } from './field';
+import { COVERAGE, CoverageReader, carrySpot, inPhaseSpot, overTop, type Helper, type ReadTarget } from './coverage';
+import { inPhase, throwingWindow } from './windows';
+import { TACKLE, resolveTackle, type ContactKind } from './tackle';
+import { SCREEN, screenTiming, type ScreenTiming } from './screen';
+import { nearestOfficial, setupOfficials, updateOfficials, type Official } from './officials';
+import { PENALTIES, makeFoul, rollFoul, type Flag, type Foul, type FoulType, type PenaltyBias } from './penalties';
+import pocketJson from '../data/pocket.json';
+
+export const POCKET = pocketJson.pocket;
+export const SCRAMBLE = pocketJson.scramble;
 
 export const SIM_DT = 1 / 60;
 const HISTORY = 90;
-const TACKLE_RANGE = 1.2;
 const MAX_PLAY_TIME = 25;
 
 export type Side = 'off' | 'def';
@@ -48,6 +57,28 @@ export interface Actor {
   tackleCooldown: number;
   down: boolean;
   history: Vec2[];
+  /** Contact animation the renderer should play (tackles, broken tackles, slides). */
+  anim: ContactAnim | null;
+}
+
+export interface ContactAnim {
+  kind: ContactKind;
+  role: 'carrier' | 'tackler';
+  /** Sim time the contact started. */
+  t: number;
+  duration: number;
+  /** Carrier went down (vs. broke the tackle). */
+  down: boolean;
+  /** Heading the contact comes from / falls toward. */
+  heading: number;
+}
+
+/** A successful tackle in progress: the whistle blows when the carrier hits the turf. */
+interface Contact {
+  carrier: number;
+  tackler: number;
+  whistleAt: number;
+  sack: boolean;
 }
 
 export interface SimInput {
@@ -61,11 +92,21 @@ export interface SimInput {
   handoff: boolean;
   /** Edge-triggered: juke move for the ball carrier. */
   juke: boolean;
+  /** Edge-triggered: QB slides (gives himself up) while scrambling. */
+  slide?: boolean;
 }
 
 export const idleInput = (): SimInput => ({
-  move: v2(), gazeYaw: 0, throwHeld: false, target: null, handoff: false, juke: false,
+  move: v2(), gazeYaw: 0, throwHeld: false, target: null, handoff: false, juke: false, slide: false,
 });
+
+/** Where the most dangerous rusher is coming from, for the pocket cue. */
+export interface PocketCue {
+  /** Field heading from the QB to the rusher (0 = downfield, + = right). */
+  heading: number;
+  /** 0..1, how close he is to getting home. */
+  level: number;
+}
 
 interface Flight {
   from: Vec2;
@@ -79,6 +120,8 @@ interface Flight {
   quality: number;
   speed: number;
   tipChecked: Set<number>;
+  /** Screen throws: how well the throw hit the timing window. */
+  screen?: ScreenTiming;
 }
 
 export interface Ball {
@@ -96,7 +139,7 @@ export interface Ball {
 export type PlayEventType =
   | 'snap' | 'handoff' | 'pitch' | 'throw' | 'catch' | 'interception' | 'deflection' | 'drop'
   | 'incomplete' | 'tackle' | 'sack' | 'touchdown' | 'outOfBounds' | 'brokenTackle' | 'juke' | 'safety'
-  | 'scramble' | 'shed';
+  | 'scramble' | 'shed' | 'slide' | 'flag';
 
 export interface PlayEvent {
   t: number;
@@ -104,7 +147,7 @@ export interface PlayEvent {
   actor?: number;
 }
 
-export type PlayOutcome = 'tackle' | 'sack' | 'incomplete' | 'outOfBounds' | 'touchdown' | 'interception' | 'safety';
+export type PlayOutcome = 'tackle' | 'sack' | 'incomplete' | 'outOfBounds' | 'touchdown' | 'interception' | 'safety' | 'noPlay';
 
 export interface PlayResult {
   outcome: PlayOutcome;
@@ -120,6 +163,8 @@ export interface PlayResult {
   turnover: boolean;
   defenseCall: string;
   description: string;
+  /** Fouls flagged during the play; enforced after the whistle (game/penalties.ts). */
+  fouls: Foul[];
 }
 
 export interface SimOptions {
@@ -132,12 +177,16 @@ export interface SimOptions {
   los: number;
   difficulty: DifficultyConfig;
   seed: number;
+  /** Penalty chance scale per side (crowd noise etc.); 0 turns fouls off. Default 1. */
+  penaltyBias?: PenaltyBias;
 }
 
 interface Engagement {
   blocker: number;
   defender: number;
   t: number;
+  /** The line doesn't hold perfectly: some reps are lost early, at this engagement time. */
+  loseAt: number;
 }
 
 const SPEED = (r: number) => 4.8 + 5.0 * (r / 100);
@@ -155,8 +204,14 @@ export class PlaySim {
   /** Which actor the user currently controls (QB, then the ball carrier). */
   controlledId: number;
   pressure = 0;
+  pocketCue: PocketCue | null = null;
+  /** QB is running with the ball (out of the pocket or past the LOS). */
+  scrambling = false;
   charge = 0;
   charging = false;
+  readonly officials: Official[];
+  readonly fouls: Foul[] = [];
+  readonly flags: Flag[] = [];
 
   private rng: Rng;
   private steps = 0;
@@ -176,6 +231,15 @@ export class PlaySim {
   private carrierPath: Vec2[] = [];
   private carrierIdx = 0;
   private bySlot = new Map<string, Actor>();
+  readonly coverage: CoverageReader;
+  /** Underneath defender id -> vertical receiver id he is carrying. */
+  private carry = new Map<number, number>();
+  private contact: Contact | null = null;
+  /** When the defense has read the screen (Infinity until then). */
+  private screenReadAt = Infinity;
+  /** Separate stream so turning penalties on or off never changes the football. */
+  private penRng: Rng;
+  private penaltyBias: PenaltyBias;
 
   constructor(opts: SimOptions) {
     this.play = opts.play;
@@ -186,6 +250,10 @@ export class PlaySim {
     this.rng = new Rng(opts.seed);
     this.setupOffense(opts.offenseTeam);
     this.setupDefense(opts.defenseTeam);
+    this.coverage = new CoverageReader(this.diff.coverageRead, this.rng.fork());
+    this.penRng = this.rng.fork();
+    this.penaltyBias = opts.penaltyBias ?? { off: 1, def: 1 };
+    this.officials = setupOfficials(this.los, this.ballX);
     const qb = this.get('QB');
     this.controlledId = qb.id;
     const center = this.get('C');
@@ -228,6 +296,7 @@ export class PlaySim {
       tackleCooldown: 0,
       down: false,
       history: [],
+      anim: null,
     };
     this.actors.push(a);
     this.bySlot.set(`${side}:${slot}`, a);
@@ -378,6 +447,13 @@ export class PlaySim {
     return { window: win, charge: this.charge, charging: this.charging };
   }
 
+  /** The RB is next to the QB and the QB still has the ball behind the line: a handoff is possible. */
+  canHandoff(): boolean {
+    const qb = this.get('QB');
+    return !this.result && this.ball.state === 'held' && this.ball.holder === qb.id && !this.pastLos(qb) && !this.passThrown &&
+      dist(qb.pos, this.get('RB').pos) < 1.4;
+  }
+
   canThrow(): boolean {
     const qb = this.get('QB');
     return !this.result && this.ball.state === 'held' && this.ball.holder === qb.id && qb.pos.y <= this.los + 0.2;
@@ -393,6 +469,8 @@ export class PlaySim {
       this.stepAfterWhistle(dt);
       return;
     }
+    if (this.steps === 0) this.snapFouls();
+    if (this.result) return;
     this.t += dt;
     this.steps++;
     if (!input.throwHeld) this.throwArmed = true;
@@ -401,6 +479,7 @@ export class PlaySim {
     const desired = new Map<number, Vec2>();
     this.controlUser(input, desired);
     this.offenseAI(desired);
+    this.updateReads();
     this.defenseAI(desired);
     this.updateEngagements(dt, desired);
     this.integrate(dt, desired);
@@ -409,11 +488,14 @@ export class PlaySim {
     if (!this.result) this.handleThrowing(input);
     if (!this.result) this.checkTackles();
     if (!this.result) this.checkBoundaries();
+    if (!this.result && this.contact && this.t >= this.contact.whistleAt) this.whistleContact();
     if (!this.result && this.t > MAX_PLAY_TIME) {
       const c = this.carrier;
       this.finish(c ? 'tackle' : 'incomplete', c ?? this.get('QB'));
     }
     this.updatePressure();
+    if (!this.result) this.checkLateHits();
+    this.updateOfficials(dt);
     for (const a of this.actors) {
       a.history.push({ ...a.pos });
       if (a.history.length > HISTORY) a.history.shift();
@@ -422,7 +504,56 @@ export class PlaySim {
     }
   }
 
+  private updateOfficials(dt: number) {
+    const c = this.carrier;
+    updateOfficials(this.officials, {
+      los: this.los, ballX: this.ballX, ball: this.ball.pos, carrier: c && c.side === 'off' && c.slot !== 'QB' ? c.pos : c && this.scrambling ? c.pos : null,
+      players: this.actors.map((a) => a.pos), dead: !!this.result,
+    }, dt);
+  }
+
+  // ---------------------------------------------------------------- penalties
+
+  private addFoul(type: FoulType, spot: Vec2) {
+    if (this.fouls.some((f) => f.type === type)) return;
+    const foul = makeFoul(type, spot, this.t);
+    this.fouls.push(foul);
+    const official = nearestOfficial(this.officials, spot);
+    const o = this.officials[official];
+    this.flags.push({ foul, official, from: { ...o.pos }, to: { ...spot }, t0: this.t + PENALTIES.flag.throwDelay, T: PENALTIES.flag.flightTime });
+    this.emit('flag');
+  }
+
+  /** Pre-snap fouls: false start kills the play, offside gives a free play. */
+  private snapFouls() {
+    if (rollFoul('falseStart', this.penaltyBias, this.penRng)) {
+      const ol = this.get(this.penRng.pick(OL_SLOTS));
+      this.addFoul('falseStart', ol.pos);
+      this.result = this.makeResult('noPlay', v2(this.ballX, this.los), null);
+      return;
+    }
+    if (rollFoul('offside', this.penaltyBias, this.penRng)) {
+      const d = this.getDef(this.penRng.pick(['DE1', 'DT1', 'DT2', 'DE2'] as const));
+      this.addFoul('offside', d.pos);
+    }
+  }
+
+  /** Roughing the passer: a rusher still arriving at the QB just after the throw. */
+  private checkLateHits() {
+    if (!this.passThrown || this.t - this.throwAt > PENALTIES.lateHitWindow) return;
+    const qb = this.get('QB');
+    for (const d of this.actors) {
+      if (d.side !== 'def' || d.down || !this.isRushing(d) || dist(d.pos, qb.pos) > 0.9 || len(d.vel) < 3) continue;
+      if (d.tackleCooldown > 0) continue;
+      d.tackleCooldown = 1;
+      if (rollFoul('roughingPasser', this.penaltyBias, this.penRng)) this.addFoul('roughingPasser', qb.pos);
+    }
+  }
+
   private stepAfterWhistle(dt: number) {
+    // Time keeps running for the presentation only (flags landing, players getting up).
+    this.t += dt;
+    this.updateOfficials(dt);
     for (const a of this.actors) {
       a.vel = scale(a.vel, Math.max(0, 1 - dt * 3));
       a.pos = add(a.pos, scale(a.vel, dt));
@@ -444,6 +575,11 @@ export class PlaySim {
     const controlled = c && c.side === 'off' ? c : this.passThrown || this.handedOff ? null : qb;
     this.controlledId = controlled ? controlled.id : -1;
     if (!controlled) return;
+    if (this.contact) {
+      // Going down: momentum carries the runner, the stick does nothing.
+      desired.set(controlled.id, controlled.vel);
+      return;
+    }
 
     let move = clampLen(input.move, 1);
     if (controlled !== qb && len(move) < 0.15) {
@@ -462,9 +598,18 @@ export class PlaySim {
     desired.set(controlled.id, v);
     if (controlled === qb) {
       qb.facing = input.gazeYaw;
-      if (this.ball.holder === qb.id && this.pastLos(qb) && !this.handedOff && this.runRecognizedAt === Infinity) {
+      const holds = this.ball.holder === qb.id && !this.handedOff && !this.passThrown;
+      if (holds && !this.scrambling && this.t > SCRAMBLE.minTime && len(qb.vel) > SCRAMBLE.speedToScramble && qb.vel.y > -1) {
+        this.scrambling = true; // out of the pocket: the head follows the running path
+      }
+      if (holds && this.pastLos(qb) && this.runRecognizedAt === Infinity) {
+        this.scrambling = true;
         this.runRecognizedAt = this.t;
         this.emit('scramble', qb.id);
+      }
+      if (input.slide && holds && this.pastLos(qb) && !this.result) {
+        this.slide(qb);
+        return;
       }
     }
 
@@ -482,7 +627,16 @@ export class PlaySim {
     }
   }
 
-  private pastLos(a: Actor) {
+  /** QB gives himself up: down at the spot plus a little slide, no hit. */
+  private slide(qb: Actor) {
+    const dur = TACKLE.contactTime.slide;
+    qb.vel = scale(norm(qb.vel), SCRAMBLE.slideGain / dur);
+    qb.anim = { kind: 'slide', role: 'carrier', t: this.t, duration: dur, down: true, heading: Math.atan2(qb.vel.x, qb.vel.y) };
+    this.contact = { carrier: qb.id, tackler: -1, whistleAt: this.t + dur, sack: false };
+    this.emit('slide', qb.id);
+  }
+
+  pastLos(a: Actor) {
     return a.pos.y > this.los + 0.3;
   }
 
@@ -553,6 +707,7 @@ export class PlaySim {
       quality: sol.quality,
       speed: sol.speed,
       tipChecked: new Set(),
+      screen: this.play.screen && target?.slot === this.play.screen.target ? screenTiming(this.t, this.play.screen) : undefined,
     };
     this.passThrown = true;
     this.throwAt = this.t;
@@ -589,8 +744,20 @@ export class PlaySim {
         desired.set(a.id, this.followRoute(a));
         continue;
       }
+      const qbRun = this.runRecognizedAt < Infinity && carrier === qb;
+      const scr = this.play.screen;
+      if (scr && !(carrier && carrier !== qb) && !qbRun) {
+        if ((scr.linemen as string[]).includes(a.slot) && this.t >= scr.release) {
+          desired.set(a.id, this.screenConvoy(a, scr.linemen.indexOf(a.slot as never)));
+          continue;
+        }
+        if (scr.stalk?.includes(a.slot as EligibleSlot)) {
+          desired.set(a.id, this.runBlock(a, this.get(scr.target)));
+          continue;
+        }
+      }
       if (a.position === 'OL') {
-        desired.set(a.id, this.play.run || this.handedOff || (carrier && carrier !== qb) ? this.runBlock(a) : this.passPro(a));
+        desired.set(a.id, this.play.run || this.handedOff || (carrier && carrier !== qb) || qbRun ? this.runBlock(a) : this.passPro(a));
         continue;
       }
       // Eligible receivers.
@@ -609,7 +776,7 @@ export class PlaySim {
         continue;
       }
       const afterCatch = carrier && carrier.side === 'off' && carrier !== qb;
-      if (afterCatch || this.handedOff || this.play.run) {
+      if (afterCatch || this.handedOff || this.play.run || qbRun) {
         desired.set(a.id, this.runBlock(a));
         continue;
       }
@@ -649,24 +816,42 @@ export class PlaySim {
     return scale(d, s / l);
   }
 
+  /** Nearest rusher nobody is blocking (within `range` of the blocker). */
+  private freeRusher(b: Actor, range: number): Actor | null {
+    const qb = this.get('QB');
+    let r: Actor | null = null;
+    for (const d of this.actors) {
+      if (d.side !== 'def' || d.down || !this.isRushing(d)) continue;
+      if (this.engagersOf(d) > 0) continue;
+      if ([...this.passBlock.entries()].some(([bid, rid]) => rid === d.id && bid !== b.id && !this.actors[bid].down)) continue;
+      if (dist(d.pos, b.pos) > range) continue;
+      if (!r || dist(d.pos, qb.pos) < dist(r.pos, qb.pos)) r = d;
+    }
+    return r;
+  }
+
   private passPro(b: Actor): Vec2 {
     const qb = this.get('QB');
-    if (this.isEngaged(b)) return v2(); // engagement code positions engaged blockers
+    const eng = this.isEngaged(b);
+    if (eng) {
+      // The second man in a double team peels off to pick up a free rusher.
+      const free = this.engagersOf(this.actors[eng.defender]) > 1 ? this.freeRusher(b, 4.5) : null;
+      if (!free) return v2(); // engagement code positions engaged blockers
+      this.engagements = this.engagements.filter((e) => e !== eng);
+      this.passBlock.set(b.id, free.id);
+    }
     let rid = this.passBlock.get(b.id);
     let r = rid !== undefined ? this.actors[rid] : null;
-    if (!r || r.down) {
-      // Find an unblocked rusher threatening the QB.
-      r = null;
-      for (const d of this.actors) {
-        if (d.side !== 'def' || d.down || d.assignment?.kind !== 'rush') continue;
-        if (this.engagersOf(d) > 0) continue;
-        if (dist(d.pos, b.pos) > 4) continue;
-        if (!r || dist(d.pos, qb.pos) < dist(r.pos, qb.pos)) r = d;
-      }
+    if (!r || r.down || (this.engagersOf(r) > 0 && !this.isEngaged(b))) {
+      // Find an unblocked rusher threatening the QB (backs scan further).
+      r = this.freeRusher(b, b.position === 'OL' ? 4 : 7);
       if (r) this.passBlock.set(b.id, r.id);
     }
     if (!r) {
-      const home = v2(b.pos.x, Math.max(qb.pos.y + 1.5, this.los - 2.2));
+      // Backs and tight ends set up beside the QB instead of walking through him.
+      const home = b.position === 'OL'
+        ? v2(b.pos.x, Math.max(qb.pos.y + 1.5, this.los - 2.2))
+        : v2(qb.pos.x + (Math.sign(b.pos.x - qb.pos.x) || 1) * POCKET.backBlockerSide, qb.pos.y + 0.6);
       return this.seek(b, home, 0.5);
     }
     const spot = add(r.pos, scale(norm(sub(qb.pos, r.pos)), 0.9));
@@ -674,9 +859,9 @@ export class PlaySim {
     return this.seek(b, spot, 1);
   }
 
-  private runBlock(b: Actor): Vec2 {
+  private runBlock(b: Actor, ref?: Actor): Vec2 {
     if (this.isEngaged(b)) return v2();
-    const carrier = this.carrier ?? this.get('RB');
+    const carrier = ref ?? this.carrier ?? this.get('RB');
     let best: Actor | null = null;
     let bestScore = Infinity;
     for (const d of this.actors) {
@@ -695,6 +880,39 @@ export class PlaySim {
     return this.seek(b, spot, 1);
   }
 
+  /**
+   * Screen linemen: let their man go at the release, then set up a convoy in
+   * front of the catch point and block whoever comes to it.
+   */
+  private screenConvoy(b: Actor, i: number): Vec2 {
+    const scr = this.play.screen!;
+    const eng = this.isEngaged(b);
+    if (eng && this.t < scr.release + 0.15) {
+      this.engagements = this.engagements.filter((e) => e !== eng);
+      this.shedFrom.set(eng.defender, { blocker: b.id, until: this.t + 3 });
+      if (this.screenReadAt === Infinity) {
+        this.screenReadAt = this.t + SCREEN.readDelay * (1 + 1.5 * (1 - this.diff.coverageRead));
+      }
+    }
+    const tgt = this.get(scr.target);
+    // Anchor on where the screen is going to be caught, not on the moving receiver.
+    const pts = tgt.route?.points ?? [];
+    const anchor = pts.length ? pts[pts.length - 1] : tgt.pos;
+    const spot = v2(anchor.x + scr.side * (1.5 + i * SCREEN.convoySpacing), Math.max(anchor.y, this.los - 1) + SCREEN.convoyDepth + i * 0.8);
+    // Block the first defender coming to the screen from downfield or outside.
+    let threat: Actor | null = null;
+    for (const d of this.actors) {
+      if (d.side !== 'def' || d.down || d.pos.y < this.los - 0.5 || this.engagersOf(d) > 0) continue;
+      if (dist(d.pos, b.pos) > 5) continue;
+      if (!threat || dist(d.pos, tgt.pos) < dist(threat.pos, tgt.pos)) threat = d;
+    }
+    if (threat && dist(b.pos, spot) < 4) {
+      this.tryEngage(b, threat);
+      return this.seek(b, add(threat.pos, scale(norm(sub(tgt.pos, threat.pos)), 0.8)), 1);
+    }
+    return this.seek(b, spot, 1);
+  }
+
   private tryEngage(b: Actor, d: Actor) {
     if (b.blockCooldown > 0 || d.down || dist(b.pos, d.pos) > 1.15) return;
     const shed = this.shedFrom.get(d.id);
@@ -702,10 +920,107 @@ export class PlaySim {
     if (this.engagersOf(d) >= 2) return;
     const c = this.carrier;
     if (c === d || (c && c.side === 'off' && dist(c.pos, d.pos) < 1.6)) return;
-    this.engagements.push({ blocker: b.id, defender: d.id, t: 0 });
+    const quick = this.rng.chance(POCKET.quickLossChance * this.diff.pocketPressure);
+    this.engagements.push({ blocker: b.id, defender: d.id, t: 0, loseAt: quick ? this.rng.range(POCKET.quickLossMin, POCKET.quickLossMax) : Infinity });
   }
 
   // ---------------------------------------------------------------- defense AI
+
+  /** Route-concept reads: vertical stems, over-the-top help, carries and the shell roll. */
+  private updateReads() {
+    if (this.play.run || this.passThrown || this.handedOff) return;
+    const lag = this.diff.reactionTime;
+    const receivers: ReadTarget[] = ELIGIBLE.map((s) => {
+      const r = this.get(s);
+      return { id: r.id, pos: this.perceived(r, lag), vel: this.perceivedVel(r, lag), maxSpeed: r.maxSpeed, blocks: !!r.route?.blocks };
+    });
+    const helpers: Helper[] = [];
+    const isHelpZone = (z: string) => z === 'deepM' || z === 'deepL' || z === 'deepR';
+    for (const d of this.actors) {
+      const a = d.assignment;
+      if (d.side === 'def' && !d.down && a?.kind === 'zone' && isHelpZone(a.zone)) {
+        helpers.push({ id: d.id, homeX: this.ballX * 0.5 + ZONES[a.zone].x });
+      }
+    }
+    const helperIds = new Set(helpers.map((x) => x.id));
+    const qb = this.get('QB');
+    const others = this.actors.filter((a) => a.side === 'def' && !a.down && !helperIds.has(a.id));
+    const danger = (id: number) => throwingWindow(qb.pos, this.actors[id], others).margin;
+    this.coverage.update(this.t, this.los, this.ballX, receivers, helpers, danger);
+
+    // Underneath zone defenders carry vertical stems through their zone.
+    this.carry.clear();
+    if (this.t < this.coverage.readAt) return;
+    const taken = new Set<number>();
+    for (const d of this.actors) {
+      const a = d.assignment;
+      if (d.side !== 'def' || d.down || a?.kind !== 'zone' || ZONES[a.zone].deep) continue;
+      const z = ZONES[a.zone];
+      const landX = this.ballX * 0.5 + z.x;
+      const shallowThreat = receivers.some((r) => !r.blocks && !this.coverage.verticals.has(r.id) &&
+        Math.abs(r.pos.x - landX) < z.w && r.pos.y < this.los + 6 && r.pos.y > this.los - 2);
+      if (shallowThreat && (a.zone === 'flatL' || a.zone === 'flatR')) continue;
+      let best: ReadTarget | null = null;
+      for (const r of receivers) {
+        if (!this.coverage.verticals.has(r.id) || taken.has(r.id)) continue;
+        if (Math.abs(r.pos.x - landX) > z.w + 2) continue;
+        const depth = r.pos.y - this.los;
+        const helped = [...this.coverage.help.values()].includes(r.id) || this.deepOverTop(r);
+        if (depth > COVERAGE.carryDepth + (helped ? 0 : 8)) continue;
+        if (!best || dist(r.pos, d.pos) < dist(best.pos, d.pos)) best = r;
+      }
+      if (best) {
+        this.carry.set(d.id, best.id);
+        taken.add(best.id);
+      }
+    }
+  }
+
+  /**
+   * Rush lanes: interior rushers push straight at the QB, edge rushers arc
+   * around the tackle and come at him from the side and from behind.
+   */
+  private rushGoal(d: Actor, qb: Actor): Vec2 {
+    const startX = d.history.length ? d.history[0].x : d.pos.x;
+    const side = Math.sign(startX - this.ballX);
+    if (Math.abs(startX - this.ballX) < POCKET.edgeStartWidth || this.scrambling) return qb.pos;
+    const beside = Math.abs(d.pos.x - qb.pos.x) < POCKET.edgeArcWidth + 0.6;
+    if (d.pos.y <= qb.pos.y + POCKET.edgeArcDepth && beside) return qb.pos; // turned the corner
+    return v2(qb.pos.x + side * POCKET.edgeArcWidth, qb.pos.y - POCKET.edgeArcDepth);
+  }
+
+  /** Has this defender read the screen? Then he attacks the screen target. */
+  private screenRecognized(d: Actor, isDeep: boolean): boolean {
+    const scr = this.play.screen;
+    if (!scr || isDeep) return false;
+    const read = scr.release > 0 ? this.screenReadAt : SCREEN.readDelay * (1 + 1.5 * (1 - this.diff.coverageRead));
+    if (this.t < read + d.reaction) return false;
+    return dist(d.pos, this.get(scr.target).pos) < SCREEN.reactRadius;
+  }
+
+  /** Rushers, plus man defenders whose receiver stayed in to block (green dog). */
+  private isRushing(d: Actor): boolean {
+    const a = d.assignment;
+    if (a?.kind === 'rush') return true;
+    if (a?.kind !== 'man' || this.t <= 1.2) return false;
+    const r = this.get(a.target).route;
+    return !!r?.blocks && !(r.type === 'check' && this.t > 1.5);
+  }
+
+  /** Defender is level with or behind his receiver, so his back is to the QB. */
+  private trailing(d: Actor, r: Actor): boolean {
+    return d.pos.y < r.pos.y + 0.5 && len(r.vel) > 3;
+  }
+
+  /** Is a deep zone defender already sitting over the top of this receiver? */
+  private deepOverTop(r: ReadTarget): boolean {
+    for (const d of this.actors) {
+      const a = d.assignment;
+      if (d.side !== 'def' || d.down || a?.kind !== 'zone' || !ZONES[a.zone].deep) continue;
+      if (Math.abs(d.pos.x - r.pos.x) < 4 && d.pos.y - r.pos.y > COVERAGE.carryHandoffCushion) return true;
+    }
+    return false;
+  }
 
   private defenseAI(desired: Map<number, Vec2>) {
     const qb = this.get('QB');
@@ -714,6 +1029,10 @@ export class PlaySim {
     const runMode = carrier && carrier.side === 'off' && (carrier !== qb || this.runRecognizedAt < Infinity);
     for (const d of this.actors) {
       if (d.side !== 'def' || d.down || desired.has(d.id)) continue;
+      if (this.contact && d.id === this.contact.tackler) {
+        desired.set(d.id, this.actors[this.contact.carrier].vel); // ride the carrier to the turf
+        continue;
+      }
       const asg = d.assignment!;
       const isDeep = asg.kind === 'zone' && ZONES[asg.zone].deep;
       let goal: Vec2;
@@ -721,22 +1040,69 @@ export class PlaySim {
 
       if (carrier && carrier.side === 'def') {
         goal = d.pos;
-      } else if (runMode && this.t > this.runRecognizedAt + d.reaction + (isDeep ? 0.35 : 0)) {
+      } else if (runMode && this.t > this.runRecognizedAt + d.reaction * (carrier === qb ? SCRAMBLE.reactFactor : 1) + (isDeep ? 0.35 : 0)) {
         goal = this.pursuit(d, carrier!);
-      } else if (flight && this.t > this.throwAt + d.reaction) {
+      } else if (flight && asg.kind === 'man' && this.get(asg.target).id === flight.targetId && this.trailing(d, this.get(asg.target))) {
+        // Trailing man defender can't see the ball: play through the receiver's hands.
+        const r = this.get(asg.target);
+        goal = add(r.pos, scale(r.vel, 0.25));
+      } else if (flight && this.t > this.throwAt + d.reaction + (asg.kind === 'man' ? COVERAGE.manBallReadDelay : 0)) {
         const timeLeft = flight.T - flight.t;
         const canReach = dist(d.pos, flight.landing) / d.maxSpeed < timeLeft + 0.6;
         goal = canReach ? flight.landing : add(flight.landing, scale(norm(sub(d.pos, flight.landing)), 2));
+      } else if (this.screenRecognized(d, isDeep)) {
+        goal = this.pursuit(d, this.get(this.play.screen!.target));
       } else if (this.play.playAction && this.t < this.diff.playActionBite && !isDeep && asg.kind !== 'rush' && d.position !== 'CB') {
         goal = v2(d.pos.x * 0.9 + this.ballX * 0.1, this.los + 1.5);
         urgency = 0.55;
       } else {
         goal = this.coverageGoal(d, asg, qb);
-        if (asg.kind === 'zone') urgency = 0.9;
+        if (asg.kind === 'zone' && !isDeep && !this.carry.has(d.id)) urgency = 0.9;
       }
-      if (asg.kind !== 'rush' && this.t < d.reaction && !(asg.kind === 'man')) goal = d.pos; // read step
+      if (asg.kind !== 'rush' && this.t < d.reaction && asg.kind !== 'man') {
+        // Read step: underneath defenders hold, deep defenders bail to their landmark.
+        goal = isDeep && asg.kind === 'zone' ? this.zoneLandmark(asg.zone) : d.pos;
+      }
       desired.set(d.id, this.seek(d, goal, urgency));
+      if (asg.kind === 'man' && !this.passThrown && this.t > 0.6) this.checkHolding(d, this.get(asg.target));
     }
+  }
+
+  /** Defensive holding: grabbing a receiver who is trying to get open (per second of contact). */
+  private checkHolding(d: Actor, r: Actor) {
+    if (r.route?.blocks || dist(d.pos, r.pos) > PENALTIES.holdingContactRange || len(r.vel) < 4) return;
+    if (rollFoul('holdingDefense', this.penaltyBias, this.penRng, SIM_DT)) this.addFoul('holdingDefense', d.pos);
+  }
+
+  /**
+   * Deep defender with vertical threats in his zone: over the top of one, or
+   * split two, leaning toward the route he was assigned to help on.
+   */
+  private deepSplit(d: Actor, land: Vec2, width: number, helpId: number | undefined): Vec2 | null {
+    const lag = d.reaction * 0.6;
+    const tops: Vec2[] = [];
+    let helpTop: Vec2 | null = null;
+    for (const s of ELIGIBLE) {
+      const r = this.get(s);
+      if (!this.coverage.verticals.has(r.id)) continue;
+      const seen = this.perceived(r, lag);
+      const isHelp = r.id === helpId;
+      if (!isHelp && Math.abs(seen.x - land.x) > width) continue;
+      const top = overTop({ pos: seen, vel: this.perceivedVel(r, lag) }, this.ballX,
+        isHelp ? COVERAGE.helpCushion : COVERAGE.deepCushion, isHelp ? COVERAGE.helpLead : COVERAGE.deepLead);
+      tops.push(top);
+      if (isHelp) helpTop = top;
+    }
+    if (tops.length === 0) return null;
+    const mid = v2(tops.reduce((a, t) => a + t.x, 0) / tops.length, Math.max(land.y, ...tops.map((t) => t.y)));
+    const goal = helpTop ? v2(mid.x + (helpTop.x - mid.x) * COVERAGE.helpLean, Math.max(mid.y, helpTop.y)) : mid;
+    return add(goal, scale(d.coverOffset, 0.4));
+  }
+
+  private zoneLandmark(zone: keyof typeof ZONES): Vec2 {
+    const z = ZONES[zone];
+    const roll = z.deep ? this.coverage.roll : 0;
+    return v2(clamp(this.ballX * 0.5 + z.x + roll, -FIELD.halfWidth + 2, FIELD.halfWidth - 2), this.los + z.y);
   }
 
   /** Aim at the interception point of the (perceived) ball carrier's path. */
@@ -773,7 +1139,7 @@ export class PlaySim {
   private coverageGoal(d: Actor, asg: DefAssignment, qb: Actor): Vec2 {
     switch (asg.kind) {
       case 'rush':
-        return qb.pos;
+        return this.rushGoal(d, qb);
       case 'spy':
         return v2(qb.pos.x, Math.max(this.los + 4, qb.pos.y + 5));
       case 'man': {
@@ -782,15 +1148,40 @@ export class PlaySim {
           // Receiver stayed in to block: become a spy / green-dog rusher.
           return this.t > 1.2 ? qb.pos : v2(qb.pos.x, this.los + 4);
         }
-        const seen = this.perceived(r, d.reaction);
-        const vel = this.perceivedVel(r, d.reaction);
+        if (this.coverage.verticals.has(r.id)) {
+          // Vertical stem: get in phase on the receiver's inside hip. A break
+          // (post, corner) costs the defender his full reaction time again.
+          const lag = d.reaction * COVERAGE.phaseLag;
+          const vel = this.perceivedVel(r, lag);
+          if (vel.y > r.maxSpeed * COVERAGE.verticalSpeedFrac) {
+            return add(inPhaseSpot({ pos: this.perceived(r, lag), vel }, this.ballX), scale(d.coverOffset, 0.3));
+          }
+        }
+        // In press range the defender feels the release, so he reads it faster.
+        const lag = dist(d.pos, r.pos) < 3 ? d.reaction * 0.5 : d.reaction;
+        const seen = this.perceived(r, lag);
+        const vel = this.perceivedVel(r, lag);
         const inward = Math.sign(this.ballX - seen.x) || 1;
         const cushion = d.position === 'CB' ? 0.9 : 0.6;
-        return add(add(seen, scale(vel, 0.35)), v2(inward * 0.5 + d.coverOffset.x, cushion + d.coverOffset.y * 0.5));
+        const goal = add(add(seen, scale(vel, 0.35)), v2(inward * 0.5 + d.coverOffset.x, cushion + d.coverOffset.y * 0.5));
+        // Never back down toward the LOS once the receiver releases upfield.
+        if (vel.y > 1) goal.y = Math.max(goal.y, d.pos.y - 0.3);
+        return goal;
       }
       case 'zone': {
         const z = ZONES[asg.zone];
-        const land = v2(clamp(this.ballX * 0.5 + z.x, -FIELD.halfWidth + 2, FIELD.halfWidth - 2), this.los + z.y);
+        const land = this.zoneLandmark(asg.zone);
+        const helpId = this.coverage.help.get(d.id);
+        if (z.deep) {
+          const split = this.deepSplit(d, land, z.w, helpId);
+          if (split) return split;
+        }
+        const carryId = this.carry.get(d.id);
+        if (carryId !== undefined) {
+          const r = this.actors[carryId];
+          const lag = d.reaction * 0.7;
+          return add(carrySpot({ pos: this.perceived(r, lag), vel: this.perceivedVel(r, lag) }, this.ballX), scale(d.coverOffset, 0.3));
+        }
         let threat: Actor | null = null;
         let best = Infinity;
         for (const s of ELIGIBLE) {
@@ -800,7 +1191,8 @@ export class PlaySim {
           const dx = Math.abs(seen.x - land.x);
           if (dx > z.w) continue;
           if (z.deep ? seen.y < this.los + 7 : seen.y > this.los + 16 || seen.y < this.los - 1) continue;
-          const score = dist(seen, land);
+          // Deep defenders prioritise vertical stems over anything else in their zone.
+          const score = dist(seen, land) - (z.deep && this.coverage.verticals.has(r.id) ? 8 : 0);
           if (score < best) {
             best = score;
             threat = r;
@@ -809,8 +1201,9 @@ export class PlaySim {
         if (!threat) return add(land, d.coverOffset);
         const seen = this.perceived(threat, d.reaction);
         if (z.deep) {
-          const vel = this.perceivedVel(threat, d.reaction);
-          return v2(land.x * 0.3 + seen.x * 0.7 + d.coverOffset.x, Math.max(land.y, seen.y + 4 + Math.max(0, vel.y) * 0.45));
+          const vel = this.perceivedVel(threat, d.reaction * 0.6);
+          const top = overTop({ pos: seen, vel }, this.ballX, COVERAGE.deepCushion, COVERAGE.deepLead);
+          return v2(land.x * 0.3 + top.x * 0.7 + d.coverOffset.x, Math.max(land.y, top.y));
         }
         return add(lerp(land, add(seen, v2(0, 0.8)), 0.7), d.coverOffset);
       }
@@ -835,9 +1228,18 @@ export class PlaySim {
       const blkStat = (br.blocking * 2 + br.strength) / 3;
       const n = this.engagersOf(d);
       const ratio = defStat / Math.max(20, blkStat);
-      // Hazard grows linearly with time engaged: pressure builds the longer the QB holds it.
-      const rate = (rushing ? 0.05 * e.t : 0.05 + 0.08 * e.t) * ratio * ratio * ratio * this.diff.passRush / n;
-      if (this.rng.chance(rate * dt)) {
+      // Hazard grows with time engaged and with how long the QB holds the ball.
+      const hold = rushing ? 1 + POCKET.holdFactor * Math.max(0, this.t - POCKET.holdGrace) * this.diff.pocketPressure : 1;
+      const rate = (rushing ? 0.05 * e.t * hold : 0.05 + 0.08 * e.t) * ratio * ratio * ratio * this.diff.passRush / n;
+      if ((rushing && e.t >= e.loseAt && n === 1) || this.rng.chance(rate * dt)) {
+        if (rollFoul('holdingOffense', this.penaltyBias, this.penRng)) {
+          // Beaten blocker grabs on instead of letting go.
+          this.addFoul('holdingOffense', b.pos);
+          e.loseAt = Infinity;
+          e.t = 0;
+          keep.push(e);
+          continue;
+        }
         this.shedFrom.set(d.id, { blocker: b.id, until: this.t + 1.2 });
         b.blockCooldown = 0.8;
         this.emit('shed', d.id);
@@ -867,8 +1269,9 @@ export class PlaySim {
         continue;
       }
       const want = clampLen(desired.get(a.id) ?? v2(), a.maxSpeed);
-      const dv = clampLen(sub(want, a.vel), a.accel * dt);
-      a.vel = add(a.vel, dv);
+      const k = this.contact;
+      if (k && (a.id === k.carrier || a.id === k.tackler)) a.vel = want; // contact: momentum is scripted
+      else a.vel = add(a.vel, clampLen(sub(want, a.vel), a.accel * dt));
       a.pos = add(a.pos, scale(a.vel, dt));
       const sp = len(a.vel);
       if (sp > 0.5 && !(a.slot === 'QB' && a.side === 'off' && this.controlledId === a.id)) {
@@ -961,10 +1364,22 @@ export class PlaySim {
       id: a.id, pos: a.pos, catching: a.player.ratings.catching, coverage: a.player.ratings.coverage,
     });
     const offense = ELIGIBLE.map((s) => this.get(s)).filter((a) => !a.down).map(toCand);
-    const defense = this.actors.filter((a) => a.side === 'def' && !a.down).map(toCand);
+    const target = f.targetId !== null ? this.actors[f.targetId] : null;
+    if (target && dist(target.pos, f.landing) < 3) {
+      // Pass interference: a beaten defender (not in phase) climbing on the receiver.
+      for (const d of this.actors) {
+        if (d.side !== 'def' || d.down || dist(d.pos, target.pos) > PENALTIES.dpiReach) continue;
+        if (inPhase(target, d, COVERAGE.inPhaseDist)) continue;
+        if (rollFoul('passInterference', this.penaltyBias, this.penRng)) this.addFoul('passInterference', f.landing);
+        break;
+      }
+    }
+    const defense = this.actors.filter((a) => a.side === 'def' && !a.down)
+      .map((a) => ({ ...toCand(a), inPhase: !!target && inPhase(target, a, COVERAGE.inPhaseDist) }));
     const out = resolveCatch({
       landing: f.landing, quality: f.quality, speed: f.speed, offense, defense,
-      ballSkills: this.diff.ballSkills, rng: this.rng,
+      ballSkills: this.diff.ballSkills, inPhaseBreakup: COVERAGE.inPhaseBreakup, inPhaseInt: COVERAGE.inPhaseInt,
+      catchFactor: f.screen?.catchFactor, intBonus: f.screen?.intBonus, rng: this.rng,
     });
     const b = this.ball;
     switch (out.kind) {
@@ -1018,31 +1433,55 @@ export class PlaySim {
 
   private checkTackles() {
     const c = this.carrier;
-    if (!c || c.side !== 'off') return;
+    if (!c || c.side !== 'off' || this.contact) return;
     for (const d of this.actors) {
       if (d.side !== 'def' || d.down || d.tackleCooldown > 0) continue;
-      if (dist(d.pos, c.pos) > TACKLE_RANGE) continue;
-      const engaged = this.isEngaged(d);
-      if (engaged && dist(d.pos, c.pos) > 0.85) continue;
-      const armTackle = engaged ? 0.3 : 1;
-      const tr = d.player.ratings.tackling / 100;
-      const elusive = (c.player.ratings.strength + c.player.ratings.speed) / 200;
-      let p = (0.5 + 0.38 * tr - 0.22 * elusive) * this.diff.tackling * armTackle;
-      if (this.t < this.jukeUntil) p *= 0.4;
-      if (c.slot === 'QB' && !this.pastLos(c)) p *= 1.15; // sacks: QB is a sitting duck
-      if (this.rng.chance(clamp(p, 0.08, 0.97))) {
-        c.down = true;
-        d.vel = scale(d.vel, 0.3);
+      if (dist(d.pos, c.pos) > TACKLE.range) continue;
+      const engaged = !!this.isEngaged(d);
+      if (engaged && dist(d.pos, c.pos) > TACKLE.engagedRange) continue;
+      let factor = this.diff.tackling;
+      if (c.slot === 'QB' && !this.pastLos(c)) factor *= TACKLE.pocketSackFactor; // sacks: QB is a sitting duck
+      else if (c.slot === 'QB') factor *= SCRAMBLE.tackleBonus; // a scrambling QB is no running back
+      const out = resolveTackle({
+        tacklerPos: d.pos, tacklerVel: d.vel, carrierPos: c.pos, carrierVel: c.vel,
+        tackling: d.player.ratings.tackling, carrierStrength: c.player.ratings.strength, carrierSpeed: c.player.ratings.speed,
+        engaged, juking: this.t < this.jukeUntil, factor, rng: this.rng,
+      });
+      const heading = Math.atan2(d.pos.x - c.pos.x, d.pos.y - c.pos.y);
+      c.anim = { kind: out.kind, role: 'carrier', t: this.t, duration: out.contactTime, down: out.success, heading };
+      d.anim = { kind: out.kind, role: 'tackler', t: this.t, duration: out.contactTime, down: out.success, heading: heading + Math.PI };
+      if (out.success) {
+        // Momentum: the carrier keeps going (or is driven back) until he hits the turf.
+        const dir = len(c.vel) > 0.5 ? norm(c.vel) : v2(0, 1);
+        c.vel = scale(dir, out.fallForward / out.contactTime);
+        d.vel = c.vel;
         const sack = c.slot === 'QB' && c.pos.y < this.los && !this.passThrown && !this.handedOff;
-        if (c.pos.y <= 0) this.finish('safety', c);
-        else this.finish(sack ? 'sack' : 'tackle', c);
+        this.contact = { carrier: c.id, tackler: d.id, whistleAt: this.t + out.contactTime, sack };
+        if (rollFoul('facemask', this.penaltyBias, this.penRng)) this.addFoul('facemask', c.pos);
         return;
       }
-      d.tackleCooldown = 0.5;
-      c.vel = scale(c.vel, 0.45);
+      d.tackleCooldown = TACKLE.brokenCooldown;
+      c.vel = scale(c.vel, out.slow);
       this.emit('brokenTackle', d.id);
     }
   }
+
+  /** The ball carrier is down: blow the whistle at the spot. */
+  private whistleContact() {
+    const k = this.contact!;
+    this.contact = null;
+    const c = this.actors[k.carrier];
+    c.down = true;
+    if (k.tackler >= 0) this.actors[k.tackler].vel = scale(this.actors[k.tackler].vel, 0.3);
+    if (c.pos.y <= 0) this.finish('safety', c);
+    else this.finish(k.sack ? 'sack' : 'tackle', c);
+  }
+
+  /** A tackle is in progress (contact animation before the whistle). */
+  get inContact(): boolean {
+    return this.contact !== null;
+  }
+
 
   private checkBoundaries() {
     const c = this.carrier;
@@ -1062,8 +1501,8 @@ export class PlaySim {
   }
 
   private makeResult(outcome: PlayOutcome, at: Vec2, c: Actor | null): PlayResult {
-    const endY = outcome === 'incomplete' ? this.los : outcome === 'touchdown' ? FIELD.length : clamp(at.y, -FIELD.endzone, FIELD.length);
-    const yards = outcome === 'interception' || outcome === 'incomplete' ? 0 : Math.round(endY - this.los);
+    const endY = outcome === 'incomplete' || outcome === 'noPlay' ? this.los : outcome === 'touchdown' ? FIELD.length : clamp(at.y, -FIELD.endzone, FIELD.length);
+    const yards = outcome === 'interception' || outcome === 'incomplete' || outcome === 'noPlay' ? 0 : Math.round(endY - this.los);
     const completion = this.passThrown && c !== null && c.side === 'off' && c.slot !== 'QB';
     const res: PlayResult = {
       outcome,
@@ -1073,11 +1512,12 @@ export class PlaySim {
       duration: this.t,
       passAttempt: this.passThrown,
       completion,
-      rush: !this.passThrown && outcome !== 'sack' && outcome !== 'incomplete',
+      rush: !this.passThrown && outcome !== 'sack' && outcome !== 'incomplete' && outcome !== 'noPlay',
       carrier: c ? c.slot : null,
       turnover: outcome === 'interception',
       defenseCall: this.defense.name,
       description: '',
+      fouls: this.fouls,
     };
     res.description = describe(res, c);
     return res;
@@ -1087,21 +1527,32 @@ export class PlaySim {
     const qb = this.get('QB');
     if (this.ball.holder !== qb.id || this.result) {
       this.pressure = 0;
+      this.pocketCue = null;
       return;
     }
     let p = 0;
+    let cue: PocketCue | null = null;
     const picked = new Set(this.passBlock.values());
     for (const d of this.actors) {
-      if (d.side !== 'def' || d.down || d.assignment?.kind !== 'rush') continue;
+      if (d.side !== 'def' || d.down || !this.isRushing(d)) continue;
       const dd = dist(d.pos, qb.pos);
       const engaged = this.engagements.some((e) => e.defender === d.id);
       const free = clamp(1 - (dd - 1.2) / 5, 0, 1);
       // Blocked rushers only count once they are pushing the pocket into the QB.
       const v = engaged ? clamp(1 - (dd - 1) / 3.5, 0, 1) * 0.55 : picked.has(d.id) && this.t < 1 ? free * 0.3 : free;
       p = Math.max(p, v);
+      if (!engaged) {
+        // Cue: a free rusher closing in (by distance or by time to get home).
+        const closing = Math.max(0, -((d.vel.x * (d.pos.x - qb.pos.x) + d.vel.y * (d.pos.y - qb.pos.y)) / Math.max(dd, 0.1)));
+        const tHome = closing > 0.5 ? (dd - 1) / closing : Infinity;
+        const level = Math.max(clamp(1 - (dd - 1.2) / POCKET.cueRange, 0, 1), clamp(1 - tHome / POCKET.cueTime, 0, 1));
+        if (level > 0 && (!cue || level > cue.level)) cue = { heading: Math.atan2(d.pos.x - qb.pos.x, d.pos.y - qb.pos.y), level };
+      }
     }
     this.pressure = this.pressure + (p - this.pressure) * 0.2;
+    this.pocketCue = cue;
   }
+
 }
 
 function describe(r: PlayResult, c: Actor | null): string {
@@ -1109,6 +1560,7 @@ function describe(r: PlayResult, c: Actor | null): string {
   const yds = (n: number) => `${Math.abs(n)} yard${Math.abs(n) === 1 ? '' : 's'}`;
   switch (r.outcome) {
     case 'incomplete': return 'Incomplete pass';
+    case 'noPlay': return 'No play';
     case 'interception': return `Intercepted by ${who}!`;
     case 'sack': return `Sacked for a loss of ${yds(r.yards)}`;
     case 'safety': return 'Safety!';

@@ -20,6 +20,7 @@ export class TouchControls {
   readonly chargeZone: HTMLElement;
   readonly chargeFill: HTMLElement;
   readonly chargeBox: HTMLElement;
+  readonly secondary: HTMLButtonElement;
   private slotBtns = new Map<EligibleSlot, HTMLButtonElement>();
   private joy = new VirtualJoystick(60);
   private joyId: number | null = null;
@@ -35,19 +36,32 @@ export class TouchControls {
     this.chargeZone = h('div', { class: 'zone' });
     this.chargeFill = h('div', { class: 'fill' });
     this.chargeBox = h('div', { id: 'charge' }, this.chargeZone, this.chargeFill);
-    const actions = h('div', { id: 'actions' }, this.chargeBox, this.primary);
+    this.secondary = h('button', { id: 'btn-secondary', class: 'hidden' }, 'SLIDE');
+    this.secondary.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      this.secondary.classList.add('down');
+      input.pressSecondary();
+    });
+    const secUp = () => this.secondary.classList.remove('down');
+    this.secondary.addEventListener('pointerup', secUp);
+    this.secondary.addEventListener('pointercancel', secUp);
+    const actions = h('div', { id: 'actions' }, this.chargeBox, this.primary, this.secondary);
     for (const slot of Object.keys(SLOT_POS) as EligibleSlot[]) {
       const [r, b] = SLOT_POS[slot];
       const btn = h('button', { class: 'slot', style: { right: `${r}px`, bottom: `${b}px` } }, SLOT_LABEL[slot]);
+      // Hold = charge the throw to this receiver, release = throw (Madden-style).
       btn.addEventListener('pointerdown', (e) => {
         e.preventDefault();
+        btn.setPointerCapture(e.pointerId);
         btn.classList.add('down');
-        input.pressSlot(slot);
+        input.setTouchSlot(slot, true);
       });
-      const up = () => btn.classList.remove('down');
+      const up = () => {
+        btn.classList.remove('down');
+        input.setTouchSlot(slot, false);
+      };
       btn.addEventListener('pointerup', up);
       btn.addEventListener('pointercancel', up);
-      btn.addEventListener('pointerleave', up);
       this.slotBtns.set(slot, btn);
       actions.append(btn);
     }
@@ -125,18 +139,26 @@ export class TouchControls {
     this.knob.style.top = `${this.joy.originY - this.joy.y * this.joy.radius}px`;
   }
 
-  setPrimary(label: string, mode: 'snap' | 'throw' | 'juke' | 'none') {
+  setPrimary(label: string, mode: 'snap' | 'throw' | 'juke' | 'kick' | 'none') {
     if (this.primary.textContent !== label) this.primary.textContent = label;
-    this.primary.classList.toggle('throw', mode === 'throw');
+    this.primary.classList.toggle('throw', mode === 'throw' || mode === 'kick');
     this.primary.classList.toggle('juke', mode === 'juke');
     this.primary.disabled = mode === 'none';
   }
 
-  setSlots(selected: EligibleSlot | null, blocking: Set<EligibleSlot>) {
+  setSlots(selected: EligibleSlot | null, blocking: Set<EligibleSlot>, visible = true) {
     for (const [slot, btn] of this.slotBtns) {
       btn.classList.toggle('selected', slot === selected);
       btn.classList.toggle('blocking', blocking.has(slot));
+      btn.classList.toggle('hidden', !visible);
     }
+  }
+
+  /** Secondary action button (SLIDE / DASH); null hides it. */
+  setSecondary(label: string | null, ready = true) {
+    this.secondary.classList.toggle('hidden', !label);
+    if (label && this.secondary.textContent !== label) this.secondary.textContent = label;
+    this.secondary.disabled = !ready;
   }
 
   /** Charge meter: fill 0..1 and the sweet-spot window (null hides it). */
@@ -163,6 +185,7 @@ export class TouchControls {
       this.joy.end();
       this.input.setTouchMove(0, 0);
       this.input.setTouchPrimary(false);
+      for (const slot of this.slotBtns.keys()) this.input.setTouchSlot(slot, false);
       this.drawJoy();
     }
   }

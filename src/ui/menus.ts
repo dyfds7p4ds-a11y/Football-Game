@@ -57,10 +57,12 @@ export function settingsPanel(s: Settings, onChange: (s: Settings) => void, inGa
     onChange(s);
   };
   const diffNote: Record<Difficulty, string> = {
-    easy: 'Slow reactions, loose coverage, soft pass rush, wide throw window.',
+    easy: 'Slow reads, loose coverage, soft pocket, weak tackling, wide throw and kick windows.',
     normal: 'Balanced.',
-    hard: 'Quick reads, tight coverage, heavy pass rush, narrow throw window.',
+    hard: 'Quick route reads and safety help, collapsing pocket, sure tacklers, narrow throw and kick windows.',
   };
+  const onOff = (k: 'quickSim' | 'crowdEffect' | 'penalties' | 'intro' | 'sound' | 'shadows') =>
+    segmented([{ value: 1, label: 'ON' }, { value: 0, label: 'OFF' }], s[k] ? 1 : 0, (v) => set(k, v === 1));
   const note = h('div', { style: { fontSize: '12px', opacity: '0.7' } }, diffNote[s.difficulty]);
   return h('div', {},
     row('CPU difficulty', h('div', {},
@@ -75,6 +77,12 @@ export function settingsPanel(s: Settings, onChange: (s: Settings) => void, inGa
     row('Retro pixels', segmented([{ value: 1, label: 'ON' }, { value: 0, label: 'OFF' }], s.retroPixels ? 1 : 0, (v) => set('retroPixels', v === 1)),
       'Chunky low-res rendering; also faster on older iPads.'),
     row('Look sensitivity', segmented([0.6, 1, 1.5, 2].map((v) => ({ value: v, label: `${v}x` })), s.lookSensitivity, (v) => set('lookSensitivity', v))),
+    row('Quick sim special teams', onOff('quickSim'), 'ON: punts, field goals and kickoffs resolve instantly (Phase 1). OFF: kick meters and returns.'),
+    row('Crowd effect', onOff('crowdEffect'), 'A loud home crowd adds a little pass rush and rattles the visitors (more false starts).'),
+    row('Penalties', onOff('penalties')),
+    row('Intro cutscenes', onOff('intro'), 'Tunnel, team intro and coin toss before the opening kickoff. Tap to skip.'),
+    row('Sound', onOff('sound'), 'Crowd noise follows the crowd meter.'),
+    row('Soft shadows', onOff('shadows'), 'Turn off for more speed on older iPads.'),
   );
 }
 
@@ -126,15 +134,20 @@ export function helpContent(): HTMLElement {
     h('ul', {},
       h('li', {}, 'Pick a play. The defense picks a coverage you will have to read.'),
       h('li', {}, 'Press SNAP. Put your LEFT thumb anywhere on the left half: an invisible joystick appears. Pull down to drop back, push to scramble.'),
-      h('li', {}, 'Tap a receiver button (1, 2, 3, RB, TE) to look at him and target him. Drag on the right half of the screen to look around.'),
-      h('li', {}, 'HOLD THROW to charge, RELEASE inside the green zone of the meter. Under-charged balls float short, over-charged balls sail. Throw early to a receiver who is about to be open: the ball leads him.'),
-      h('li', {}, 'The pocket meter on the left shows pressure. Holding the ball too long gets you sacked; pressure also costs accuracy.'),
+      h('li', {}, 'Every receiver has a colored marker ring and a number above him; receivers outside your view show as arrows at the screen edge. You do not have to look at a receiver to throw to him.'),
+      h('li', {}, 'HOLD a receiver button (1, 2, 3, RB, TE) to charge the throw to him, RELEASE inside the green zone of the meter. Under-charged balls float short, over-charged balls sail. THROW throws to the last receiver you picked.'),
+      h('li', {}, 'Deep balls are a risk: safeties rotate over the top and corners run in phase with your receivers. Read the coverage before you let it fly.'),
+      h('li', {}, 'The pocket collapses from the sides and from behind. A red glow at the screen edge warns you that a free rusher is closing in; the longer you hold the ball, the more blocks are lost.'),
+      h('li', {}, 'Screens need timing: wait until the blockers release, then get it out before the defense reads it.'),
+      h('li', {}, 'Scrambling: your view follows your path. Defenders close fast on a running QB, so let blockers open a lane, and tap SLIDE to give yourself up safely.'),
       h('li', {}, 'Run plays hand off automatically; then steer the runner. Press JUKE to dodge a tackle. Tap RB when he is next to you to hand off on any play; hold THROW on a run play to keep it yourself.'),
+      h('li', {}, 'Kicking: hold KICK to fill the meter and release in the green zone. Punts also lock the angle needle on release. Returns: steer the returner and tap DASH for a burst.'),
+      h('li', {}, 'Flags: an official throws a yellow flag at the spot of a foul; the penalty is applied after the play.'),
       h('li', {}, 'Clock: 40-second play clock (delay of game = 5 yards). The game clock stops on incompletions, out of bounds, scores and turnovers.'),
     ),
     h('h2', {}, 'KEYBOARD / GAMEPAD'),
-    h('p', {}, 'Keyboard: WASD/arrows move · 1 2 3 = WR · 4 or R = RB · 5 or T = TE · SPACE snap/throw/juke · Q/E look · O timeout · P/Esc pause.'),
-    h('p', {}, 'Gamepad: left stick move · right stick look · A or RT snap/throw/juke · X=1 Y=2 B=3 LB=RB RB=TE · Start pause · Back timeout.'),
+    h('p', {}, 'Keyboard: WASD/arrows move · hold 1 2 3 = WR, 4 or R = RB, 5 or T = TE to charge, release to throw · SPACE snap/throw/juke/kick · X or SHIFT slide/dash · Q/E look · O timeout · P/Esc pause.'),
+    h('p', {}, 'Gamepad: left stick move · right stick look · hold X=1 Y=2 B=3 LB=RB RB=TE to charge, release to throw · A or RT snap/throw/juke/kick · LT slide/dash · Start pause · Back timeout.'),
   );
 }
 
@@ -142,7 +155,7 @@ export function driveSummary(s: GameState, side: TeamSide, entries: DriveEntry[]
   const t = getTeam(s.teams[side]);
   return h('div', {},
     h('h2', {}, `${t.city.toUpperCase()} ${t.name.toUpperCase()} DRIVE`),
-    h('p', { style: { opacity: '0.8' } }, 'You will play defense in Phase 2. For now the CPU drive is simulated:'),
+    h('p', { style: { opacity: '0.8' } }, 'Playing defense comes in Phase 3. For now the CPU drive is simulated:'),
     h('ol', { class: 'drive' }, ...entries.map((e) => h('li', {}, h('span', { class: 'sit' }, `${e.clock} · ${e.situation}  `), e.text))),
     h('h2', { style: { color: '#fff' } }, headline),
   );

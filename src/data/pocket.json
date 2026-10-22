@@ -1,0 +1,25 @@
+{
+  "pocket": {
+    "edgeStartWidth": 3.0,
+    "edgeArcWidth": 2.4,
+    "edgeArcDepth": 1.2,
+    "quickLossChance": 0.1,
+    "quickLossMin": 0.7,
+    "quickLossMax": 2.0,
+    "holdGrace": 1.6,
+    "holdFactor": 0.9,
+    "backBlockerSide": 1.7,
+    "cueRange": 5.0,
+    "cueTime": 1.0
+  },
+  "scramble": {
+    "speedToScramble": 4.0,
+    "minTime": 0.6,
+    "tackleBonus": 1.3,
+    "brokenTackleSlow": 0.3,
+    "reactFactor": 0.6,
+    "slideGain": 0.5,
+    "slideCooldown": 0.25,
+    "laneRadius": 3.0
+  }
+}

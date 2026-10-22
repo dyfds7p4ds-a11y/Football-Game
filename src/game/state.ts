@@ -1,6 +1,7 @@
 import { createClock, type ClockState } from './clock';
 import type { Difficulty } from '../data/types';
 import { emptyTendencies, type Tendencies } from '../play/defenseCalls';
+import { crowdStart } from './crowd';
 
 export type TeamSide = 'home' | 'away';
 export const other = (s: TeamSide): TeamSide => (s === 'home' ? 'away' : 'home');
@@ -40,6 +41,10 @@ export interface GameState {
   tendencies: Tendencies;
   over: boolean;
   seed: number;
+  /** The side that must kick off before the next snap (Phase 2 special teams); null = none. */
+  pendingKickoff: TeamSide | null;
+  /** Crowd pulse 0..100 (home crowd's energy). */
+  crowd: number;
 }
 
 export interface NewGameOptions {
@@ -69,6 +74,9 @@ export function newGame(o: NewGameOptions): GameState {
     tendencies: emptyTendencies(),
     over: false,
     seed: o.seed,
+    // Opening kickoff: the CPU kicks to the user's team.
+    pendingKickoff: other(o.userSide),
+    crowd: crowdStart(),
   };
 }
 

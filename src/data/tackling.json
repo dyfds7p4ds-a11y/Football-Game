@@ -1,0 +1,19 @@
+{
+  "range": 1.2,
+  "engagedRange": 0.85,
+  "base": 0.5,
+  "tacklerWeight": 0.38,
+  "elusiveWeight": 0.22,
+  "armTackle": 0.3,
+  "jukeFactor": 0.4,
+  "pocketSackFactor": 1.15,
+  "angle": { "headOn": 1.15, "side": 1.0, "behind": 0.7 },
+  "speedEdge": 0.06,
+  "min": 0.08,
+  "max": 0.97,
+  "shoulderClosingSpeed": 9,
+  "contactTime": { "shoulder": 0.32, "wrap": 0.42, "stumble": 0.55, "hipTurn": 0.4, "slide": 0.35 },
+  "fallForward": { "shoulder": -0.4, "wrap": 0.5, "stumble": 1.6, "hipTurn": 0.3, "slide": 0.0 },
+  "brokenSlow": { "hipTurn": 0.55, "stumble": 0.35 },
+  "brokenCooldown": 0.5
+}

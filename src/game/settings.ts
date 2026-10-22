@@ -11,6 +11,18 @@ export interface Settings {
   lookSensitivity: number;
   userTeam: string;
   cpuTeam: string;
+  /** Phase 1 instant results for punts, field goals and kickoffs (no meters, no returns). */
+  quickSim: boolean;
+  /** Home crowd gives a small, bounded edge (pressure, penalty chance). */
+  crowdEffect: boolean;
+  /** Flags: holding, offside, pass interference, ... */
+  penalties: boolean;
+  /** Tunnel / team intro / coin toss cutscenes before the opening kickoff. */
+  intro: boolean;
+  /** Crowd noise and whistles. */
+  sound: boolean;
+  /** Real-time soft shadows (turn off on older iPads). */
+  shadows: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -22,6 +34,12 @@ export const DEFAULT_SETTINGS: Settings = {
   lookSensitivity: 1,
   userTeam: 'rheinstadt',
   cpuTeam: 'elbtal',
+  quickSim: false,
+  crowdEffect: true,
+  penalties: true,
+  intro: true,
+  sound: true,
+  shadows: true,
 };
 
 const KEY = 'gridiron-qb.settings.v1';

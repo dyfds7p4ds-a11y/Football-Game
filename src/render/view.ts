@@ -1,16 +1,22 @@
 /**
- * SceneView: owns the Three.js renderer/scene and mirrors a PlaySim each
- * frame. Read-only with respect to game state.
+ * SceneView: owns the Three.js renderer/scene and mirrors a PlaySim or a
+ * ReturnSim each frame. Read-only with respect to game state.
+ *
+ * Look: stylized realistic. Soft shadows from one sun light that follows the
+ * play, a gradient sky, fog for depth, the stadium bowl from stadium.ts.
  */
 import * as THREE from 'three';
 import type { TeamData, EligibleSlot } from '../data/types';
 import { ELIGIBLE } from '../data/types';
 import { lerp as lerp2 } from '../core/vec';
-import type { PlaySim } from '../play/sim';
-import { FieldView } from './fieldMesh';
+import { PlaySim, type Actor } from '../play/sim';
+import type { ReturnSim } from '../play/returnSim';
+import { flagPosition } from '../play/penalties';
+import { flightPos, type KickFlight } from '../play/kicking';
+import { FieldView, SLOT_COLORS } from './fieldMesh';
 import { PlayerMesh } from './playerMesh';
 import { PALETTE } from './palette';
-import { headingToRotY, toWorld } from './coords';
+import { headingToRotY, setFrameFlip, toWorld } from './coords';
 
 export type CameraMode = 'firstPerson' | 'behindQB';
 
@@ -23,19 +29,34 @@ export interface ViewInput {
   presnap: boolean;
 }
 
+export interface ScreenPoint {
+  x: number;
+  y: number;
+  /** In front of the camera and inside the viewport. */
+  onScreen: boolean;
+}
+
 const LABELS: Record<EligibleSlot, string> = { WR1: '1', WR2: '2', WR3: '3', RB: 'RB', TE: 'TE' };
 const EYE = 2.15;
 /** Eyes sit slightly behind the sim position so linemen don't fill the screen. */
 const EYE_BACK = 0.45;
+const LABEL_HEX: Record<EligibleSlot, string> = Object.fromEntries(
+  ELIGIBLE.map((s) => [s, `#${SLOT_COLORS[s].toString(16).padStart(6, '0')}`]),
+) as Record<EligibleSlot, string>;
+
+/** Anything SceneView can draw: a scrimmage play or a kick return. */
+export type FieldSim = PlaySim | ReturnSim;
 
 export class SceneView {
   readonly renderer: THREE.WebGLRenderer;
   readonly scene = new THREE.Scene();
   readonly camera: THREE.PerspectiveCamera;
   readonly field: FieldView;
-  private players: PlayerMesh[] = [];
-  private ball: THREE.Mesh;
+  readonly players: PlayerMesh[] = [];
+  readonly officials: PlayerMesh[] = [];
+  readonly ball: THREE.Mesh;
   private heldBall: THREE.Mesh;
+  private sun: THREE.DirectionalLight;
   private pixelScale = 1;
   private time = 0;
   private camPos = new THREE.Vector3();
@@ -44,28 +65,47 @@ export class SceneView {
   private routeGroup = new THREE.Group();
   private tmp = new THREE.Vector3();
   private tmp2 = new THREE.Vector3();
+  private crowdEnergy = 0.3;
 
   constructor(private canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
     this.renderer.setClearColor(PALETTE.sky);
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.05;
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.scene.background = new THREE.Color(PALETTE.sky);
-    this.scene.fog = new THREE.Fog(PALETTE.horizon, 90, 260);
-    this.camera = new THREE.PerspectiveCamera(72, 1, 0.1, 600);
+    this.scene.fog = new THREE.Fog(PALETTE.horizon, 120, 330);
+    this.camera = new THREE.PerspectiveCamera(72, 1, 0.1, 700);
     this.camera.rotation.order = 'YXZ';
     this.scene.add(this.camera);
+    this.scene.add(this.skyDome());
 
-    this.scene.add(new THREE.HemisphereLight(0xdff3ff, 0x3c5a2a, 1.6));
-    const sun = new THREE.DirectionalLight(0xfff1d6, 1.6);
-    sun.position.set(-40, 80, 20);
-    this.scene.add(sun);
+    this.scene.add(new THREE.HemisphereLight(0xe3f0ff, 0x46603a, 1.25));
+    this.sun = new THREE.DirectionalLight(0xfff0d8, 2.1);
+    this.sun.castShadow = true;
+    this.sun.shadow.mapSize.set(2048, 2048);
+    const sc = this.sun.shadow.camera;
+    sc.left = -38;
+    sc.right = 38;
+    sc.top = 38;
+    sc.bottom = -38;
+    sc.near = 10;
+    sc.far = 220;
+    this.sun.shadow.bias = -0.0005;
+    this.sun.shadow.normalBias = 0.03;
+    this.sun.shadow.radius = 4;
+    this.scene.add(this.sun, this.sun.target);
 
     this.field = new FieldView(this.renderer);
     this.scene.add(this.field.group);
 
-    const ballGeo = new THREE.SphereGeometry(0.15, 10, 6);
+    const ballGeo = new THREE.SphereGeometry(0.15, 14, 10);
     ballGeo.scale(1, 1, 1.75);
-    const ballMat = new THREE.MeshLambertMaterial({ color: PALETTE.ball, flatShading: true });
+    const ballMat = new THREE.MeshLambertMaterial({ color: PALETTE.ball });
     this.ball = new THREE.Mesh(ballGeo, ballMat);
+    this.ball.castShadow = true;
     const laces = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.02, 0.14), new THREE.MeshBasicMaterial({ color: 0xffffff }));
     laces.position.y = 0.15;
     this.ball.add(laces);
@@ -83,7 +123,37 @@ export class SceneView {
       this.players.push(p);
       this.scene.add(p.root);
     }
+    for (let i = 0; i < 5; i++) {
+      const o = new PlayerMesh('official');
+      o.root.visible = false;
+      this.officials.push(o);
+      this.scene.add(o.root);
+    }
+    this.setShadows(true);
     this.resize();
+  }
+
+  private skyDome(): THREE.Mesh {
+    const geo = new THREE.SphereGeometry(500, 24, 12);
+    const top = new THREE.Color(PALETTE.skyTop);
+    const bottom = new THREE.Color(PALETTE.horizon);
+    const colors: number[] = [];
+    const pos = geo.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      const k = Math.max(0, pos.getY(i) / 500);
+      const c = bottom.clone().lerp(top, Math.pow(k, 0.6));
+      colors.push(c.r, c.g, c.b);
+    }
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false, depthWrite: false }));
+    mesh.renderOrder = -1;
+    return mesh;
+  }
+
+  setShadows(on: boolean) {
+    this.renderer.shadowMap.enabled = on;
+    this.sun.castShadow = on;
+    for (const p of [...this.players, ...this.officials]) p.setCastShadow(on);
   }
 
   setPixelScale(scale: number) {
@@ -104,20 +174,27 @@ export class SceneView {
     this.camera.updateProjectionMatrix();
   }
 
-  setTeams(offense: TeamData, defense: TeamData) {
-    this.field.paint(offense, defense);
+  setTeams(user: TeamData, cpu: TeamData) {
+    this.field.paint(user, cpu);
   }
 
-  /** Assign team looks and receiver labels for a new play. */
-  bindPlay(sim: PlaySim, offense: TeamData, defense: TeamData) {
+  setCrowdEnergy(e: number) {
+    this.crowdEnergy = e;
+  }
+
+  /** Assign team looks and receiver labels for a new play or return. */
+  bindPlay(sim: FieldSim, offense: TeamData, defense: TeamData) {
+    const scrimmage = sim instanceof PlaySim;
     sim.actors.forEach((a, i) => {
       const pm = this.players[i];
       const team = a.side === 'off' ? offense : defense;
       pm.setLook(team.colors, a.player.number, PALETTE.skin[(a.player.number * 7 + a.id) % PALETTE.skin.length]);
-      const isElig = a.side === 'off' && (ELIGIBLE as readonly string[]).includes(a.slot);
-      pm.setLabel(isElig ? LABELS[a.slot as EligibleSlot] : null);
+      const isElig = scrimmage && a.side === 'off' && (ELIGIBLE as readonly string[]).includes(a.slot);
+      pm.setLabel(isElig ? LABELS[a.slot as EligibleSlot] : null, isElig ? LABEL_HEX[a.slot as EligibleSlot] : undefined);
       pm.root.visible = true;
     });
+    for (let i = sim.actors.length; i < this.players.length; i++) this.players[i].root.visible = false;
+    for (const o of this.officials) o.root.visible = true;
     this.camInit = false;
   }
 
@@ -126,7 +203,6 @@ export class SceneView {
     for (const c of this.routeGroup.children) (c as THREE.Mesh).geometry.dispose();
     this.routeGroup.clear();
     if (!sim) return;
-    const colors: Record<EligibleSlot, number> = { WR1: 0xffd23f, WR2: 0x4ea8ff, WR3: 0xff8c42, RB: 0xf1faee, TE: 0xc77dff };
     for (const slot of ELIGIBLE) {
       const a = sim.get(slot);
       let pts = a.route && !a.route.blocks ? [a.pos, ...a.route.points] : [];
@@ -136,7 +212,7 @@ export class SceneView {
           ? [a.pos, { x: sim.ballX + sim.play.run.aim * 0.55, y: sim.los - 4.5 }, { x: aim, y: sim.los - 1.5 }, { x: aim, y: sim.los + 8 }]
           : [a.pos, { x: sim.get('QB').pos.x, y: sim.get('QB').pos.y }, { x: aim, y: sim.los + 0.5 }, { x: aim, y: sim.los + 8 }];
       }
-      const mat = new THREE.MeshBasicMaterial({ color: colors[slot], transparent: true, opacity: 0.75, depthWrite: false });
+      const mat = new THREE.MeshBasicMaterial({ color: SLOT_COLORS[slot], transparent: true, opacity: 0.75, depthWrite: false });
       for (let i = 1; i < pts.length; i++) {
         const p0 = pts[i - 1];
         const p1 = { x: pts[i].x, y: Math.min(pts[i].y, sim.los + 22) };
@@ -153,35 +229,98 @@ export class SceneView {
 
   /** Camera for screens without an active play (behind the ball). */
   updateIdle(ballX: number, ballY: number, dt: number) {
+    setFrameFlip(false);
     this.time += dt;
     for (const p of this.players) p.root.visible = false;
+    for (const o of this.officials) o.root.visible = false;
     this.ball.visible = true;
     this.heldBall.visible = false;
     this.ball.position.copy(toWorld(ballX, ballY, 0.15));
     this.ball.rotation.set(0, 0, Math.PI / 2);
     this.field.setTargetRing(null, 0);
+    this.field.hideReceiverRings();
+    this.field.setFlags([]);
     this.camera.position.copy(toWorld(ballX + Math.sin(this.time * 0.1) * 6, ballY - 14, 6));
     this.camera.lookAt(toWorld(ballX, ballY + 10, 0));
+    this.followSun(ballX, ballY);
     this.camInit = false;
   }
 
-  update(sim: PlaySim, alpha: number, dt: number, inp: ViewInput) {
-    this.time += dt;
-    const qb = sim.get('QB');
-    const carrier = sim.carrier;
-    // First person while the play is "through the QB's eyes"; chase cam once someone else has the ball.
-    const firstPerson = inp.cameraMode === 'firstPerson' && !(carrier && carrier !== qb);
+  /** Project a sim-frame point (x, y, height) to screen pixels. */
+  project(x: number, y: number, h = 1.6): ScreenPoint {
+    const v = toWorld(x, y, h, this.tmp).project(this.camera);
+    const w = window.innerWidth;
+    const hh = window.innerHeight;
+    const front = v.z < 1;
+    let sx = (v.x * 0.5 + 0.5) * w;
+    let sy = (-v.y * 0.5 + 0.5) * hh;
+    if (!front) {
+      // Behind the camera: mirror so edge arrows point the right way.
+      sx = w - sx;
+      sy = hh;
+    }
+    return { x: sx, y: sy, onScreen: front && sx >= 0 && sx <= w && sy >= 0 && sy <= hh };
+  }
 
-    sim.actors.forEach((a, i) => {
+  private drawActors(actors: Actor[], alpha: number, dt: number, simT: number, presnap: boolean, hideId: number, target: EligibleSlot | null) {
+    actors.forEach((a, i) => {
       const pm = this.players[i];
       const p = lerp2(a.prevPos, a.pos, alpha);
       pm.root.position.copy(toWorld(p.x, p.y));
       pm.root.rotation.y = headingToRotY(a.facing);
       const speed = Math.hypot(a.vel.x, a.vel.y);
-      pm.animate(dt, speed, a.down, inp.presnap && a.position !== 'QB' && a.position !== 'WR' && a.position !== 'CB' && a.position !== 'S');
-      pm.updateLabel(pm.root.position.distanceTo(this.camera.position), a.side === 'off' && a.slot === inp.target);
-      pm.root.visible = !(firstPerson && a.id === qb.id);
+      const stance = presnap && a.position !== 'QB' && a.position !== 'WR' && a.position !== 'CB' && a.position !== 'S';
+      pm.animate(dt, speed, a.down, stance, a.anim, simT, a.facing);
+      pm.updateLabel(pm.root.position.distanceTo(this.camera.position), a.side === 'off' && a.slot === target);
+      pm.root.visible = a.id !== hideId;
     });
+  }
+
+  private drawOfficials(sim: FieldSim, alpha: number, dt: number) {
+    sim.officials.forEach((o, i) => {
+      const pm = this.officials[i];
+      const p = lerp2(o.prevPos, o.pos, alpha);
+      pm.root.visible = true;
+      pm.root.position.copy(toWorld(p.x, p.y));
+      pm.root.rotation.y = headingToRotY(o.facing);
+      pm.animate(dt, Math.hypot(o.vel.x, o.vel.y), false, false);
+    });
+  }
+
+  private drawFlags(sim: FieldSim) {
+    const flags = sim.flags.map((f) => {
+      const fp = flagPosition(f, sim.t);
+      if (!fp) {
+        // Still in the official's hand: show it at his hip.
+        const o = sim.officials[f.official];
+        return { pos: toWorld(o.pos.x + 0.3, o.pos.y, 1.0), flying: true, spin: 0 };
+      }
+      return { pos: toWorld(fp.x, fp.y, fp.h), flying: !fp.landed, spin: this.time * 9 };
+    });
+    this.field.setFlags(flags);
+  }
+
+  private followSun(x: number, y: number) {
+    const c = toWorld(x, y, 0, this.tmp2);
+    this.sun.target.position.copy(c);
+    this.sun.position.set(c.x - 45, 85, c.z + 30);
+  }
+
+  update(sim: FieldSim, alpha: number, dt: number, inp: ViewInput) {
+    this.time += dt;
+    this.field.setCrowd(this.time, this.crowdEnergy);
+    if (!(sim instanceof PlaySim)) {
+      this.updateReturn(sim, alpha, dt);
+      return;
+    }
+    setFrameFlip(false);
+    const qb = sim.get('QB');
+    const carrier = sim.carrier;
+    // First person while the play is "through the QB's eyes"; chase cam once someone else has the ball.
+    const firstPerson = inp.cameraMode === 'firstPerson' && !(carrier && carrier !== qb);
+    this.drawActors(sim.actors, alpha, dt, sim.t, inp.presnap, firstPerson ? qb.id : -1, inp.target);
+    this.drawOfficials(sim, alpha, dt);
+    this.drawFlags(sim);
 
     // Ball.
     const b = sim.ball;
@@ -200,15 +339,130 @@ export class SceneView {
       this.ball.rotation.set(0, headingToRotY(sim.actors[b.holder].facing), 0);
     }
 
-    // Target ring under the selected receiver.
-    if (inp.target && !sim.result && (sim.canThrow() || inp.presnap)) {
+    // Every eligible receiver carries a marker ring; the selected one pulses.
+    const showMarkers = !sim.result && (sim.canThrow() || inp.presnap);
+    for (const slot of ELIGIBLE) {
+      const r = sim.get(slot);
+      const rp = lerp2(r.prevPos, r.pos, alpha);
+      this.field.setReceiverRing(slot, showMarkers && slot !== inp.target ? toWorld(rp.x, rp.y) : null, !!r.route?.blocks);
+    }
+    if (inp.target && showMarkers) {
       const r = sim.get(inp.target);
-      this.field.setTargetRing(toWorld(r.pos.x, r.pos.y), this.time);
+      const rp = lerp2(r.prevPos, r.pos, alpha);
+      this.field.setTargetRing(toWorld(rp.x, rp.y), this.time);
     } else {
       this.field.setTargetRing(null, this.time);
     }
 
+    const focus = carrier ?? qb;
+    this.followSun(focus.pos.x, focus.pos.y + 8);
     this.updateCamera(sim, alpha, dt, inp, firstPerson);
+  }
+
+  /** Kick returns: chase cam behind the returner, looking at the ball while it is in the air. */
+  private updateReturn(sim: ReturnSim, alpha: number, dt: number) {
+    setFrameFlip(!sim.userReturns);
+    this.heldBall.visible = false;
+    this.field.hideReceiverRings();
+    this.field.setTargetRing(null, this.time);
+    this.drawActors(sim.actors, alpha, dt, sim.t, false, -1, null);
+    this.drawOfficials(sim, alpha, dt);
+    this.drawFlags(sim);
+    const b = sim.ball;
+    const bp = lerp2(b.prevPos, b.pos, alpha);
+    const bh = b.prevH + (b.h - b.prevH) * alpha;
+    this.ball.visible = true;
+    this.ball.position.copy(toWorld(bp.x, bp.y, bh));
+    if (b.state === 'air') {
+      this.ball.rotation.set(this.time * 12, 0, 0);
+    } else if (b.state === 'held' && b.holder !== null) {
+      this.ball.rotation.set(0, headingToRotY(sim.actors[b.holder].facing), 0);
+    }
+    const r = sim.returner;
+    const rp = lerp2(r.prevPos, r.pos, alpha);
+    let desiredPos: THREE.Vector3;
+    let desiredLook: THREE.Vector3;
+    // Stay in front of the goalposts (they stand on the end line, y = -10).
+    const camY = (y: number) => Math.max(y, -8.5);
+    if (b.state === 'air') {
+      // Behind the returner, looking up at the ball coming down.
+      desiredPos = toWorld(rp.x, camY(rp.y - 9), 5.2);
+      desiredLook = toWorld(bp.x * 0.5 + rp.x * 0.5, (bp.y + rp.y) / 2, Math.max(2, bh * 0.6));
+    } else {
+      desiredPos = toWorld(rp.x - r.vel.x * 0.4, camY(rp.y - 8.5), 4.6);
+      desiredLook = toWorld(rp.x + r.vel.x * 0.5, rp.y + 8, 1.0);
+    }
+    if (!this.camInit) {
+      this.camPos.copy(desiredPos);
+      this.camLook.copy(desiredLook);
+      this.camInit = true;
+    }
+    const k = Math.min(1, dt * 4);
+    this.camPos.lerp(desiredPos, k);
+    this.camLook.lerp(desiredLook, k);
+    this.camera.position.copy(this.camPos);
+    this.camera.lookAt(this.camLook);
+    this.followSun(rp.x, rp.y + 6);
+  }
+
+  /**
+   * Kick setup / field goal flight: ball on the tee or in the air, the kicker
+   * (and holder) next to it, camera behind the kicker. `flight` in the kicking
+   * team's frame (the user's frame when the user kicks).
+   */
+  updateKick(spot: { x: number; y: number }, flight: KickFlight | null, t: number, dt: number, kicker: TeamData, withHolder: boolean, flip: boolean) {
+    setFrameFlip(flip);
+    this.time += dt;
+    this.field.setCrowd(this.time, this.crowdEnergy);
+    for (const p of this.players) p.root.visible = false;
+    for (const o of this.officials) o.root.visible = false;
+    this.field.hideReceiverRings();
+    this.field.setTargetRing(null, 0);
+    this.field.setFlags([]);
+    this.heldBall.visible = false;
+    const k = this.players[0];
+    k.setLook(kicker.colors, 3, PALETTE.skin[1]);
+    k.setLabel(null);
+    k.root.visible = true;
+    const kickT = flight ? Math.min(t, 0.25) : 0;
+    k.root.position.copy(toWorld(spot.x - 0.9, spot.y - 2.2 + kickT * 6));
+    k.root.rotation.y = headingToRotY(0.35);
+    k.animate(dt, flight && t < 0.3 ? 6 : 0, false, false);
+    if (withHolder) {
+      const hd = this.players[1];
+      hd.setLook(kicker.colors, 12, PALETTE.skin[3]);
+      hd.setLabel(null);
+      hd.root.visible = true;
+      hd.root.position.copy(toWorld(spot.x + 0.7, spot.y));
+      hd.root.rotation.y = headingToRotY(-Math.PI / 2);
+      hd.animate(dt, 0, false, true);
+    }
+    this.ball.visible = true;
+    if (flight) {
+      const p = flightPos(flight, Math.min(t, flight.hang));
+      this.ball.position.copy(toWorld(p.x, p.y, Math.max(0.15, p.h)));
+      this.ball.rotation.set(this.time * 14, 0, 0);
+    } else {
+      this.ball.position.copy(toWorld(spot.x, spot.y, 0.3));
+      this.ball.rotation.set(Math.PI / 2, 0, 0);
+    }
+    const look = flight ? flightPos(flight, Math.min(t, flight.hang)) : { x: spot.x, y: spot.y + 30, h: 2 };
+    const desiredPos = toWorld(spot.x, spot.y - 7, 3.2);
+    const desiredLook = toWorld(look.x * 0.4 + spot.x * 0.6, look.y * 0.5 + (spot.y + 25) * 0.5, Math.max(1.5, look.h * 0.5));
+    if (!this.camInit) {
+      this.camPos.copy(desiredPos);
+      this.camLook.copy(desiredLook);
+      this.camInit = true;
+    }
+    this.camPos.lerp(desiredPos, Math.min(1, dt * 4));
+    this.camLook.lerp(desiredLook, Math.min(1, dt * 4));
+    this.camera.position.copy(this.camPos);
+    this.camera.lookAt(this.camLook);
+    this.followSun(spot.x, spot.y + 10);
+  }
+
+  resetCamera() {
+    this.camInit = false;
   }
 
   private updateCamera(sim: PlaySim, alpha: number, dt: number, inp: ViewInput, firstPerson: boolean) {
@@ -231,8 +485,10 @@ export class SceneView {
         pitch = Math.atan2(sim.ball.h - EYE, Math.max(1, Math.hypot(dx, dy))) * 0.6 - 0.05;
       }
       const bob = Math.sin(this.time * 9) * Math.min(1, Math.hypot(qb.vel.x, qb.vel.y) / 6) * 0.04;
-      desiredPos = toWorld(qp.x - Math.sin(yaw) * EYE_BACK, qp.y - Math.cos(yaw) * EYE_BACK, EYE + bob);
-      desiredLook = desiredPos.clone().add(new THREE.Vector3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch)));
+      // Going down in a sack or slide pulls the eyes toward the turf.
+      const down = qb.anim && (qb.anim.down || qb.anim.kind === 'slide') ? Math.min(1, (sim.t - qb.anim.t) / qb.anim.duration) : 0;
+      desiredPos = toWorld(qp.x - Math.sin(yaw) * EYE_BACK, qp.y - Math.cos(yaw) * EYE_BACK, EYE + bob - down * 1.4);
+      desiredLook = desiredPos.clone().add(new THREE.Vector3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch) - down * 0.3, -Math.cos(yaw) * Math.cos(pitch)));
       if (!this.camInit) {
         this.camPos.copy(desiredPos);
         this.camLook.copy(desiredLook);
