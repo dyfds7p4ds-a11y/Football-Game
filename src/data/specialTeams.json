@@ -2,9 +2,32 @@
   "meter": {
     "fillTime": 1.1,
     "anglePeriod": 1.3,
-    "punt": { "zoneCenter": 0.88, "zoneHalfWidth": 0.07, "angleMin": 25, "angleMax": 70, "idealAngle": 50, "angleHalfWidth": 7 },
-    "fieldGoal": { "zoneMargin": 0.06, "zoneHalfWidth": 0.06, "maxDistance": 63, "angle": 38 },
-    "kickoff": { "zoneCenter": 0.9, "zoneHalfWidth": 0.07, "angle": 42 }
+    "punt": {
+      "zoneCenter": 0.88,
+      "zoneHalfWidth": 0.07,
+      "angleMin": 25,
+      "angleMax": 70,
+      "idealAngle": 50,
+      "angleHalfWidth": 7
+    },
+    "fieldGoal": {
+      "zoneMargin": 0.06,
+      "zoneHalfWidth": 0.06,
+      "maxDistance": 63,
+      "angle": 38
+    },
+    "kickoff": {
+      "zoneCenter": 0.9,
+      "zoneHalfWidth": 0.07,
+      "angle": 42
+    },
+    "aim": {
+      "period": 0.9,
+      "zoneHalfWidth": 0.16,
+      "maxLateralDeg": 9,
+      "residualLateral": 0.3,
+      "weight": 0.4
+    }
   },
   "physics": {
     "gravity": 10.73,
@@ -14,7 +37,10 @@
     "maxLateralDeg": 10,
     "shankChance": 0.25
   },
-  "goalposts": { "halfWidth": 3.08, "crossbar": 3.33 },
+  "goalposts": {
+    "halfWidth": 3.08,
+    "crossbar": 3.33
+  },
   "rules": {
     "kickoffSpot": 35,
     "touchback": 25,
@@ -32,10 +58,28 @@
     "rollFriction": 4,
     "kickoffFrontLine": 10,
     "coverageSpeed": 0.95,
-    "blockHold": [0.6, 2.2],
+    "blockHold": [
+      0.6,
+      2.2
+    ],
     "maxTime": 20
   },
   "cpu": {
-    "timingSigma": { "easy": 0.09, "normal": 0.06, "hard": 0.035 }
-  }
+    "timingSigma": {
+      "easy": 0.09,
+      "normal": 0.06,
+      "hard": 0.035
+    }
+  },
+  "coverage": {
+    "diveRange": 2.3,
+    "diveFactor": 1.1,
+    "diveLunge": 2.6,
+    "diveTime": 0.4,
+    "diveCooldown": 1.2,
+    "missStumble": 0.7,
+    "ripCut": 0.6,
+    "startSlot": "LB2"
+  },
+  "_doc": "Special teams (play/kicking.ts, play/returnSim.ts). meter: hold-to-fill power with a timing zone per kick. Phase 3b adds meter.aim, the second layer: after the power is locked a needle sweeps -1..1 (period s per side) and a tap locks it. Kickoff / field goal: aim = sideways direction (maxLateralDeg at the ends, green zone = zoneHalfWidth x kickWindow); punt: aim = launch angle (angleMin..angleMax), green around idealAngle. weight: share of the aim in the kick quality; residualLateral: share of the old random sideways error that remains. coverage: the user's cover man on his own kicks (DIVE tackle range/factor/lunge, a missed dive stumbles him, RIP cuts a return block short)."
 }

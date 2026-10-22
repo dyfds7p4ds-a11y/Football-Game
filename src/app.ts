@@ -19,7 +19,7 @@ import { PlaySim, SIM_DT, type PlayEvent, type PlayResult, type SimInput } from 
 import { ReturnSim } from './play/returnSim';
 import { chooseDefense, emptyTendencies, recordTendency, type DefenseCall } from './play/defenseCalls';
 import { PENALTIES, calloutText, type Flag } from './play/penalties';
-import { ST, cpuRelease, judgeFieldGoal, kickFlight, kickZone, meterAngle, meterPower, releaseKick, type KickFlight, type KickKind } from './play/kicking';
+import { ST, aimNeedle, aimToAngle, aimZone, cpuRelease, judgeFieldGoal, kickFlight, kickZone, meterPower, releaseKickAimed, type KickFlight, type KickKind } from './play/kicking';
 import { PLAY_CLOCK, callTimeoutClock, snapClock, tickClock } from './game/clock';
 import { afterPlay, checkQuarter, type Break } from './game/flow';
 import { attemptFieldGoal, delayOfGame, fieldGoalDistance, punt, type RulesResult } from './game/rules';
@@ -59,6 +59,9 @@ interface KickState {
   t: number;
   fgDistance: number;
   done: boolean;
+  /** Phase 3b: layer 1 (hold for power) then layer 2 (tap to lock the aim needle). */
+  stage: 'power' | 'aim';
+  aimT: number;
 }
 
 export class App {
@@ -595,7 +598,7 @@ export class App {
   }
 
   private startUserKick(kind: KickKind, side: TeamSide, spot: { x: number; y: number }, fgDistance: number) {
-    this.kick = { kind, side, spot, held: 0, holding: false, flight: null, t: 0, fgDistance, done: false };
+    this.kick = { kind, side, spot, held: 0, holding: false, flight: null, t: 0, fgDistance, done: false, stage: 'power', aimT: 0 };
     this.sim = null;
     this.ret = null;
     this.view.resetCamera();
@@ -625,6 +628,8 @@ export class App {
       kind, flight, kickingTeam: this.teamOf(kicking), receivingTeam: this.teamOf(other(kicking)), userReturns,
       // The CPU's tackling scales with difficulty when the user returns; the user's cover team is neutral.
       tackling: userReturns ? diff.tackling : 1, seed: this.rng.int(1, 2 ** 31 - 1),
+      // Phase 3b: on the user's own kicks the user plays a cover man.
+      userCovers: kicking === g.userSide,
     });
     this.retInfo = { kind, kicking };
     this.kick = null;
@@ -640,37 +645,52 @@ export class App {
     const k = this.kick!;
     const diff = DIFFICULTY[this.game!.difficulty];
     if (this.phase === 'kick') {
-      if (f.primaryHeld && !k.done) {
-        k.holding = true;
-        k.held += dt;
-      } else if (k.holding && !f.primaryHeld) {
-        // Release: lock power (and the punt angle), kick it.
-        k.done = true;
-        const rel = releaseKick(k.kind, k.held, diff.kickWindow, k.fgDistance);
-        k.flight = kickFlight(rel, k.spot, k.kind === 'fieldGoal' ? 0 : k.spot.x * 0.3, this.rng);
-        this.audio.thump();
-        if (k.kind === 'fieldGoal') {
-          k.t = 0;
-          this.setPhase('kickFlight');
-        } else {
-          this.startReturn(k.kind as 'kickoff' | 'punt', k.side, k.flight, false);
+      if (k.stage === 'power') {
+        if (f.primaryHeld && !k.done) {
+          k.holding = true;
+          k.held += dt;
+        } else if (k.holding && !f.primaryHeld) {
+          // Layer 1 done: power locked. Layer 2: the aim needle starts sweeping.
+          k.stage = 'aim';
+          k.aimT = 0;
+          k.holding = false;
         }
-        return;
+      } else {
+        k.aimT += dt;
+        // Tap locks the needle (it locks itself after a few sweeps so the game never stalls).
+        if (f.primaryPressed || k.aimT > ST.meter.aim.period * 6) {
+          k.done = true;
+          const rel = releaseKickAimed(k.kind, k.held, aimNeedle(k.aimT), diff.kickWindow, k.fgDistance);
+          k.flight = kickFlight(rel, k.spot, k.kind === 'fieldGoal' ? 0 : k.spot.x * 0.3, this.rng);
+          this.audio.thump();
+          if (k.kind === 'fieldGoal') {
+            k.t = 0;
+            this.setPhase('kickFlight');
+          } else {
+            this.startReturn(k.kind as 'kickoff' | 'punt', k.side, k.flight, false);
+          }
+          return;
+        }
       }
       const zone = kickZone(k.kind, diff.kickWindow, k.fgDistance);
       const P = ST.meter.punt;
+      const aiming = k.stage === 'aim';
+      const needle = aiming ? aimNeedle(k.aimT) : -1;
+      const punt = k.kind === 'punt';
       this.hud.setKickMeter({
-        title: k.kind === 'kickoff' ? 'KICKOFF' : k.kind === 'punt' ? 'PUNT' : `FIELD GOAL ${k.fgDistance} YDS`,
+        title: k.kind === 'kickoff' ? 'KICKOFF' : punt ? 'PUNT' : `FIELD GOAL ${k.fgDistance} YDS`,
         power: meterPower(k.held),
         zone,
-        angle: k.kind === 'punt' ? { value: meterAngle(k.held), min: P.angleMin, max: P.angleMax, ideal: P.idealAngle, halfWidth: P.angleHalfWidth * diff.kickWindow } : undefined,
-        sub: k.kind === 'punt' ? 'Hold for power, release when the needle is in the green.' : 'Hold KICK, release in the green zone.',
+        step: aiming ? 2 : 1,
+        angle: punt ? { value: aimToAngle(needle), min: P.angleMin, max: P.angleMax, ideal: P.idealAngle, halfWidth: P.angleHalfWidth * diff.kickWindow } : undefined,
+        aim: aiming ? { value: needle, zone: aimZone(k.kind, diff.kickWindow), left: punt ? 'LOW' : 'LEFT', right: punt ? 'HIGH' : 'RIGHT', active: true, label: punt ? 'ANGLE' : 'ACCURACY' } : undefined,
+        sub: aiming ? (punt ? 'Tap when the needle is in the green: the hang angle.' : 'Tap when the needle is in the green: straight through.') : 'Hold KICK, release in the green zone for power.',
       });
-      this.touch.setPrimary(k.holding ? 'RELEASE' : 'KICK', 'kick');
+      this.touch.setPrimary(aiming ? 'TAP' : k.holding ? 'RELEASE' : 'KICK', 'kick');
       this.touch.setSlots(null, new Set(), false);
       this.touch.setSecondary(null);
       this.touch.setCharge(false, 0, null);
-      this.hud.setHint(this.playsRun < 6 ? 'Hold KICK to fill the meter, release in the green zone.' : null);
+      this.hud.setHint(this.playsRun < 6 ? (aiming ? 'Second tap: stop the needle in the green.' : 'Hold KICK to fill the meter, release in the green zone.') : null);
       return;
     }
     // Field goal in the air.
@@ -708,7 +728,11 @@ export class App {
       this.acc += dt;
       let first = true;
       while (this.acc >= SIM_DT) {
-        rs.step({ move: rs.userReturns ? f.move : { x: 0, y: 0 }, dash: first && rs.userReturns && (f.secondaryPressed || f.primaryPressed) });
+        rs.step({
+          move: rs.userReturns ? f.move : { x: 0, y: 0 }, dash: first && rs.userReturns && (f.secondaryPressed || f.primaryPressed),
+          // Covering the user's own kick: the camera looks back at the returner, so the stick is mirrored (as on defense).
+          cover: rs.coverMan ? { move: { x: -f.move.x, y: -f.move.y }, dive: first && f.primaryPressed, switch: first && f.secondaryPressed } : undefined,
+        });
         first = false;
         this.acc -= SIM_DT;
         const t = tickClock(this.game!.clock, SIM_DT);
@@ -717,11 +741,17 @@ export class App {
         if (rs.result) break;
       }
       const carrying = rs.userReturns && rs.carrier === rs.returner;
-      this.touch.setPrimary(carrying ? 'DASH' : '', carrying ? 'juke' : 'none');
-      this.touch.setSecondary(null);
+      if (rs.coverMan) {
+        this.touch.setPrimary(rs.coverBlocked ? 'RIP' : 'DIVE', 'throw');
+        this.touch.setSecondary('SWITCH');
+      } else {
+        this.touch.setPrimary(carrying ? 'DASH' : '', carrying ? 'juke' : 'none');
+        this.touch.setSecondary(null);
+      }
       this.touch.setSlots(null, new Set(), false);
       this.touch.setCharge(false, 0, null);
-      this.hud.setHint(rs.userReturns && this.playsRun < 8 ? (carrying ? 'Steer with your left thumb · DASH for a burst' : 'Get under the ball...') : null);
+      this.hud.setHint(rs.coverMan && this.playsRun < 10 ? 'Cover the kick: left thumb runs your man down · DIVE to tackle (RIP when blocked) · SWITCH = man nearest the ball'
+        : rs.userReturns && this.playsRun < 8 ? (carrying ? 'Steer with your left thumb · DASH for a burst' : 'Get under the ball...') : null);
       if (rs.result) {
         this.audio.whistle();
         this.postTimer = 0;

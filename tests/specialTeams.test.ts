@@ -3,7 +3,8 @@ import { Rng } from '../src/core/rng';
 import { v2 } from '../src/core/vec';
 import { getTeam } from '../src/data';
 import {
-  ST, cpuRelease, fgPowerNeeded, judgeFieldGoal, kickFlight, kickZone, meterAngle, meterPower, releaseKick, zoneQuality,
+  ST, aimNeedle, aimToAngle, aimZone, cpuRelease, fgPowerNeeded, judgeFieldGoal, kickFlight, kickZone, meterAngle, meterPower,
+  releaseKick, releaseKickAimed, zoneQuality,
 } from '../src/play/kicking';
 import { ReturnSim } from '../src/play/returnSim';
 import { SIM_DT } from '../src/play/sim';
@@ -203,5 +204,114 @@ describe('special-teams rules', () => {
     const miss = applyFieldGoal(s, false, 47);
     expect(miss.state.possession).toBe('away');
     expect(miss.state.ballY).toBe(37);
+  });
+});
+
+describe('two-layer kick meter (Phase 3b)', () => {
+  it('the aim needle starts at the left and sweeps back and forth', () => {
+    const P = ST.meter.aim.period;
+    expect(aimNeedle(0)).toBeCloseTo(-1, 6);
+    expect(aimNeedle(P / 2)).toBeCloseTo(0, 6);
+    expect(aimNeedle(P)).toBeCloseTo(1, 6);
+    expect(aimNeedle(1.5 * P)).toBeCloseTo(0, 6);
+    expect(aimNeedle(2 * P)).toBeCloseTo(-1, 6);
+  });
+
+  it('layer 2 sets the direction: a centered needle kicks straight, an edge needle hooks', () => {
+    const p = heldFor(kickZone('kickoff', 1).center);
+    const straight = releaseKickAimed('kickoff', p, 0, 1);
+    const left = releaseKickAimed('kickoff', p, -0.9, 1);
+    expect(straight.lateralDeg).toBeCloseTo(0, 6);
+    expect(left.lateralDeg!).toBeLessThan(-5);
+    expect(straight.quality).toBeGreaterThan(left.quality);
+    expect(aimZone('kickoff', 0.7).halfWidth).toBeLessThan(aimZone('kickoff', 1.4).halfWidth);
+  });
+
+  it('punts: layer 2 is the launch angle, green around the ideal angle', () => {
+    const z = aimZone('punt', 1);
+    expect(aimToAngle(z.center)).toBeCloseTo(ST.meter.punt.idealAngle, 6);
+    const p = heldFor(kickZone('punt', 1).center);
+    const ideal = releaseKickAimed('punt', p, z.center, 1);
+    const low = releaseKickAimed('punt', p, -1, 1);
+    expect(ideal.angle).toBeCloseTo(ST.meter.punt.idealAngle, 6);
+    expect(low.angle).toBeCloseTo(ST.meter.punt.angleMin, 6);
+    expect(ideal.quality).toBeGreaterThan(low.quality);
+    const rng = new Rng(3);
+    expect(kickFlight(ideal, v2(0, 20), 0, rng).hang).toBeGreaterThan(kickFlight(low, v2(0, 20), 0, rng).hang);
+  });
+
+  it('field goals keep the power timing; the aim decides wide or through', () => {
+    const c = kickZone('fieldGoal', 1, 40).center;
+    const kick = (aim: number) => ({ ...releaseKickAimed('fieldGoal', heldFor(c), aim, 1, 40), power: c });
+    let good = 0, wideEdge = 0;
+    for (let s = 0; s < 40; s++) {
+      // Posts at y = 110: kick from the 70 for a 40-yarder.
+      if (judgeFieldGoal(kickFlight(kick(0.02), v2(0, 70), 0, new Rng(s))).good) good++;
+      if (judgeFieldGoal(kickFlight(kick(0.95), v2(0, 70), 0, new Rng(s))).reason === 'wide') wideEdge++;
+    }
+    expect(good).toBeGreaterThan(36);
+    expect(wideEdge).toBeGreaterThan(36);
+    // Power out of the zone still falls short, whatever the aim.
+    const weak = releaseKickAimed('fieldGoal', heldFor(0.4), 0, 1, 50);
+    expect(judgeFieldGoal(kickFlight(weak, v2(0, 60), 0, new Rng(1))).good).toBe(false);
+  });
+});
+
+describe('kick coverage (Phase 3b)', () => {
+  const cover = (seed: number, user: 'idle' | 'chase', kind: 'kickoff' | 'punt' = 'kickoff') => {
+    const from = kind === 'kickoff' ? v2(0, ST.rules.kickoffSpot) : v2(0, 30 - ST.rules.puntSnapBack);
+    const rel = kind === 'kickoff' ? { ...releaseKick('kickoff', heldFor(0.6), 1), power: 0.6 } : releaseKick('punt', heldFor(0.85), 1);
+    const flight = kickFlight(rel, from, 0, new Rng(seed));
+    const sim = new ReturnSim({
+      kind, flight, kickingTeam: getTeam('rheinstadt'), receivingTeam: getTeam('elbtal'), userReturns: false, tackling: 1, seed, userCovers: true,
+    });
+    let dives = 0;
+    for (let i = 0; i < 60 * 25 && !sim.result; i++) {
+      const me = sim.coverMan!;
+      const at = sim.carrier?.pos ?? sim.ball.pos;
+      const d = Math.hypot(at.x - me.pos.x, at.y - me.pos.y);
+      const move = user === 'chase' ? { x: (at.x - me.pos.x) / Math.max(d, 0.1), y: (at.y - me.pos.y) / Math.max(d, 0.1) } : { x: 0, y: 0 };
+      const dive = user === 'chase' && !!sim.carrier && d < ST.coverage.diveRange * 0.9;
+      if (dive) dives++;
+      sim.step({ move: { x: 0, y: 0 }, dash: false, cover: { move, dive, switch: false } }, SIM_DT);
+    }
+    return { sim, res: sim.result!, dives };
+  };
+
+  it('the user controls one cover man, the CPU the other ten', () => {
+    const { sim } = cover(1, 'idle');
+    const me = sim.coverMan!;
+    expect(me.slot).toBe(ST.coverage.startSlot);
+    // Idle stick: he stays near his spot while the others run down the field.
+    const moved = sim.actors.filter((a) => a.side === 'def' && a.id !== me.id && Math.abs(a.pos.y - sim.los) > 10).length;
+    expect(Math.abs(me.pos.y - sim.los)).toBeLessThan(6);
+    expect(moved).toBeGreaterThan(5);
+  });
+
+  it('running down and diving at the returner makes tackles and shortens returns', () => {
+    let chase = 0, idle = 0, tacklesByMe = 0;
+    const N = 12;
+    for (let s = 1; s <= N; s++) {
+      const a = cover(s, 'chase');
+      const b = cover(s, 'idle');
+      chase += a.res.yards;
+      idle += b.res.yards;
+      if (a.res.outcome === 'tackle' && a.sim.actors.find((x) => x.anim?.role === 'tackler')?.id === a.sim.coverId) tacklesByMe++;
+    }
+    expect(chase / N).toBeLessThan(idle / N);
+    expect(tacklesByMe).toBeGreaterThan(0);
+  });
+
+  it('SWITCH takes the cover man nearest the ball', () => {
+    const { sim } = cover(2, 'idle');
+    const before = sim.coverId;
+    sim.switchCover();
+    expect(sim.coverId).not.toBe(before);
+    const at = sim.carrier?.pos ?? sim.ball.pos;
+    const me = sim.coverMan!;
+    for (const a of sim.actors) {
+      if (a.side !== 'def' || a.down || a.id === before) continue;
+      expect(Math.hypot(a.pos.x - at.x, a.pos.y - at.y)).toBeGreaterThanOrEqual(Math.hypot(me.pos.x - at.x, me.pos.y - at.y) - 1e-9);
+    }
   });
 });

@@ -6,6 +6,11 @@
  * coverage team runs down in lanes and pursues. Tackles use play/tackle.ts,
  * so returns feel like offense. The renderer reads `actors`, `ball` and
  * `officials` exactly like a PlaySim.
+ *
+ * Phase 3b: on the user's own kicks (`userCovers`) the user controls one
+ * coverage player: stick to move, DIVE for a tackle attempt (longer range,
+ * a miss stumbles him; against a blocker it is a RIP that cuts the block
+ * short), SWITCH to the cover man nearest the ball. The CPU keeps the rest.
  */
 import { Rng } from '../core/rng';
 import { add, clamp, clampLen, dist, len, norm, scale, sub, v2, type Vec2 } from '../core/vec';
@@ -24,6 +29,8 @@ export interface ReturnInput {
   move: Vec2;
   /** Edge-triggered dash. */
   dash: boolean;
+  /** Phase 3b, user on the kicking team: stick for the cover man, edge-triggered DIVE and SWITCH. */
+  cover?: { move: Vec2; dive: boolean; switch: boolean };
 }
 
 export interface ReturnResult {
@@ -48,6 +55,8 @@ export interface ReturnOptions {
   /** Difficulty tackling multiplier for the side that tackles. */
   tackling: number;
   seed: number;
+  /** Phase 3b: the user controls a coverage player (his own punts and kickoffs). */
+  userCovers?: boolean;
 }
 
 const RECV_SLOTS: OffSlot[] = ['RB', 'WR1', 'WR2', 'WR3', 'TE', 'LT', 'LG', 'C', 'RG', 'RT', 'QB'];
@@ -93,6 +102,10 @@ export class ReturnSim {
   private tacklingFactor: number;
   private landing: Vec2;
   private rolling: Vec2 | null = null;
+  /** User-controlled cover man (-1: none). */
+  coverId = -1;
+  private diveUntil = -Infinity;
+  private lastDive = -Infinity;
 
   constructor(o: ReturnOptions) {
     this.kind = o.kind;
@@ -107,6 +120,7 @@ export class ReturnSim {
     this.setupReturnTeam(o.receivingTeam);
     this.setupCoverage(o.kickingTeam);
     this.controlledId = 0;
+    if (o.userCovers) this.coverId = this.actors.find((a) => a.side === 'def' && a.slot === ST.coverage.startSlot)!.id;
     const start = flightPos(o.flight, 0);
     const p = toReceivingFrame(start);
     this.ball = { state: 'air', holder: null, pos: p, h: start.h, prevPos: { ...p }, prevH: start.h, flight: null, looseVel: { x: 0, y: 0, h: 0 } };
@@ -210,6 +224,7 @@ export class ReturnSim {
     this.t += dt;
     this.dashCooldown = Math.max(0, this.dashCooldown - dt);
     const desired = new Map<number, Vec2>();
+    this.controlCover(input.cover, desired);
     this.controlReturner(input, desired);
     this.returnTeamAI(desired);
     this.coverageAI(desired);
@@ -263,6 +278,62 @@ export class ReturnSim {
     }
     const boost = this.t < this.dashUntil ? ST.return.dashBoost : 1;
     desired.set(r.id, scale(move, r.maxSpeed * boost));
+  }
+
+  /** The user's cover man (null when the user returns or watches). */
+  get coverMan(): Actor | null {
+    return this.coverId >= 0 ? this.actors[this.coverId] : null;
+  }
+
+  /** A return blocker has the user's cover man. */
+  get coverBlocked(): boolean {
+    return this.coverId >= 0 && this.blocks.some((b) => b.defender === this.coverId);
+  }
+
+  get diving(): boolean {
+    return this.t < this.diveUntil;
+  }
+
+  /** SWITCH: the cover man nearest the ball (or the carrier), never the current one. */
+  switchCover() {
+    if (this.coverId < 0) return;
+    const at = this.carrier?.pos ?? this.ball.pos;
+    let best: Actor | null = null;
+    for (const a of this.actors) {
+      if (a.side !== 'def' || a.down || a.id === this.coverId) continue;
+      if (!best || dist(a.pos, at) < dist(best.pos, at)) best = a;
+    }
+    if (best) this.coverId = best.id;
+  }
+
+  private controlCover(inp: ReturnInput['cover'], desired: Map<number, Vec2>) {
+    if (this.coverId < 0) return;
+    if (inp?.switch) this.switchCover();
+    const d = this.actors[this.coverId];
+    if (d.down || (this.contact && this.contact.tackler === d.id)) return;
+    const C = ST.coverage;
+    if (this.diving) {
+      desired.set(d.id, d.vel); // in the air: momentum only
+      return;
+    }
+    const move = clampLen(inp?.move ?? v2(), 1);
+    // A blocker on him: he only fights slowly in the stick direction (like the CPU cover men).
+    const blocked = this.blocks.some((b) => b.defender === d.id);
+    desired.set(d.id, scale(move, blocked ? 1.2 : d.maxSpeed * ST.return.coverageSpeed));
+    if (!inp?.dive || this.t - this.lastDive < C.diveCooldown) return;
+    this.lastDive = this.t;
+    const blk = this.blocks.find((b) => b.defender === d.id);
+    if (blk) {
+      // Rip move: get off the return block sooner.
+      blk.until -= C.ripCut;
+      this.emit('rip', d.id);
+      return;
+    }
+    const aim = this.carrier?.pos ?? this.rolling ?? this.landing;
+    d.vel = scale(norm(sub(aim, d.pos)), Math.min(d.maxSpeed + C.diveLunge, len(d.vel) + C.diveLunge));
+    desired.set(d.id, d.vel);
+    this.diveUntil = this.t + C.diveTime;
+    this.emit('jump', d.id);
   }
 
   private nearestCover(p: Vec2): { a: Actor | null; d: number } {
@@ -347,6 +418,7 @@ export class ReturnSim {
         desired.set(d.id, this.actors[this.contact.carrier].vel);
         continue;
       }
+      if (d.id === this.coverId && desired.has(d.id)) continue; // the user's cover man
       const blk = this.blocks.find((x) => x.defender === d.id);
       if (blk) {
         // Engaged: fight toward the returner slowly.
@@ -486,13 +558,14 @@ export class ReturnSim {
     if (!c || this.contact) return;
     for (const d of this.actors) {
       if (d.side !== 'def' || d.down || d.tackleCooldown > 0) continue;
-      if (dist(d.pos, c.pos) > TACKLE.range) continue;
+      const diving = d.id === this.coverId && this.diving;
+      if (dist(d.pos, c.pos) > (diving ? ST.coverage.diveRange : TACKLE.range)) continue;
       const engaged = this.blocks.some((b) => b.defender === d.id);
       if (engaged && dist(d.pos, c.pos) > TACKLE.engagedRange) continue;
       const out = resolveTackle({
         tacklerPos: d.pos, tacklerVel: d.vel, carrierPos: c.pos, carrierVel: c.vel,
         tackling: d.player.ratings.tackling, carrierStrength: c.player.ratings.strength, carrierSpeed: c.player.ratings.speed,
-        engaged, juking: this.t < this.dashUntil, factor: this.tacklingFactor, rng: this.rng,
+        engaged, juking: this.t < this.dashUntil, factor: this.tacklingFactor * (diving ? ST.coverage.diveFactor : 1), rng: this.rng,
       });
       const heading = Math.atan2(d.pos.x - c.pos.x, d.pos.y - c.pos.y);
       const anim = (role: 'carrier' | 'tackler'): ContactAnim => ({ kind: out.kind, role, t: this.t, duration: out.contactTime, down: out.success, heading: role === 'carrier' ? heading : heading + Math.PI });
@@ -505,7 +578,12 @@ export class ReturnSim {
         this.contact = { carrier: c.id, tackler: d.id, whistleAt: this.t + out.contactTime };
         return;
       }
-      d.tackleCooldown = TACKLE.brokenCooldown;
+      d.tackleCooldown = diving ? ST.coverage.missStumble + TACKLE.brokenCooldown : TACKLE.brokenCooldown;
+      if (diving) {
+        // Missed dive: he hits the turf and needs a moment to get up.
+        d.vel = scale(d.vel, 0.2);
+        this.diveUntil = this.t + ST.coverage.missStumble;
+      }
       c.vel = scale(c.vel, out.slow);
       this.emit('brokenTackle', d.id);
     }

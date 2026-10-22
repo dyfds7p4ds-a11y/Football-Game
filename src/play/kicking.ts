@@ -1,8 +1,10 @@
 /**
  * Timing-based kicking (pure). The kicker holds to fill a power meter and
  * releases; a timing zone on the meter decides accuracy, like the throw sweet
- * spot. Punts add an angle needle that sweeps while the button is held: the
- * release locks both power and angle. Results are ballistic flights in the
+ * spot. Phase 3b adds a second layer (`releaseKickAimed`): after the power is
+ * locked an aim needle sweeps and a tap locks it: sideways direction for
+ * kickoffs and field goals, launch angle for punts. `releaseKick` (power
+ * only, the Phase 2 punt angle sweep) stays for the CPU and old callers. Results are ballistic flights in the
  * kicking team's frame (kicking toward +y); game/specialTeams.ts turns them
  * into field position. Tunables in data/specialTeams.json.
  */
@@ -60,6 +62,48 @@ export interface KickRelease {
   /** 0..1 timing quality (power vs zone; for punts also the angle). */
   quality: number;
   inZone: boolean;
+  /** Phase 3b second layer: the locked aim needle (-1..1) and, for kickoffs / field goals, the sideways direction it sets. */
+  aim?: number;
+  lateralDeg?: number;
+}
+
+/** Aim needle (-1..1) `t` seconds after the power was locked: starts at the left end and sweeps back and forth. */
+export function aimNeedle(t: number): number {
+  const k = (t / ST.meter.aim.period) % 2;
+  return k <= 1 ? -1 + 2 * k : 3 - 2 * k;
+}
+
+/** Green zone of the aim needle (center 0). Punts: the ideal angle mapped onto the needle. */
+export function aimZone(kind: KickKind, windowScale: number): KickZone {
+  if (kind === 'punt') {
+    const p = ST.meter.punt;
+    const half = (p.angleMax - p.angleMin) / 2;
+    return { center: (p.idealAngle - (p.angleMin + half)) / half, halfWidth: (p.angleHalfWidth * windowScale) / half };
+  }
+  return { center: 0, halfWidth: ST.meter.aim.zoneHalfWidth * windowScale };
+}
+
+/** Punt launch angle for an aim needle value (left = low line drive, right = high hang). */
+export function aimToAngle(aim: number): number {
+  const p = ST.meter.punt;
+  return p.angleMin + ((clamp(aim, -1, 1) + 1) / 2) * (p.angleMax - p.angleMin);
+}
+
+/**
+ * Two-layer kick: power held for `held` seconds (layer 1, the Phase 2 zones),
+ * then the aim needle locked at `aim` (layer 2).
+ */
+export function releaseKickAimed(kind: KickKind, held: number, aim: number, windowScale: number, fgDistance = 40): KickRelease {
+  const power = meterPower(held);
+  const z = kickZone(kind, windowScale, fgDistance);
+  const pq = zoneQuality(power, z);
+  const aq = zoneQuality(aim, aimZone(kind, windowScale));
+  const w = ST.meter.aim.weight;
+  const quality = pq * (1 - w) + aq * w;
+  const inZone = Math.abs(power - z.center) <= z.halfWidth;
+  if (kind === 'punt') return { kind, power, angle: clamp(aimToAngle(aim), 10, 80), quality, inZone, aim };
+  const angle = kind === 'kickoff' ? ST.meter.kickoff.angle : ST.meter.fieldGoal.angle;
+  return { kind, power, angle, quality, inZone, aim, lateralDeg: clamp(aim, -1, 1) * ST.meter.aim.maxLateralDeg };
 }
 
 export function releaseKick(kind: KickKind, held: number, windowScale: number, fgDistance = 40): KickRelease {
@@ -111,6 +155,8 @@ export function kickFlight(rel: KickRelease, from: Vec2, aimX: number, rng: Rng)
   const maxSpeed = rel.kind === 'punt' ? ph.puntMaxSpeed : rel.kind === 'kickoff' ? ph.kickoffMaxSpeed : ph.fgMaxSpeed;
   let speed = maxSpeed * (0.45 + 0.55 * rel.power);
   let lateral = (1 - rel.quality) * ph.maxLateralDeg * (rng.next() < 0.5 ? -1 : 1) * (0.5 + 0.5 * rng.next());
+  // Aimed kicks: the needle sets the direction; only a little of the random spray remains.
+  if (rel.lateralDeg !== undefined) lateral = rel.lateralDeg + lateral * ST.meter.aim.residualLateral;
   if (rel.quality < 0.3 && rng.chance(ph.shankChance)) {
     speed *= 0.6; // shank
     lateral *= 2;

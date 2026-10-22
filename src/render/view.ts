@@ -458,7 +458,25 @@ export class SceneView {
     let desiredLook: THREE.Vector3;
     // Stay in front of the goalposts (they stand on the end line, y = -10).
     const camY = (y: number) => Math.max(y, -8.5);
-    if (b.state === 'air') {
+    const cover = sim.coverMan;
+    if (cover && cover.id !== this.labeledDef) {
+      if (this.labeledDef >= 0) this.players[this.labeledDef]?.setLabel(null);
+      this.players[cover.id]?.setLabel(cover.slot);
+      this.labeledDef = cover.id;
+    }
+    if (cover) {
+      // Phase 3b coverage: behind the user's cover man, looking at the ball / returner (same rig as defense).
+      const C = CAMERA.defense;
+      const cp = lerp2(cover.prevPos, cover.pos, alpha);
+      if (!cover.down) this.field.setTargetRing(toWorld(cp.x, cp.y), this.time);
+      const focus = b.state === 'held' ? rp : bp;
+      const look = { x: cp.x + (focus.x - cp.x) * 0.5, y: Math.min(cp.y, focus.y + 6) - C.lookAhead * 0.5 };
+      const dx = look.x - cp.x;
+      const dy = look.y - cp.y;
+      const l = Math.hypot(dx, dy) || 1;
+      desiredPos = toWorld(cp.x - (dx / l) * C.back, cp.y - (dy / l) * C.back, C.height + 1);
+      desiredLook = toWorld(look.x, look.y, b.state === 'air' ? Math.max(1, bh * 0.4) : C.lookHeight);
+    } else if (b.state === 'air') {
       // Behind the returner, looking up at the ball coming down.
       desiredPos = toWorld(rp.x, camY(rp.y - 9), 5.2);
       desiredLook = toWorld(bp.x * 0.5 + rp.x * 0.5, (bp.y + rp.y) / 2, Math.max(2, bh * 0.6));

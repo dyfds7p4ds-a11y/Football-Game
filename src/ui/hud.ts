@@ -23,6 +23,10 @@ export interface KickMeterView {
   /** Punt only: needle angle and ideal-angle zone (degrees) inside [min, max]. */
   angle?: { value: number; min: number; max: number; ideal: number; halfWidth: number };
   sub?: string;
+  /** Phase 3b second layer: aim needle (-1..1), its green zone and end labels; `active` while it sweeps. */
+  aim?: { value: number; zone: { center: number; halfWidth: number }; left: string; right: string; active: boolean; label: string };
+  /** Which layer is live: 1 = power, 2 = aim. */
+  step?: 1 | 2;
 }
 
 export class Hud {
@@ -54,6 +58,13 @@ export class Hud {
   private angle = h('div', { class: 'angle' });
   private angleZone = h('div', { class: 'azone' });
   private angleNeedle = h('div', { class: 'needle' });
+  private aimBar = h('div', { id: 'aimbar', class: 'hidden' });
+  private aimZone = h('div', { class: 'azone' });
+  private aimNeedle = h('div', { class: 'aneedle' });
+  private aimLeft = h('span', { class: 'aend left' });
+  private aimRight = h('span', { class: 'aend right' });
+  private aimLabel = h('div', { class: 'alabel' });
+  private kickSteps = h('div', { class: 'steps' });
   readonly pauseBtn = h('button', { class: 'ghost' }, '❚❚');
   readonly timeoutBtn = h('button', { class: 'ghost' }, 'T/O');
   private last = '';
@@ -66,9 +77,10 @@ export class Hud {
     this.pressure.append(this.pressureFill);
     this.crowd.append(h('span', {}, 'CROWD'), h('div', { class: 'bar' }, this.crowdFill));
     this.angle.append(this.angleZone, this.angleNeedle);
-    this.kick.append(this.kickTitle, h('div', { class: 'row' }, h('div', { class: 'power' }, this.kickZone, this.kickFill), this.angle), this.kickSub);
+    this.kick.append(this.kickTitle, this.kickSteps, h('div', { class: 'row' }, h('div', { class: 'power' }, this.kickZone, this.kickFill), this.angle), this.kickSub);
+    this.aimBar.append(this.aimLabel, h('div', { class: 'track' }, this.aimZone, this.aimNeedle, this.aimLeft, this.aimRight));
     this.root = h('div', { id: 'hud' }, this.cues.left, this.cues.right, this.cues.back, this.edges, bug, this.crowd, this.situation,
-      this.pressure, this.pressureLabel, this.banner, this.callout, this.kick, this.playName, this.hint,
+      this.pressure, this.pressureLabel, this.banner, this.callout, this.kick, this.aimBar, this.playName, this.hint,
       h('div', { id: 'topleft' }, this.pauseBtn, this.timeoutBtn));
   }
 
@@ -141,7 +153,29 @@ export class Hud {
 
   setKickMeter(k: KickMeterView | null) {
     this.kick.classList.toggle('hidden', !k);
+    this.aimBar.classList.toggle('hidden', !k?.aim);
     if (!k) return;
+    this.kickSteps.innerHTML = '';
+    if (k.step) {
+      this.kickSteps.append(
+        h('span', { class: k.step === 1 ? 'on' : 'done' }, k.step === 1 ? '1 POWER' : '1 POWER ✓'),
+        h('span', { class: k.step === 2 ? 'on' : '' }, `2 ${k.aim?.label ?? 'AIM'}`),
+      );
+    }
+    if (k.aim) {
+      // Big horizontal bar at the bottom center: -1 = left edge, +1 = right edge.
+      const a = k.aim;
+      const pct = (v: number) => `${((Math.max(-1, Math.min(1, v)) + 1) / 2) * 100}%`;
+      this.aimNeedle.style.left = pct(a.value);
+      this.aimZone.style.left = pct(a.zone.center - a.zone.halfWidth);
+      this.aimZone.style.width = `${a.zone.halfWidth * 50}%`;
+      this.aimLeft.textContent = a.left;
+      this.aimRight.textContent = a.right;
+      this.aimLabel.textContent = a.active ? `TAP KICK TO SET ${a.label}` : a.label;
+      this.aimBar.classList.toggle('live', a.active);
+      const inZone = Math.abs(a.value - a.zone.center) <= a.zone.halfWidth;
+      this.aimNeedle.classList.toggle('good', inZone);
+    }
     this.kickTitle.textContent = k.title;
     this.kickSub.textContent = k.sub ?? '';
     this.kickFill.style.height = `${Math.round(k.power * 100)}%`;
