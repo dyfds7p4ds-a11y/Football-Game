@@ -53,6 +53,7 @@ button:disabled { opacity: 0.45; }
 .slot { width: 68px; height: 68px; }
 .slot.selected { background: var(--accent); outline: 4px solid #fff; }
 .slot.blocking { opacity: 0.5; }
+.slot.defender { font-size: 15px; }
 #charge { position: absolute; right: 134px; bottom: 0; width: 22px; height: 140px; border: 3px solid var(--ink); background: #2a2f38; border-radius: 4px; overflow: hidden; pointer-events: none; }
 #charge .zone { position: absolute; left: 0; right: 0; background: rgba(82, 183, 136, 0.85); }
 #charge .fill { position: absolute; left: 0; right: 0; bottom: 0; background: var(--paper); opacity: 0.9; }

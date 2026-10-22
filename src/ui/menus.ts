@@ -77,6 +77,8 @@ export function settingsPanel(s: Settings, onChange: (s: Settings) => void, inGa
     row('Retro pixels', segmented([{ value: 1, label: 'ON' }, { value: 0, label: 'OFF' }], s.retroPixels ? 1 : 0, (v) => set('retroPixels', v === 1)),
       'Chunky low-res rendering; also faster on older iPads.'),
     row('Look sensitivity', segmented([0.6, 1, 1.5, 2].map((v) => ({ value: v, label: `${v}x` })), s.lookSensitivity, (v) => set('lookSensitivity', v))),
+    row('CPU drives', segmented([{ value: 0, label: 'PLAY DEFENSE' }, { value: 1, label: 'QUICK SIM' }], s.simCpuDrives ? 1 : 0, (v) => set('simCpuDrives', v === 1)),
+      'PLAY DEFENSE: you control a cornerback when the CPU has the ball. QUICK SIM: CPU drives are simulated.'),
     row('Quick sim special teams', onOff('quickSim'), 'ON: punts, field goals and kickoffs resolve instantly (Phase 1). OFF: kick meters and returns.'),
     row('Crowd effect', onOff('crowdEffect'), 'A loud home crowd adds a little pass rush and rattles the visitors (more false starts).'),
     row('Penalties', onOff('penalties')),

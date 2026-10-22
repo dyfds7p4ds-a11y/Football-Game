@@ -23,6 +23,8 @@ export interface Settings {
   sound: boolean;
   /** Real-time soft shadows (turn off on older iPads). */
   shadows: boolean;
+  /** CPU possessions are simulated (Phase 2) instead of played on defense. */
+  simCpuDrives: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -40,6 +42,7 @@ export const DEFAULT_SETTINGS: Settings = {
   intro: true,
   sound: true,
   shadows: true,
+  simCpuDrives: false,
 };
 
 const KEY = 'gridiron-qb.settings.v1';

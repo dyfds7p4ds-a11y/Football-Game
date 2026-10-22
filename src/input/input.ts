@@ -2,7 +2,7 @@
  * InputManager merges touch, keyboard and gamepad into one InputFrame per
  * frame. Game code never looks at raw events.
  */
-import type { EligibleSlot } from '../data/types';
+import type { DefSlot, EligibleSlot } from '../data/types';
 import type { Vec2 } from '../core/vec';
 
 export interface InputFrame {
@@ -20,6 +20,8 @@ export interface InputFrame {
   slotHeld: EligibleSlot | null;
   /** Secondary action: slide (QB) / dash (returner). */
   secondaryPressed: boolean;
+  /** On defense: on-screen cornerback button pressed this frame (switch control to him). */
+  defenderPressed: DefSlot | null;
   /** Any button, key or tap this frame (skips cutscenes). */
   anyPressed: boolean;
   pausePressed: boolean;
@@ -47,6 +49,7 @@ export class InputManager {
   private keySlots: EligibleSlot[] = [];
   private padSlot: EligibleSlot | null = null;
   private pendingSecondary = false;
+  private pendingDefender: DefSlot | null = null;
   private pendingAny = false;
   /** Latched so a tap shorter than one frame is never lost. */
   private pendingPrimary = false;
@@ -116,6 +119,10 @@ export class InputManager {
   }
   pressSecondary() {
     this.pendingSecondary = true;
+  }
+  pressDefender(slot: DefSlot) {
+    this.lastDevice = 'touch';
+    this.pendingDefender = slot;
   }
   pressPause() {
     this.pendingPause = true;
@@ -188,6 +195,7 @@ export class InputManager {
       slotPressed: this.pendingSlot,
       slotHeld: this.touchSlot ?? this.keySlots[this.keySlots.length - 1] ?? this.padSlot,
       secondaryPressed: this.pendingSecondary,
+      defenderPressed: this.pendingDefender,
       anyPressed: this.pendingAny,
       pausePressed: this.pendingPause,
       timeoutPressed: this.pendingTimeout,
@@ -197,6 +205,7 @@ export class InputManager {
     this.lookPitch = 0;
     this.pendingSlot = null;
     this.pendingSecondary = false;
+    this.pendingDefender = null;
     this.pendingAny = false;
     this.pendingPrimary = false;
     this.pendingPause = false;

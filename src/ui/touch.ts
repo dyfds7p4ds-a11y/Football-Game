@@ -3,7 +3,7 @@
  * receiver buttons + primary action button (bottom right). Multi-touch safe:
  * every control tracks its own pointerId.
  */
-import type { EligibleSlot } from '../data/types';
+import type { DefSlot, EligibleSlot } from '../data/types';
 import type { InputManager } from '../input/input';
 import { VirtualJoystick } from '../input/joystick';
 import { h } from './dom';
@@ -22,6 +22,7 @@ export class TouchControls {
   readonly chargeBox: HTMLElement;
   readonly secondary: HTMLButtonElement;
   private slotBtns = new Map<EligibleSlot, HTMLButtonElement>();
+  private defBtns = new Map<DefSlot, HTMLButtonElement>();
   private joy = new VirtualJoystick(60);
   private joyId: number | null = null;
   private lookId: number | null = null;
@@ -63,6 +64,16 @@ export class TouchControls {
       btn.addEventListener('pointerup', up);
       btn.addEventListener('pointercancel', up);
       this.slotBtns.set(slot, btn);
+      actions.append(btn);
+    }
+    // Defense: switch the controlled cornerback (same arc as the receiver buttons).
+    for (const [slot, [r, b]] of [['CB1', SLOT_POS.WR1], ['CB2', SLOT_POS.WR2], ['NB', SLOT_POS.WR3]] as [DefSlot, [number, number]][]) {
+      const btn = h('button', { class: 'slot defender hidden', style: { right: `${r}px`, bottom: `${b}px` } }, slot);
+      btn.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        input.pressDefender(slot);
+      });
+      this.defBtns.set(slot, btn);
       actions.append(btn);
     }
     this.root = h('div', { id: 'touch' }, joyzone, lookzone, this.base, this.knob, actions);
@@ -151,6 +162,14 @@ export class TouchControls {
       btn.classList.toggle('selected', slot === selected);
       btn.classList.toggle('blocking', blocking.has(slot));
       btn.classList.toggle('hidden', !visible);
+    }
+  }
+
+  /** Cornerback switch buttons on defense (null hides them); `selected` is the one under control. */
+  setDefenders(selected: DefSlot | null) {
+    for (const [slot, btn] of this.defBtns) {
+      btn.classList.toggle('hidden', !selected);
+      btn.classList.toggle('selected', slot === selected);
     }
   }
 

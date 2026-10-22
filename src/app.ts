@@ -9,7 +9,7 @@
  */
 import { Rng } from './core/rng';
 import { DIFFICULTY, getTeam } from './data';
-import type { EligibleSlot, PlayData, TeamData } from './data/types';
+import type { DefSlot, EligibleSlot, PlayData, TeamData } from './data/types';
 import { ELIGIBLE } from './data/types';
 import { InputManager, type InputFrame } from './input/input';
 import { SceneView } from './render/view';
@@ -17,7 +17,7 @@ import { SLOT_COLORS } from './render/fieldMesh';
 import { Cutscene } from './render/cutscene';
 import { PlaySim, SIM_DT, type PlayEvent, type PlayResult, type SimInput } from './play/sim';
 import { ReturnSim } from './play/returnSim';
-import { chooseDefense, recordTendency } from './play/defenseCalls';
+import { chooseDefense, emptyTendencies, recordTendency, type DefenseCall } from './play/defenseCalls';
 import { PENALTIES, calloutText, type Flag } from './play/penalties';
 import { ST, cpuRelease, judgeFieldGoal, kickFlight, kickZone, meterAngle, meterPower, releaseKick, type KickFlight, type KickKind } from './play/kicking';
 import { PLAY_CLOCK, callTimeoutClock, snapClock, tickClock } from './game/clock';
@@ -36,6 +36,8 @@ import { IntroOverlay } from './ui/intro';
 import { Modal, boxScore, button, driveSummary, helpContent, scoreLine, settingsPanel, titleScreen } from './ui/menus';
 import { h } from './ui/dom';
 import { CrowdAudio } from './audio/crowdAudio';
+import { CpuQB, chooseCpuPlay, fourthDownCall } from './play/qbAI';
+import { DEF_CONTROL } from './play/interception';
 import { reactionTo, reactionToFlag } from './audio/crowdMix';
 
 type Phase = 'title' | 'intro' | 'playcall' | 'presnap' | 'live' | 'postplay' | 'kick' | 'kickFlight' | 'return' | 'returnPost' | 'break' | 'gameover';
@@ -90,6 +92,12 @@ export class App {
   private callouts: { at: number; flag: Flag }[] = [];
   /** A flag was thrown since the last snap: the next play-clock expiry is not a second penalty. */
   private waiveDelayOfGame = false;
+  /** CPU has the ball and the user plays defense (interactive CPU drive). */
+  private defense = false;
+  private cpuQB: CpuQB | null = null;
+  /** Cornerback the user controls; kept from play to play. */
+  private defSlot: DefSlot = 'CB1';
+  private presnapTimer = 0;
 
   constructor(canvas: HTMLCanvasElement, ui: HTMLElement) {
     this.view = new SceneView(canvas);
@@ -99,6 +107,7 @@ export class App {
       onPunt: () => this.userKickFromPlaycall('punt'),
       onFieldGoal: () => this.userKickFromPlaycall('fieldGoal'),
       onTimeout: () => this.timeout(),
+      onDefense: (call) => this.callDefense(call),
     });
     ui.append(this.touch.root, this.hud.root, this.playcall.root, this.intro.root, this.modal.root,
       h('div', { id: 'rotate' }, 'Rotate your iPad to landscape for the best experience.'));
@@ -140,6 +149,7 @@ export class App {
     this.phase = p;
     const onField = p === 'presnap' || p === 'live' || p === 'postplay' || p === 'kick' || p === 'kickFlight' || p === 'return' || p === 'returnPost';
     this.touch.setVisible(onField);
+    if (!this.defense) this.touch.setDefenders(null);
     this.hud.root.classList.toggle('hidden', p === 'title' || p === 'intro');
     this.intro.show(p === 'intro');
     if (p !== 'kick') this.hud.setKickMeter(null);
@@ -243,12 +253,13 @@ export class App {
         return this.startKickoff(g.pendingKickoff);
       }
     }
-    if (this.game!.possession !== this.game!.userSide) return this.runCpuDrive();
+    if (this.game!.possession !== this.game!.userSide) return this.settings.simCpuDrives ? this.runCpuDrive() : this.enterDefense();
     this.enterPlaycall();
   }
 
   private enterPlaycall() {
     const g = this.game!;
+    this.defense = false;
     this.kick = null;
     this.setPhase('playcall');
     this.hud.showBanner(null);
@@ -267,6 +278,132 @@ export class App {
     const edge = crowdEdge(g.crowd, this.settings.crowdEffect);
     const offHome = g.possession === 'home';
     return { off: offHome ? edge.homePenalty : edge.awayPenalty, def: offHome ? edge.awayPenalty : edge.homePenalty };
+  }
+
+  // ------------------------------------------------------------ defense (interactive CPU drives)
+
+  /** Down markers in the user's world: a CPU possession's yard lines are in the CPU's frame. */
+  private setMarkersFor(g: GameState) {
+    const flip = g.possession !== g.userSide;
+    const los = flip ? 100 - g.ballY : g.ballY;
+    const fd = flip ? 100 - (g.ballY + g.toGo) : g.ballY + g.toGo;
+    this.view.field.setMarkers(los, fd);
+    this.view.field.showMarkers(true);
+  }
+
+  /** CPU ball: fourth-down decision, then the user's defensive play call. */
+  private enterDefense() {
+    const g = this.game!;
+    if (g.down === 4) {
+      const trailingLate = g.clock.quarter >= 4 && g.clock.remaining < 300 && g.score[g.possession] < g.score[g.userSide];
+      const call = fourthDownCall({ down: g.down, toGo: g.toGo, yardline: g.ballY }, trailingLate);
+      if (call === 'fieldGoal') return this.quickKick('fg');
+      if (call === 'punt') return this.settings.quickSim ? this.quickKick('punt') : this.startCpuKick('punt');
+    }
+    this.defense = true;
+    this.kick = null;
+    this.sim = null;
+    this.setPhase('playcall');
+    this.hud.showBanner(null);
+    this.hud.setPlayName(null);
+    this.hud.setHint(null);
+    this.view.showRoutes(null);
+    this.setMarkersFor(g);
+    this.playcall.showDefense(g);
+  }
+
+  /** The user picked a defense (null: let the coordinator call it); the CPU picks its play. */
+  private callDefense(call: DefenseCall | null) {
+    const g = this.game!;
+    if (!this.defense || this.phase !== 'playcall') return;
+    this.playcall.hide();
+    const diff = DIFFICULTY[g.difficulty];
+    const sit = { down: g.down, toGo: g.toGo, yardline: g.ballY };
+    const defense = call ?? chooseDefense(
+      { ...sit, halfSecondsLeft: (g.clock.quarter % 2 === 1 ? g.clock.quarterLength : 0) + g.clock.remaining, scoreDiff: g.score[g.possession] - g.score[g.userSide] },
+      emptyTendencies(), DIFFICULTY.normal, this.rng,
+    );
+    const play = chooseCpuPlay(sit, this.rng);
+    this.play = play;
+    // The defenders are the user's team: they cover at Normal. Difficulty shows in the CPU QB (cpuOffense) and the flag rate.
+    this.sim = new PlaySim({
+      play, defense, offenseTeam: this.cpuTeam, defenseTeam: this.userTeam, ballX: g.ballX, los: g.ballY,
+      difficulty: { ...DIFFICULTY.normal, penaltyRate: diff.penaltyRate }, seed: this.rng.int(1, 2 ** 31 - 1),
+      penaltyBias: this.penaltyBias(), userDefense: true,
+    });
+    this.sim.selectDefender(this.defSlot);
+    this.cpuQB = new CpuQB(play, diff, new Rng(this.rng.int(1, 2 ** 31 - 1)));
+    this.ret = null;
+    this.callouts = [];
+    this.target = null;
+    this.view.bindPlay(this.sim, this.cpuTeam, this.userTeam);
+    this.view.showRoutes(null);
+    this.setMarkersFor(g);
+    this.hud.setPlayName(`DEFENSE · ${defense.name}`);
+    this.presnapTimer = 0;
+    this.setPhase('presnap');
+  }
+
+  /** CB buttons (touch) or 1 / 2 / 3 (keyboard, gamepad) switch the controlled cornerback. */
+  private switchDefender(f: InputFrame) {
+    const keyMap: Partial<Record<EligibleSlot, DefSlot>> = { WR1: 'CB1', WR2: 'CB2', WR3: 'NB' };
+    const slot = f.defenderPressed ?? (f.slotPressed ? keyMap[f.slotPressed] ?? null : null);
+    const sim = this.sim!;
+    if (!slot) return;
+    sim.selectDefender(slot);
+    if (sim.userDefender?.slot === slot) this.defSlot = slot;
+  }
+
+  private presnapDefense(f: InputFrame, dt: number) {
+    this.presnapTimer += dt;
+    this.switchDefender(f);
+    const left = Math.max(0, DEF_CONTROL.presnapAutoSnap - this.presnapTimer);
+    this.touch.setPrimary(`READY ${Math.ceil(left)}`, 'snap');
+    this.touch.setSecondary(null);
+    this.touch.setSlots(null, new Set(), false);
+    this.touch.setDefenders(this.defSlot);
+    this.touch.setCharge(false, 0, null);
+    this.hud.setEdgeMarkers(null);
+    this.hud.setHint(this.playsRun < 6 ? `You are ${this.defSlot}. Left thumb moves him · JUMP plays the ball (time it!) or dives at the runner · CB buttons switch` : null);
+    if (f.primaryPressed || left <= 0) {
+      const g = this.game!;
+      this.game = { ...g, clock: snapClock(g.clock) };
+      this.waiveDelayOfGame = false;
+      this.acc = 0;
+      this.playsRun++;
+      this.setPhase('live');
+    }
+  }
+
+  private liveDefense(f: InputFrame, dt: number) {
+    const sim = this.sim!;
+    this.switchDefender(f);
+    // The camera looks back at the offense: stick up = toward the line of scrimmage.
+    const def = { move: { x: -f.move.x, y: -f.move.y }, jump: f.primaryPressed };
+    this.acc += dt;
+    let first = true;
+    while (this.acc >= SIM_DT) {
+      const inp = this.cpuQB!.input(sim);
+      inp.defense = first ? def : { ...def, jump: false };
+      sim.step(inp);
+      first = false;
+      this.acc -= SIM_DT;
+      const t = tickClock(this.game!.clock, SIM_DT);
+      this.game = { ...this.game!, clock: t.clock };
+      this.onEvents(sim.drainEvents());
+      if (sim.result) break;
+    }
+    this.checkCallouts();
+    const c = sim.carrier;
+    const runner = !!c && c.side === 'off' && (c.slot !== 'QB' || sim.pastLos(c));
+    this.touch.setPrimary(runner ? 'DIVE' : 'JUMP', 'throw');
+    this.touch.setSecondary(null);
+    this.touch.setSlots(null, new Set(), false);
+    this.touch.setDefenders(this.defSlot);
+    this.touch.setCharge(false, 0, null);
+    this.hud.setEdgeMarkers(null);
+    this.hud.setHint(null);
+    if (sim.result) this.whistle();
   }
 
   private callPlay(play: PlayData) {
@@ -327,7 +464,7 @@ export class App {
     if (res.fouls.length) this.waiveDelayOfGame = true;
     const r = enf.result;
     const st = { ...r.state, stats: { ...r.state.stats } };
-    const side = g.userSide;
+    const side = g.possession;
     const s = { ...st.stats[side] };
     // A play wiped out by an accepted penalty doesn't count in the box score.
     if (!enf.enforced && !enf.offsetting) {
@@ -682,7 +819,10 @@ export class App {
       this.game = q.state;
       if (q.brk !== 'none') return this.handleBreak(q.brk);
     }
-    if (t.playClockExpired && this.waiveDelayOfGame) {
+    if (t.playClockExpired && this.defense) {
+      // The CPU offense is waiting on the user's defensive call: no delay of game for that.
+      this.game = { ...this.game, clock: { ...this.game.clock, playClock: PLAY_CLOCK } };
+    } else if (t.playClockExpired && this.waiveDelayOfGame) {
       // No penalty chains: the first expiry after a flagged play only resets the play clock.
       this.waiveDelayOfGame = false;
       this.game = { ...this.game, clock: { ...this.game.clock, playClock: PLAY_CLOCK } };
@@ -718,6 +858,7 @@ export class App {
   }
 
   private presnap(f: InputFrame, dt: number) {
+    if (this.defense) return this.presnapDefense(f, dt);
     this.updateGaze(f, dt);
     // Picking a receiver pre-snap only marks him; the QB does not turn his head.
     if (f.slotPressed) this.target = f.slotPressed;
@@ -764,6 +905,7 @@ export class App {
   }
 
   private live(f: InputFrame, dt: number) {
+    if (this.defense) return this.liveDefense(f, dt);
     const sim = this.sim!;
     this.updateGaze(f, dt);
     const inp = this.simInput(f);
@@ -780,17 +922,22 @@ export class App {
     }
     this.checkCallouts();
     this.updateLiveControls();
-    if (sim.result) {
+    if (sim.result) this.whistle();
+  }
+
+  /** Whistle: result banner and crowd reaction, then the post-play phase. */
+  private whistle() {
+    const r = this.sim!.result!;
+    const g = this.game!;
+    {
       this.setPhase('postplay');
       this.postTimer = 0;
       this.audio.whistle();
-      const r = sim.result;
-      const g = this.game!;
       const headline = { noPlay: 'NO PLAY', touchdown: 'TOUCHDOWN!', interception: 'INTERCEPTED!', sack: 'SACKED!', safety: 'SAFETY!', incomplete: 'INCOMPLETE', outOfBounds: 'OUT OF BOUNDS', tackle: r.yards >= g.toGo ? 'FIRST DOWN!' : 'DOWN' }[r.outcome];
       const enf = enforcePenalties(g, r, r.fouls);
       // Flags get their boos at the call-out; interceptions already got their reaction at the catch.
       if (r.outcome !== 'interception') this.audio.react(reactionTo({ ...this.playForCrowd(g, r, enf), penaltyOnHome: null }));
-      const sub = r.fouls.length ? `FLAG: ${enf.text}` : `${r.description} · vs ${r.defenseCall}`;
+      const sub = r.fouls.length ? `FLAG: ${enf.text}` : this.defense ? `${r.description} · ${this.play!.name}` : `${r.description} · vs ${r.defenseCall}`;
       this.flash(headline, sub, POSTPLAY_TIME + 1);
     }
   }
@@ -800,6 +947,11 @@ export class App {
       if (e.type === 'deflection') this.flash('BROKEN UP', '', 1);
       if (e.type === 'drop') this.flash('DROPPED', '', 1);
       if (e.type === 'brokenTackle') this.flash('BROKEN TACKLE', '', 0.7);
+      if (e.type === 'timing' && this.sim?.lastTiming) {
+        const gr = this.sim.lastTiming.grade;
+        const early = this.sim.lastTiming.offset < 0;
+        if (gr !== 'none') this.flash(gr === 'perfect' ? 'PERFECT JUMP' : gr === 'good' ? 'GOOD JUMP' : early ? 'JUMPED TOO EARLY' : 'JUMPED TOO LATE', '', 0.9);
+      }
       if (e.type === 'interception' && this.game) this.audio.react(this.game.possession === 'home' ? { kind: 'silence', intensity: 1 } : { kind: 'roar', intensity: 0.8 });
       if (e.type === 'flag' && this.sim) {
         const fl = this.sim.flags[this.sim.flags.length - 1];

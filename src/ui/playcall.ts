@@ -3,6 +3,7 @@ import { FORMATIONS, PLAYS } from '../data';
 import type { EligibleSlot, PlayCategory, PlayData } from '../data/types';
 import { ELIGIBLE, OFF_SLOTS } from '../data/types';
 import { buildRoute } from '../play/routes';
+import { DEFENSE_CALLS, type DefenseCall } from '../play/defenseCalls';
 import { fieldGoalDistance, fieldGoalProbability } from '../game/rules';
 import type { GameState } from '../game/state';
 import { downText, ballOnText } from '../game/state';
@@ -20,6 +21,25 @@ export interface PlaycallHandlers {
   onPunt: () => void;
   onFieldGoal: () => void;
   onTimeout: () => void;
+  /** Defense: the user's call (null = let the coordinator call it). */
+  onDefense: (call: DefenseCall | null) => void;
+}
+
+const SHELL_NOTE: Record<DefenseCall['shell'], string> = {
+  cover0: 'All-out pressure, man everywhere, no deep help. Big risk, big reward.',
+  cover1: 'Man coverage with one deep safety over the top.',
+  cover2: 'Two deep safeties, corners squat on the flats.',
+  cover3: 'Three deep, four underneath. Safe against the deep ball.',
+  cover2man: 'Man underneath, two safeties deep. Tight coverage, light rush.',
+};
+
+/** What the user's cornerbacks do in this call, e.g. "CB1 man WR1 · CB2 deep third". */
+function cornerNote(call: DefenseCall): string {
+  const what = (slot: 'CB1' | 'CB2' | 'NB') => {
+    const a = call.assignments[slot];
+    return a.kind === 'man' ? `man ${a.target}` : a.kind === 'zone' ? `zone ${a.zone}` : a.kind;
+  };
+  return `CB1 ${what('CB1')} · CB2 ${what('CB2')} · NB ${what('NB')}`;
 }
 
 export class PlaycallScreen {
@@ -32,6 +52,7 @@ export class PlaycallScreen {
   private fgBtn = h('button', {}, 'FIELD GOAL');
   private toBtn = h('button', { class: 'ghost' }, 'TIMEOUT');
   private filter: PlayCategory | 'all' = 'all';
+  private defense = false;
 
   constructor(private handlers: PlaycallHandlers) {
     for (const t of TABS) {
@@ -53,6 +74,35 @@ export class PlaycallScreen {
   }
 
   show(s: GameState) {
+    this.defense = false;
+    this.tabs.classList.remove('hidden');
+    this.renderCards();
+    this.root.classList.remove('hidden');
+    this.update(s);
+  }
+
+  /** Defensive play call: coverage cards (the CPU calls its offensive play). */
+  showDefense(s: GameState) {
+    this.defense = true;
+    this.tabs.classList.add('hidden');
+    const auto = h('div', { class: 'card' },
+      h('div', { class: 'row' }, h('span', { class: 'name' }, 'Coordinator\'s Call')),
+      h('span', { class: 'tag run' }, 'auto'),
+      h('div', { class: 'desc' }, 'Let the defensive coordinator read the situation and call it.'));
+    onTap(auto, () => this.handlers.onDefense(null));
+    this.grid.replaceChildren(auto, ...DEFENSE_CALLS.map((c) => {
+      const card = h('div', { class: 'card' },
+        h('div', { class: 'row' }, h('span', { class: 'name' }, c.name)),
+        h('span', { class: 'tag deep' }, c.shell.replace('cover', 'cover ').replace('2man', '2 man')),
+        h('div', { class: 'desc' }, SHELL_NOTE[c.shell]),
+        h('div', { class: 'desc', style: { opacity: '0.7' } }, cornerNote(c)));
+      let startY = 0;
+      card.addEventListener('pointerdown', (e) => (startY = e.clientY));
+      card.addEventListener('pointerup', (e) => {
+        if (Math.abs(e.clientY - startY) < 12) this.handlers.onDefense(c);
+      });
+      return card;
+    }));
     this.root.classList.remove('hidden');
     this.update(s);
   }
@@ -69,17 +119,19 @@ export class PlaycallScreen {
     const dist = fieldGoalDistance(s.ballY);
     const pct = Math.round(fieldGoalProbability(dist) * 100);
     this.fgBtn.textContent = `FG ${dist}y (${pct}%)`;
-    this.fgBtn.disabled = dist > 62;
-    this.puntBtn.disabled = s.ballY > 65;
+    this.fgBtn.disabled = dist > 62 || this.defense;
+    this.puntBtn.disabled = s.ballY > 65 || this.defense;
+    this.fgBtn.classList.toggle('hidden', this.defense);
+    this.puntBtn.classList.toggle('hidden', this.defense);
     this.toBtn.textContent = `TIMEOUT (${s.timeouts[s.userSide]})`;
     this.toBtn.disabled = s.timeouts[s.userSide] <= 0;
     const pc = Math.ceil(s.clock.playClock);
     this.clockEl.textContent = `PLAY CLOCK :${String(pc).padStart(2, '0')}`;
     this.clockEl.style.color = pc <= 10 ? '#e63946' : '#ffd23f';
-    const title = `${downText(s)} · ${ballOnText(s.ballY)} · Q${s.clock.quarter} ${formatClock(s.clock.remaining)}`;
+    const title = `${this.defense ? 'CPU ball · ' : ''}${downText(s)} · ${ballOnText(s.ballY)} · Q${s.clock.quarter} ${formatClock(s.clock.remaining)}`;
     if (this.header.dataset.title !== title) {
       this.header.dataset.title = title;
-      this.header.replaceChildren(h('h2', {}, 'CALL A PLAY'), h('span', { style: { opacity: '0.85' } }, title), h('div', { class: 'spacer' }), this.clockEl);
+      this.header.replaceChildren(h('h2', {}, this.defense ? 'CALL A DEFENSE' : 'CALL A PLAY'), h('span', { style: { opacity: '0.85' } }, title), h('div', { class: 'spacer' }), this.clockEl);
     }
   }
 
