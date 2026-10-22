@@ -1,0 +1,7 @@
+{
+  "_doc": "Route boundary logic (play/routes.ts). Waypoints stay sidelineMargin inside the sideline; a receiver continuing past his last waypoint turns upfield once he is within turnUpfieldAt yards of the sideline, and never runs past the margin or the end line. holdInside: no player without the ball is ever farther out than this many yards inside the sideline (momentum, pushes).",
+  "sidelineMargin": 1.5,
+  "turnUpfieldAt": 3.0,
+  "endLineMargin": 1.0,
+  "holdInside": 0.4
+}

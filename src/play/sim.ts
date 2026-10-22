@@ -13,7 +13,7 @@ import type {
 } from '../data/types';
 import { ELIGIBLE, OL_SLOTS, DEF_SLOTS, OFF_SLOTS } from '../data/types';
 import { FORMATIONS, playerFor } from '../data';
-import { buildRoute, type Route } from './routes';
+import { ROUTE_BOUNDS, boundRouteVelocity, buildRoute, type Route } from './routes';
 import { ZONES, type DefAssignment, type DefenseCall } from './defenseCalls';
 import { computeThrow, ballHeightAt, THROW, throwWindow, type ThrowWindow } from './throw';
 import { resolveCatch, type CatchCandidate } from './catch';
@@ -485,6 +485,7 @@ export class PlaySim {
     this.updateEngagements(dt, desired);
     this.integrate(dt, desired);
     this.separate();
+    this.keepInBounds();
     this.updateBall(dt);
     if (!this.result) this.handleThrowing(input);
     if (!this.result) this.checkTackles();
@@ -801,7 +802,7 @@ export class PlaySim {
           continue;
         }
       }
-      desired.set(a.id, this.followRoute(a));
+      desired.set(a.id, boundRouteVelocity(a.pos, this.followRoute(a), a.routeIdx >= (a.route?.points.length ?? 0)));
     }
   }
 
@@ -1288,6 +1289,18 @@ export class PlaySim {
       if (sp > 0.5 && !(a.slot === 'QB' && a.side === 'off' && this.controlledId === a.id)) {
         a.facing = Math.atan2(a.vel.x, a.vel.y);
       }
+    }
+  }
+
+  /** Players without the ball stop at the sideline instead of drifting out (momentum, pushes). */
+  private keepInBounds() {
+    const xMax = FIELD.halfWidth - ROUTE_BOUNDS.holdInside;
+    const c = this.carrier;
+    for (const a of this.actors) {
+      if (a === c || a.down || Math.abs(a.pos.x) <= xMax) continue;
+      const side = Math.sign(a.pos.x);
+      a.pos = { x: side * xMax, y: a.pos.y };
+      if (Math.sign(a.vel.x) === side) a.vel = { x: 0, y: a.vel.y };
     }
   }
 

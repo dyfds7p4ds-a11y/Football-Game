@@ -2,9 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { Rng } from '../src/core/rng';
 import { v2 } from '../src/core/vec';
 import { resolveCatch, catchProbability } from '../src/play/catch';
-import { buildRoute } from '../src/play/routes';
+import { ROUTE_BOUNDS, boundRouteVelocity, buildRoute } from '../src/play/routes';
+import { FIELD } from '../src/play/field';
+import { PlaySim, idleInput } from '../src/play/sim';
+import { getDefenseCall } from '../src/play/defenseCalls';
 import { DEFENSE_CALLS, chooseDefense, emptyTendencies, recordTendency } from '../src/play/defenseCalls';
-import { DIFFICULTY, PLAYS } from '../src/data';
+import { DIFFICULTY, PLAYS, getPlay, getTeam } from '../src/data';
 import { runPlay } from './simHarness';
 
 describe('play simulation', () => {
@@ -136,5 +139,36 @@ describe('cpu defense play-calling', () => {
       return n;
     };
     expect(count(t)).toBeGreaterThan(count(emptyTendencies()));
+  });
+});
+
+describe('routes stay in bounds', () => {
+  it('a receiver continuing toward the sideline turns upfield and never runs past the margin', () => {
+    const xMax = FIELD.halfWidth - ROUTE_BOUNDS.sidelineMargin;
+    const near = boundRouteVelocity({ x: xMax - 0.5, y: 40 }, { x: 6, y: 2 }, true);
+    expect(near.x).toBeLessThan(2);
+    expect(Math.hypot(near.x, near.y)).toBeCloseTo(Math.hypot(6, 2), 5);
+    expect(boundRouteVelocity({ x: -xMax - 0.1, y: 40 }, { x: -5, y: 1 }, false).x).toBe(0);
+    // Inside the field and moving inward: untouched.
+    expect(boundRouteVelocity({ x: 20, y: 40 }, { x: -6, y: 1 }, true)).toEqual({ x: -6, y: 1 });
+    // Waypoints are clamped inside the margin.
+    const r = buildRoute({ route: 'out', depth: 6 }, { x: 22, y: 29 }, 0);
+    for (const p of r.points) expect(Math.abs(p.x)).toBeLessThanOrEqual(xMax + 1e-9);
+  });
+
+  it('no player without the ball leaves the field on any pass play, from either hash', () => {
+    const passPlays = ['slants', 'quick_outs', 'mesh', 'curl_flat', 'levels', 'smash', 'y_cross', 'four_verts', 'deep_post', 'bubble', 'pa_boot', 'pa_shot'];
+    for (const id of passPlays) for (const bx of [-FIELD.hash, 0, FIELD.hash]) {
+      const sim = new PlaySim({
+        play: getPlay(id), defense: getDefenseCall('cover3'), offenseTeam: getTeam('rheinstadt'), defenseTeam: getTeam('elbtal'),
+        ballX: bx, los: 30, difficulty: DIFFICULTY.normal, seed: 3, penaltyBias: { off: 0, def: 0 },
+      });
+      for (let i = 0; i < 60 * 6 && !sim.result; i++) {
+        const inp = idleInput();
+        if (sim.t < 0.6) inp.move = { x: 0, y: -1 };
+        sim.step(inp);
+        for (const a of sim.actors) if (a !== sim.carrier) expect(Math.abs(a.pos.x), `${id} ${a.slot}`).toBeLessThan(FIELD.halfWidth);
+      }
+    }
   });
 });
