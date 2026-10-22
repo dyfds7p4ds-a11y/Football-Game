@@ -1,0 +1,14 @@
+{
+  "verticalConcepts": {
+    "four_verts": ["WR1", "WR2", "WR3", "TE"],
+    "pa_shot": ["WR1", "WR2", "WR3"],
+    "deep_post": ["WR1", "WR2", "WR3"]
+  },
+  "difficulty": "normal",
+  "sampleTime": 2.4,
+  "dropFor": 0.8,
+  "seedsPerDefense": 12,
+  "openMargin": 0.2,
+  "maxOpenRate": 0.45,
+  "maxOpenRateRoute1": 0.4
+}

@@ -18,6 +18,8 @@ import { ZONES, type DefAssignment, type DefenseCall } from './defenseCalls';
 import { computeThrow, ballHeightAt, THROW, throwWindow, type ThrowWindow } from './throw';
 import { resolveCatch, type CatchCandidate } from './catch';
 import { FIELD } from './field';
+import { COVERAGE, CoverageReader, carrySpot, inPhaseSpot, overTop, type Helper, type ReadTarget } from './coverage';
+import { inPhase, throwingWindow } from './windows';
 
 export const SIM_DT = 1 / 60;
 const HISTORY = 90;
@@ -176,6 +178,9 @@ export class PlaySim {
   private carrierPath: Vec2[] = [];
   private carrierIdx = 0;
   private bySlot = new Map<string, Actor>();
+  readonly coverage: CoverageReader;
+  /** Underneath defender id -> vertical receiver id he is carrying. */
+  private carry = new Map<number, number>();
 
   constructor(opts: SimOptions) {
     this.play = opts.play;
@@ -186,6 +191,7 @@ export class PlaySim {
     this.rng = new Rng(opts.seed);
     this.setupOffense(opts.offenseTeam);
     this.setupDefense(opts.defenseTeam);
+    this.coverage = new CoverageReader(this.diff.coverageRead, this.rng.fork());
     const qb = this.get('QB');
     this.controlledId = qb.id;
     const center = this.get('C');
@@ -401,6 +407,7 @@ export class PlaySim {
     const desired = new Map<number, Vec2>();
     this.controlUser(input, desired);
     this.offenseAI(desired);
+    this.updateReads();
     this.defenseAI(desired);
     this.updateEngagements(dt, desired);
     this.integrate(dt, desired);
@@ -707,6 +714,71 @@ export class PlaySim {
 
   // ---------------------------------------------------------------- defense AI
 
+  /** Route-concept reads: vertical stems, over-the-top help, carries and the shell roll. */
+  private updateReads() {
+    if (this.play.run || this.passThrown || this.handedOff) return;
+    const lag = this.diff.reactionTime;
+    const receivers: ReadTarget[] = ELIGIBLE.map((s) => {
+      const r = this.get(s);
+      return { id: r.id, pos: this.perceived(r, lag), vel: this.perceivedVel(r, lag), maxSpeed: r.maxSpeed, blocks: !!r.route?.blocks };
+    });
+    const helpers: Helper[] = [];
+    const isHelpZone = (z: string) => z === 'deepM' || z === 'deepL' || z === 'deepR';
+    for (const d of this.actors) {
+      const a = d.assignment;
+      if (d.side === 'def' && !d.down && a?.kind === 'zone' && isHelpZone(a.zone)) {
+        helpers.push({ id: d.id, homeX: this.ballX * 0.5 + ZONES[a.zone].x });
+      }
+    }
+    const helperIds = new Set(helpers.map((x) => x.id));
+    const qb = this.get('QB');
+    const others = this.actors.filter((a) => a.side === 'def' && !a.down && !helperIds.has(a.id));
+    const danger = (id: number) => throwingWindow(qb.pos, this.actors[id], others).margin;
+    this.coverage.update(this.t, this.los, this.ballX, receivers, helpers, danger);
+
+    // Underneath zone defenders carry vertical stems through their zone.
+    this.carry.clear();
+    if (this.t < this.coverage.readAt) return;
+    const taken = new Set<number>();
+    for (const d of this.actors) {
+      const a = d.assignment;
+      if (d.side !== 'def' || d.down || a?.kind !== 'zone' || ZONES[a.zone].deep) continue;
+      const z = ZONES[a.zone];
+      const landX = this.ballX * 0.5 + z.x;
+      const shallowThreat = receivers.some((r) => !r.blocks && !this.coverage.verticals.has(r.id) &&
+        Math.abs(r.pos.x - landX) < z.w && r.pos.y < this.los + 6 && r.pos.y > this.los - 2);
+      if (shallowThreat && (a.zone === 'flatL' || a.zone === 'flatR')) continue;
+      let best: ReadTarget | null = null;
+      for (const r of receivers) {
+        if (!this.coverage.verticals.has(r.id) || taken.has(r.id)) continue;
+        if (Math.abs(r.pos.x - landX) > z.w + 2) continue;
+        const depth = r.pos.y - this.los;
+        const helped = [...this.coverage.help.values()].includes(r.id) || this.deepOverTop(r);
+        if (depth > COVERAGE.carryDepth + (helped ? 0 : 8)) continue;
+        if (!best || dist(r.pos, d.pos) < dist(best.pos, d.pos)) best = r;
+      }
+      if (best) {
+        this.carry.set(d.id, best.id);
+        taken.add(best.id);
+      }
+    }
+  }
+
+  /** Defender is level with or behind his receiver, so his back is to the QB. */
+  private trailing(d: Actor, r: Actor): boolean {
+    return d.pos.y < r.pos.y + 0.5 && len(r.vel) > 3;
+  }
+
+  /** Is a deep zone defender already sitting over the top of this receiver? */
+  private deepOverTop(r: ReadTarget): boolean {
+    for (const d of this.actors) {
+      const a = d.assignment;
+      if (d.side !== 'def' || d.down || a?.kind !== 'zone' || !ZONES[a.zone].deep) continue;
+      if (Math.abs(d.pos.x - r.pos.x) < 4 && d.pos.y - r.pos.y > COVERAGE.carryHandoffCushion) return true;
+    }
+    return false;
+  }
+
   private defenseAI(desired: Map<number, Vec2>) {
     const qb = this.get('QB');
     const carrier = this.carrier;
@@ -723,7 +795,11 @@ export class PlaySim {
         goal = d.pos;
       } else if (runMode && this.t > this.runRecognizedAt + d.reaction + (isDeep ? 0.35 : 0)) {
         goal = this.pursuit(d, carrier!);
-      } else if (flight && this.t > this.throwAt + d.reaction) {
+      } else if (flight && asg.kind === 'man' && this.get(asg.target).id === flight.targetId && this.trailing(d, this.get(asg.target))) {
+        // Trailing man defender can't see the ball: play through the receiver's hands.
+        const r = this.get(asg.target);
+        goal = add(r.pos, scale(r.vel, 0.25));
+      } else if (flight && this.t > this.throwAt + d.reaction + (asg.kind === 'man' ? COVERAGE.manBallReadDelay : 0)) {
         const timeLeft = flight.T - flight.t;
         const canReach = dist(d.pos, flight.landing) / d.maxSpeed < timeLeft + 0.6;
         goal = canReach ? flight.landing : add(flight.landing, scale(norm(sub(d.pos, flight.landing)), 2));
@@ -732,11 +808,45 @@ export class PlaySim {
         urgency = 0.55;
       } else {
         goal = this.coverageGoal(d, asg, qb);
-        if (asg.kind === 'zone') urgency = 0.9;
+        if (asg.kind === 'zone' && !isDeep && !this.carry.has(d.id)) urgency = 0.9;
       }
-      if (asg.kind !== 'rush' && this.t < d.reaction && !(asg.kind === 'man')) goal = d.pos; // read step
+      if (asg.kind !== 'rush' && this.t < d.reaction && asg.kind !== 'man') {
+        // Read step: underneath defenders hold, deep defenders bail to their landmark.
+        goal = isDeep && asg.kind === 'zone' ? this.zoneLandmark(asg.zone) : d.pos;
+      }
       desired.set(d.id, this.seek(d, goal, urgency));
     }
+  }
+
+  /**
+   * Deep defender with vertical threats in his zone: over the top of one, or
+   * split two, leaning toward the route he was assigned to help on.
+   */
+  private deepSplit(d: Actor, land: Vec2, width: number, helpId: number | undefined): Vec2 | null {
+    const lag = d.reaction * 0.6;
+    const tops: Vec2[] = [];
+    let helpTop: Vec2 | null = null;
+    for (const s of ELIGIBLE) {
+      const r = this.get(s);
+      if (!this.coverage.verticals.has(r.id)) continue;
+      const seen = this.perceived(r, lag);
+      const isHelp = r.id === helpId;
+      if (!isHelp && Math.abs(seen.x - land.x) > width) continue;
+      const top = overTop({ pos: seen, vel: this.perceivedVel(r, lag) }, this.ballX,
+        isHelp ? COVERAGE.helpCushion : COVERAGE.deepCushion, isHelp ? COVERAGE.helpLead : COVERAGE.deepLead);
+      tops.push(top);
+      if (isHelp) helpTop = top;
+    }
+    if (tops.length === 0) return null;
+    const mid = v2(tops.reduce((a, t) => a + t.x, 0) / tops.length, Math.max(land.y, ...tops.map((t) => t.y)));
+    const goal = helpTop ? v2(mid.x + (helpTop.x - mid.x) * COVERAGE.helpLean, Math.max(mid.y, helpTop.y)) : mid;
+    return add(goal, scale(d.coverOffset, 0.4));
+  }
+
+  private zoneLandmark(zone: keyof typeof ZONES): Vec2 {
+    const z = ZONES[zone];
+    const roll = z.deep ? this.coverage.roll : 0;
+    return v2(clamp(this.ballX * 0.5 + z.x + roll, -FIELD.halfWidth + 2, FIELD.halfWidth - 2), this.los + z.y);
   }
 
   /** Aim at the interception point of the (perceived) ball carrier's path. */
@@ -782,15 +892,40 @@ export class PlaySim {
           // Receiver stayed in to block: become a spy / green-dog rusher.
           return this.t > 1.2 ? qb.pos : v2(qb.pos.x, this.los + 4);
         }
-        const seen = this.perceived(r, d.reaction);
-        const vel = this.perceivedVel(r, d.reaction);
+        if (this.coverage.verticals.has(r.id)) {
+          // Vertical stem: get in phase on the receiver's inside hip. A break
+          // (post, corner) costs the defender his full reaction time again.
+          const lag = d.reaction * COVERAGE.phaseLag;
+          const vel = this.perceivedVel(r, lag);
+          if (vel.y > r.maxSpeed * COVERAGE.verticalSpeedFrac) {
+            return add(inPhaseSpot({ pos: this.perceived(r, lag), vel }, this.ballX), scale(d.coverOffset, 0.3));
+          }
+        }
+        // In press range the defender feels the release, so he reads it faster.
+        const lag = dist(d.pos, r.pos) < 3 ? d.reaction * 0.5 : d.reaction;
+        const seen = this.perceived(r, lag);
+        const vel = this.perceivedVel(r, lag);
         const inward = Math.sign(this.ballX - seen.x) || 1;
         const cushion = d.position === 'CB' ? 0.9 : 0.6;
-        return add(add(seen, scale(vel, 0.35)), v2(inward * 0.5 + d.coverOffset.x, cushion + d.coverOffset.y * 0.5));
+        const goal = add(add(seen, scale(vel, 0.35)), v2(inward * 0.5 + d.coverOffset.x, cushion + d.coverOffset.y * 0.5));
+        // Never back down toward the LOS once the receiver releases upfield.
+        if (vel.y > 1) goal.y = Math.max(goal.y, d.pos.y - 0.3);
+        return goal;
       }
       case 'zone': {
         const z = ZONES[asg.zone];
-        const land = v2(clamp(this.ballX * 0.5 + z.x, -FIELD.halfWidth + 2, FIELD.halfWidth - 2), this.los + z.y);
+        const land = this.zoneLandmark(asg.zone);
+        const helpId = this.coverage.help.get(d.id);
+        if (z.deep) {
+          const split = this.deepSplit(d, land, z.w, helpId);
+          if (split) return split;
+        }
+        const carryId = this.carry.get(d.id);
+        if (carryId !== undefined) {
+          const r = this.actors[carryId];
+          const lag = d.reaction * 0.7;
+          return add(carrySpot({ pos: this.perceived(r, lag), vel: this.perceivedVel(r, lag) }, this.ballX), scale(d.coverOffset, 0.3));
+        }
         let threat: Actor | null = null;
         let best = Infinity;
         for (const s of ELIGIBLE) {
@@ -800,7 +935,8 @@ export class PlaySim {
           const dx = Math.abs(seen.x - land.x);
           if (dx > z.w) continue;
           if (z.deep ? seen.y < this.los + 7 : seen.y > this.los + 16 || seen.y < this.los - 1) continue;
-          const score = dist(seen, land);
+          // Deep defenders prioritise vertical stems over anything else in their zone.
+          const score = dist(seen, land) - (z.deep && this.coverage.verticals.has(r.id) ? 8 : 0);
           if (score < best) {
             best = score;
             threat = r;
@@ -809,8 +945,9 @@ export class PlaySim {
         if (!threat) return add(land, d.coverOffset);
         const seen = this.perceived(threat, d.reaction);
         if (z.deep) {
-          const vel = this.perceivedVel(threat, d.reaction);
-          return v2(land.x * 0.3 + seen.x * 0.7 + d.coverOffset.x, Math.max(land.y, seen.y + 4 + Math.max(0, vel.y) * 0.45));
+          const vel = this.perceivedVel(threat, d.reaction * 0.6);
+          const top = overTop({ pos: seen, vel }, this.ballX, COVERAGE.deepCushion, COVERAGE.deepLead);
+          return v2(land.x * 0.3 + top.x * 0.7 + d.coverOffset.x, Math.max(land.y, top.y));
         }
         return add(lerp(land, add(seen, v2(0, 0.8)), 0.7), d.coverOffset);
       }
@@ -961,10 +1098,12 @@ export class PlaySim {
       id: a.id, pos: a.pos, catching: a.player.ratings.catching, coverage: a.player.ratings.coverage,
     });
     const offense = ELIGIBLE.map((s) => this.get(s)).filter((a) => !a.down).map(toCand);
-    const defense = this.actors.filter((a) => a.side === 'def' && !a.down).map(toCand);
+    const target = f.targetId !== null ? this.actors[f.targetId] : null;
+    const defense = this.actors.filter((a) => a.side === 'def' && !a.down)
+      .map((a) => ({ ...toCand(a), inPhase: !!target && inPhase(target, a, COVERAGE.inPhaseDist) }));
     const out = resolveCatch({
       landing: f.landing, quality: f.quality, speed: f.speed, offense, defense,
-      ballSkills: this.diff.ballSkills, rng: this.rng,
+      ballSkills: this.diff.ballSkills, inPhaseBreakup: COVERAGE.inPhaseBreakup, inPhaseInt: COVERAGE.inPhaseInt, rng: this.rng,
     });
     const b = this.ball;
     switch (out.kind) {

@@ -119,4 +119,10 @@ export interface DifficultyConfig {
   throwWindow: number;
   /** CPU offense strength multiplier for simulated drives. */
   cpuOffense: number;
+  /** 0..1 quality of the defense's route-concept reads (read speed, picking the right help). */
+  coverageRead: number;
+  /** Multiplier on edge/back-side pressure and on blockers losing their man over time. */
+  pocketPressure: number;
+  /** Width multiplier of the special-teams timing zones (punt, field goal, kickoff). */
+  kickWindow: number;
 }
