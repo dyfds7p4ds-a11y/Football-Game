@@ -447,6 +447,13 @@ export class PlaySim {
     return { window: win, charge: this.charge, charging: this.charging };
   }
 
+  /** The RB is next to the QB and the QB still has the ball behind the line: a handoff is possible. */
+  canHandoff(): boolean {
+    const qb = this.get('QB');
+    return !this.result && this.ball.state === 'held' && this.ball.holder === qb.id && !this.pastLos(qb) && !this.passThrown &&
+      dist(qb.pos, this.get('RB').pos) < 1.4;
+  }
+
   canThrow(): boolean {
     const qb = this.get('QB');
     return !this.result && this.ball.state === 'held' && this.ball.holder === qb.id && qb.pos.y <= this.los + 0.2;
@@ -544,6 +551,8 @@ export class PlaySim {
   }
 
   private stepAfterWhistle(dt: number) {
+    // Time keeps running for the presentation only (flags landing, players getting up).
+    this.t += dt;
     this.updateOfficials(dt);
     for (const a of this.actors) {
       a.vel = scale(a.vel, Math.max(0, 1 - dt * 3));

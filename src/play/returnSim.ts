@@ -133,8 +133,9 @@ export class ReturnSim {
     const L = this.landing;
     const ret = this.addActor('off', 'RB', playerFor(team, 'RB'), v2(clamp(L.x, -20, 20), Math.max(-4, Math.min(L.y, this.kind === 'punt' ? L.y : 3))));
     ret.maxSpeed *= 1.02;
-    const front = this.kind === 'kickoff' ? this.los - ST.return.kickoffFrontLine : this.los + 1;
-    const wave2 = this.kind === 'kickoff' ? Math.max(12, (front + ret.pos.y) / 2) : this.los - 2;
+    // Receiving frame: the return team lines up below the LOS (lower y), the kicking team above it.
+    const front = this.kind === 'kickoff' ? this.los - ST.return.kickoffFrontLine : this.los - 1;
+    const wave2 = this.kind === 'kickoff' ? Math.max(12, (front + ret.pos.y) / 2) : this.los - 7;
     RECV_SLOTS.slice(1).forEach((slot, i) => {
       const first = i < 5;
       const k = first ? i : i - 5;
