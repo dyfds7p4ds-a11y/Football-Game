@@ -425,7 +425,7 @@ export class App {
       this.setPhase('postplay');
       this.postTimer = 0;
       const r = sim.result;
-      const headline = { touchdown: 'TOUCHDOWN!', interception: 'INTERCEPTED!', sack: 'SACKED!', safety: 'SAFETY!', incomplete: 'INCOMPLETE', outOfBounds: 'OUT OF BOUNDS', tackle: r.yards >= this.game!.toGo ? 'FIRST DOWN!' : 'DOWN' }[r.outcome];
+      const headline = { noPlay: 'NO PLAY', touchdown: 'TOUCHDOWN!', interception: 'INTERCEPTED!', sack: 'SACKED!', safety: 'SAFETY!', incomplete: 'INCOMPLETE', outOfBounds: 'OUT OF BOUNDS', tackle: r.yards >= this.game!.toGo ? 'FIRST DOWN!' : 'DOWN' }[r.outcome];
       this.flash(headline, `${r.description} · vs ${r.defenseCall}`, POSTPLAY_TIME + 1);
     }
   }

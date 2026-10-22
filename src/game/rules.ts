@@ -66,6 +66,8 @@ export function applyPlay(s: GameState, p: RulesPlay): RulesResult {
     }
     case 'incomplete':
       return advanceDown(s, s.ballY, s.ballX, 'incomplete', 'INCOMPLETE');
+    case 'noPlay':
+      return { state: s, stop: 'penalty', possessionChanged: false, scored: null, headline: 'NO PLAY' };
     case 'outOfBounds':
       return advanceDown(s, p.endY, hashX(p.endX), 'outOfBounds', '');
     case 'tackle':

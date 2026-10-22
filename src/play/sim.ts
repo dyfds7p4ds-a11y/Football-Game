@@ -22,6 +22,8 @@ import { COVERAGE, CoverageReader, carrySpot, inPhaseSpot, overTop, type Helper,
 import { inPhase, throwingWindow } from './windows';
 import { TACKLE, resolveTackle, type ContactKind } from './tackle';
 import { SCREEN, screenTiming, type ScreenTiming } from './screen';
+import { nearestOfficial, setupOfficials, updateOfficials, type Official } from './officials';
+import { PENALTIES, makeFoul, rollFoul, type Flag, type Foul, type FoulType, type PenaltyBias } from './penalties';
 import pocketJson from '../data/pocket.json';
 
 export const POCKET = pocketJson.pocket;
@@ -137,7 +139,7 @@ export interface Ball {
 export type PlayEventType =
   | 'snap' | 'handoff' | 'pitch' | 'throw' | 'catch' | 'interception' | 'deflection' | 'drop'
   | 'incomplete' | 'tackle' | 'sack' | 'touchdown' | 'outOfBounds' | 'brokenTackle' | 'juke' | 'safety'
-  | 'scramble' | 'shed' | 'slide';
+  | 'scramble' | 'shed' | 'slide' | 'flag';
 
 export interface PlayEvent {
   t: number;
@@ -145,7 +147,7 @@ export interface PlayEvent {
   actor?: number;
 }
 
-export type PlayOutcome = 'tackle' | 'sack' | 'incomplete' | 'outOfBounds' | 'touchdown' | 'interception' | 'safety';
+export type PlayOutcome = 'tackle' | 'sack' | 'incomplete' | 'outOfBounds' | 'touchdown' | 'interception' | 'safety' | 'noPlay';
 
 export interface PlayResult {
   outcome: PlayOutcome;
@@ -161,6 +163,8 @@ export interface PlayResult {
   turnover: boolean;
   defenseCall: string;
   description: string;
+  /** Fouls flagged during the play; enforced after the whistle (game/penalties.ts). */
+  fouls: Foul[];
 }
 
 export interface SimOptions {
@@ -173,6 +177,8 @@ export interface SimOptions {
   los: number;
   difficulty: DifficultyConfig;
   seed: number;
+  /** Penalty chance scale per side (crowd noise etc.); 0 turns fouls off. Default 1. */
+  penaltyBias?: PenaltyBias;
 }
 
 interface Engagement {
@@ -203,6 +209,9 @@ export class PlaySim {
   scrambling = false;
   charge = 0;
   charging = false;
+  readonly officials: Official[];
+  readonly fouls: Foul[] = [];
+  readonly flags: Flag[] = [];
 
   private rng: Rng;
   private steps = 0;
@@ -228,6 +237,9 @@ export class PlaySim {
   private contact: Contact | null = null;
   /** When the defense has read the screen (Infinity until then). */
   private screenReadAt = Infinity;
+  /** Separate stream so turning penalties on or off never changes the football. */
+  private penRng: Rng;
+  private penaltyBias: PenaltyBias;
 
   constructor(opts: SimOptions) {
     this.play = opts.play;
@@ -239,6 +251,9 @@ export class PlaySim {
     this.setupOffense(opts.offenseTeam);
     this.setupDefense(opts.defenseTeam);
     this.coverage = new CoverageReader(this.diff.coverageRead, this.rng.fork());
+    this.penRng = this.rng.fork();
+    this.penaltyBias = opts.penaltyBias ?? { off: 1, def: 1 };
+    this.officials = setupOfficials(this.los, this.ballX);
     const qb = this.get('QB');
     this.controlledId = qb.id;
     const center = this.get('C');
@@ -447,6 +462,8 @@ export class PlaySim {
       this.stepAfterWhistle(dt);
       return;
     }
+    if (this.steps === 0) this.snapFouls();
+    if (this.result) return;
     this.t += dt;
     this.steps++;
     if (!input.throwHeld) this.throwArmed = true;
@@ -470,6 +487,8 @@ export class PlaySim {
       this.finish(c ? 'tackle' : 'incomplete', c ?? this.get('QB'));
     }
     this.updatePressure();
+    if (!this.result) this.checkLateHits();
+    this.updateOfficials(dt);
     for (const a of this.actors) {
       a.history.push({ ...a.pos });
       if (a.history.length > HISTORY) a.history.shift();
@@ -478,7 +497,54 @@ export class PlaySim {
     }
   }
 
+  private updateOfficials(dt: number) {
+    const c = this.carrier;
+    updateOfficials(this.officials, {
+      los: this.los, ballX: this.ballX, ball: this.ball.pos, carrier: c && c.side === 'off' && c.slot !== 'QB' ? c.pos : c && this.scrambling ? c.pos : null,
+      players: this.actors.map((a) => a.pos), dead: !!this.result,
+    }, dt);
+  }
+
+  // ---------------------------------------------------------------- penalties
+
+  private addFoul(type: FoulType, spot: Vec2) {
+    if (this.fouls.some((f) => f.type === type)) return;
+    const foul = makeFoul(type, spot, this.t);
+    this.fouls.push(foul);
+    const official = nearestOfficial(this.officials, spot);
+    const o = this.officials[official];
+    this.flags.push({ foul, official, from: { ...o.pos }, to: { ...spot }, t0: this.t + PENALTIES.flag.throwDelay, T: PENALTIES.flag.flightTime });
+    this.emit('flag');
+  }
+
+  /** Pre-snap fouls: false start kills the play, offside gives a free play. */
+  private snapFouls() {
+    if (rollFoul('falseStart', this.penaltyBias, this.penRng)) {
+      const ol = this.get(this.penRng.pick(OL_SLOTS));
+      this.addFoul('falseStart', ol.pos);
+      this.result = this.makeResult('noPlay', v2(this.ballX, this.los), null);
+      return;
+    }
+    if (rollFoul('offside', this.penaltyBias, this.penRng)) {
+      const d = this.getDef(this.penRng.pick(['DE1', 'DT1', 'DT2', 'DE2'] as const));
+      this.addFoul('offside', d.pos);
+    }
+  }
+
+  /** Roughing the passer: a rusher still arriving at the QB just after the throw. */
+  private checkLateHits() {
+    if (!this.passThrown || this.t - this.throwAt > PENALTIES.lateHitWindow) return;
+    const qb = this.get('QB');
+    for (const d of this.actors) {
+      if (d.side !== 'def' || d.down || !this.isRushing(d) || dist(d.pos, qb.pos) > 0.9 || len(d.vel) < 3) continue;
+      if (d.tackleCooldown > 0) continue;
+      d.tackleCooldown = 1;
+      if (rollFoul('roughingPasser', this.penaltyBias, this.penRng)) this.addFoul('roughingPasser', qb.pos);
+    }
+  }
+
   private stepAfterWhistle(dt: number) {
+    this.updateOfficials(dt);
     for (const a of this.actors) {
       a.vel = scale(a.vel, Math.max(0, 1 - dt * 3));
       a.pos = add(a.pos, scale(a.vel, dt));
@@ -989,7 +1055,14 @@ export class PlaySim {
         goal = isDeep && asg.kind === 'zone' ? this.zoneLandmark(asg.zone) : d.pos;
       }
       desired.set(d.id, this.seek(d, goal, urgency));
+      if (asg.kind === 'man' && !this.passThrown && this.t > 0.6) this.checkHolding(d, this.get(asg.target));
     }
+  }
+
+  /** Defensive holding: grabbing a receiver who is trying to get open (per second of contact). */
+  private checkHolding(d: Actor, r: Actor) {
+    if (r.route?.blocks || dist(d.pos, r.pos) > PENALTIES.holdingContactRange || len(r.vel) < 4) return;
+    if (rollFoul('holdingDefense', this.penaltyBias, this.penRng, SIM_DT)) this.addFoul('holdingDefense', d.pos);
   }
 
   /**
@@ -1150,6 +1223,14 @@ export class PlaySim {
       const hold = rushing ? 1 + POCKET.holdFactor * Math.max(0, this.t - POCKET.holdGrace) * this.diff.pocketPressure : 1;
       const rate = (rushing ? 0.05 * e.t * hold : 0.05 + 0.08 * e.t) * ratio * ratio * ratio * this.diff.passRush / n;
       if ((rushing && e.t >= e.loseAt && n === 1) || this.rng.chance(rate * dt)) {
+        if (rollFoul('holdingOffense', this.penaltyBias, this.penRng)) {
+          // Beaten blocker grabs on instead of letting go.
+          this.addFoul('holdingOffense', b.pos);
+          e.loseAt = Infinity;
+          e.t = 0;
+          keep.push(e);
+          continue;
+        }
         this.shedFrom.set(d.id, { blocker: b.id, until: this.t + 1.2 });
         b.blockCooldown = 0.8;
         this.emit('shed', d.id);
@@ -1275,6 +1356,15 @@ export class PlaySim {
     });
     const offense = ELIGIBLE.map((s) => this.get(s)).filter((a) => !a.down).map(toCand);
     const target = f.targetId !== null ? this.actors[f.targetId] : null;
+    if (target && dist(target.pos, f.landing) < 3) {
+      // Pass interference: a beaten defender (not in phase) climbing on the receiver.
+      for (const d of this.actors) {
+        if (d.side !== 'def' || d.down || dist(d.pos, target.pos) > PENALTIES.dpiReach) continue;
+        if (inPhase(target, d, COVERAGE.inPhaseDist)) continue;
+        if (rollFoul('passInterference', this.penaltyBias, this.penRng)) this.addFoul('passInterference', f.landing);
+        break;
+      }
+    }
     const defense = this.actors.filter((a) => a.side === 'def' && !a.down)
       .map((a) => ({ ...toCand(a), inPhase: !!target && inPhase(target, a, COVERAGE.inPhaseDist) }));
     const out = resolveCatch({
@@ -1358,6 +1448,7 @@ export class PlaySim {
         d.vel = c.vel;
         const sack = c.slot === 'QB' && c.pos.y < this.los && !this.passThrown && !this.handedOff;
         this.contact = { carrier: c.id, tackler: d.id, whistleAt: this.t + out.contactTime, sack };
+        if (rollFoul('facemask', this.penaltyBias, this.penRng)) this.addFoul('facemask', c.pos);
         return;
       }
       d.tackleCooldown = TACKLE.brokenCooldown;
@@ -1401,8 +1492,8 @@ export class PlaySim {
   }
 
   private makeResult(outcome: PlayOutcome, at: Vec2, c: Actor | null): PlayResult {
-    const endY = outcome === 'incomplete' ? this.los : outcome === 'touchdown' ? FIELD.length : clamp(at.y, -FIELD.endzone, FIELD.length);
-    const yards = outcome === 'interception' || outcome === 'incomplete' ? 0 : Math.round(endY - this.los);
+    const endY = outcome === 'incomplete' || outcome === 'noPlay' ? this.los : outcome === 'touchdown' ? FIELD.length : clamp(at.y, -FIELD.endzone, FIELD.length);
+    const yards = outcome === 'interception' || outcome === 'incomplete' || outcome === 'noPlay' ? 0 : Math.round(endY - this.los);
     const completion = this.passThrown && c !== null && c.side === 'off' && c.slot !== 'QB';
     const res: PlayResult = {
       outcome,
@@ -1412,11 +1503,12 @@ export class PlaySim {
       duration: this.t,
       passAttempt: this.passThrown,
       completion,
-      rush: !this.passThrown && outcome !== 'sack' && outcome !== 'incomplete',
+      rush: !this.passThrown && outcome !== 'sack' && outcome !== 'incomplete' && outcome !== 'noPlay',
       carrier: c ? c.slot : null,
       turnover: outcome === 'interception',
       defenseCall: this.defense.name,
       description: '',
+      fouls: this.fouls,
     };
     res.description = describe(res, c);
     return res;
@@ -1459,6 +1551,7 @@ function describe(r: PlayResult, c: Actor | null): string {
   const yds = (n: number) => `${Math.abs(n)} yard${Math.abs(n) === 1 ? '' : 's'}`;
   switch (r.outcome) {
     case 'incomplete': return 'Incomplete pass';
+    case 'noPlay': return 'No play';
     case 'interception': return `Intercepted by ${who}!`;
     case 'sack': return `Sacked for a loss of ${yds(r.yards)}`;
     case 'safety': return 'Safety!';

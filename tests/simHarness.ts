@@ -18,12 +18,15 @@ export interface Script {
   onStep?: (sim: PlaySim) => void;
   /** Adjust the input before each step (custom movement, slides, ...). */
   script?: (sim: PlaySim, inp: SimInput) => void;
+  /** Penalty chance scale (default 0: fouls off so football tests stay focused). */
+  penalties?: number;
 }
 
 export function runPlay(playId: string, defId: string, seed: number, script: Script, difficulty: Difficulty = 'normal') {
   const sim = new PlaySim({
     play: getPlay(playId), defense: getDefenseCall(defId), offenseTeam: getTeam('rheinstadt'), defenseTeam: getTeam('elbtal'),
     ballX: 0, los: 30, difficulty: DIFFICULTY[difficulty], seed,
+    penaltyBias: { off: script.penalties ?? 0, def: script.penalties ?? 0 },
   });
   const events: PlayEvent[] = [];
   let chargeUntil = Infinity;

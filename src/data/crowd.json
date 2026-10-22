@@ -1,0 +1,25 @@
+{
+  "start": 50,
+  "baseline": 50,
+  "decayPerPlay": 0.06,
+  "bigPlayYards": 20,
+  "deltas": {
+    "bigPlay": 9,
+    "firstDown": 2,
+    "touchdown": 18,
+    "fieldGoal": 7,
+    "takeaway": 16,
+    "sack": 6,
+    "defensiveStop": 6,
+    "opponentScore": -10,
+    "penaltyAgainst": -6,
+    "turnover": -14,
+    "failedFourthDown": -12,
+    "bigPlayAllowed": -6
+  },
+  "edge": {
+    "threshold": 60,
+    "maxPressure": 0.08,
+    "maxPenalty": 0.3
+  }
+}
