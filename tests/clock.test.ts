@@ -68,7 +68,8 @@ describe('clock', () => {
     expect(r.state.possession).toBe('away');
     expect(r.state.ballY).toBe(25);
 
-    r = checkQuarter({ ...r.state, clock: { ...r.state.clock, quarter: 4, remaining: 0 } });
+    // Phase 3b: a tie goes to overtime, so give the home team the lead.
+    r = checkQuarter({ ...r.state, score: { home: 3, away: 0 }, clock: { ...r.state.clock, quarter: 4, remaining: 0 } });
     expect(r.brk).toBe('gameover');
     expect(r.state.over).toBe(true);
   });

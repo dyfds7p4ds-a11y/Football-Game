@@ -72,6 +72,8 @@ button:disabled { opacity: 0.45; }
 #scorebug > div { padding: 8px 10px; display: flex; align-items: center; gap: 8px; }
 #scorebug .team { color: #fff; }
 #scorebug .score { background: rgba(0, 0, 0, 0.25); padding: 2px 6px; border-radius: 3px; min-width: 32px; text-align: center; }
+#scorebug .nm { display: flex; flex-direction: column; align-items: center; line-height: 1.1; }
+#scorebug .tos { font-size: 8px; letter-spacing: 2px; color: #ffd23f; }
 #scorebug .poss::after { content: '◆'; color: var(--accent); font-size: 9px; }
 #scorebug .mid { background: var(--panel-solid); color: var(--paper); gap: 10px; }
 #scorebug .pc { color: var(--accent); }
@@ -169,7 +171,7 @@ button:disabled { opacity: 0.45; }
 #kickmeter .steps span.on { opacity: 1; color: #ffd23f; }
 #kickmeter .steps span.done { opacity: 0.9; color: #52b788; }
 /* Phase 3b: second kick layer, large and centered so it reads on an iPad held at arm's length */
-#aimbar { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(200px + var(--safe-b)); z-index: 5; pointer-events: none; width: min(620px, 72vw); text-align: center; }
+#aimbar { position: fixed; left: 50%; transform: translateX(-50%); top: 38%; z-index: 5; pointer-events: none; width: min(620px, 72vw); text-align: center; }
 #aimbar .alabel { font-family: var(--font); font-size: 14px; color: var(--paper); margin-bottom: 8px; text-shadow: 0 2px 0 var(--ink); }
 #aimbar.live .alabel { color: #ffd23f; }
 #aimbar .track { position: relative; height: 44px; border: 4px solid var(--ink); border-radius: 8px; background: #2a2f38; box-shadow: 0 4px 0 var(--ink); }

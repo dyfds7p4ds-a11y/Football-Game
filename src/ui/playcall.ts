@@ -119,8 +119,9 @@ export class PlaycallScreen {
     const dist = fieldGoalDistance(s.ballY);
     const pct = Math.round(fieldGoalProbability(dist) * 100);
     this.fgBtn.textContent = `FG ${dist}y (${pct}%)`;
-    this.fgBtn.disabled = dist > 62 || this.defense;
-    this.puntBtn.disabled = s.ballY > 65 || this.defense;
+    // Phase 3b: no field goal on a two-point try; no punts in overtime or on a try.
+    this.fgBtn.disabled = dist > 62 || this.defense || !!s.conversionTry;
+    this.puntBtn.disabled = s.ballY > 65 || this.defense || !!s.overtime || !!s.conversionTry;
     this.fgBtn.classList.toggle('hidden', this.defense);
     this.puntBtn.classList.toggle('hidden', this.defense);
     this.toBtn.textContent = `TIMEOUT (${s.timeouts[s.userSide]})`;

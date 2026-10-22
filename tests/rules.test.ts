@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Rng } from '../src/core/rng';
-import { applyPlay, attemptFieldGoal, delayOfGame, fieldGoalProbability, punt } from '../src/game/rules';
+import { applyPlay, attemptFieldGoal, delayOfGame, fieldGoalProbability, punt, finishTry } from '../src/game/rules';
 import { downText, newGame, type GameState } from '../src/game/state';
 
 const g0 = (): GameState => newGame({ home: 'rheinstadt', away: 'elbtal', userSide: 'home', difficulty: 'normal', quarterLength: 300, seed: 1 });
@@ -45,12 +45,17 @@ describe('play resolution rules', () => {
     expect(r.state.down).toBe(1);
   });
 
-  it('touchdown scores 7 and gives the opponent the ball at its 25', () => {
+  it('touchdown scores 6, then the try; after it the scorer kicks off to the opponent (at its 25 on a touchback)', () => {
     const r = applyPlay(at({ ballY: 90 }), { outcome: 'touchdown', endY: 100, endX: 0 });
-    expect(r.state.score.home).toBe(7);
-    expect(r.state.possession).toBe('away');
-    expect(r.state.ballY).toBe(25);
+    expect(r.state.score.home).toBe(6);
+    expect(r.state.pendingConversion).toBe('home');
     expect(r.stop).toBe('score');
+    const t = finishTry(r.state, 'kick', true);
+    expect(t.state.score.home).toBe(7);
+    expect(t.state.pendingConversion).toBeNull();
+    expect(t.state.possession).toBe('away');
+    expect(t.state.ballY).toBe(25);
+    expect(t.state.pendingKickoff).toBe('home');
   });
 
   it('safety gives the defense 2 points and the ball', () => {

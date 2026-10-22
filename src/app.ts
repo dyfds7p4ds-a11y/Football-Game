@@ -20,9 +20,12 @@ import { ReturnSim } from './play/returnSim';
 import { chooseDefense, emptyTendencies, recordTendency, type DefenseCall } from './play/defenseCalls';
 import { PENALTIES, calloutText, type Flag } from './play/penalties';
 import { ST, aimNeedle, aimToAngle, aimZone, cpuRelease, judgeFieldGoal, kickFlight, kickZone, meterPower, releaseKickAimed, type KickFlight, type KickKind } from './play/kicking';
-import { PLAY_CLOCK, callTimeoutClock, snapClock, tickClock } from './game/clock';
+import { PLAY_CLOCK, snapClock, tickClock } from './game/clock';
 import { afterPlay, checkQuarter, type Break } from './game/flow';
-import { attemptFieldGoal, delayOfGame, fieldGoalDistance, punt, type RulesResult } from './game/rules';
+import { attemptFieldGoal, delayOfGame, fieldGoalDistance, finishTry, punt, type RulesResult } from './game/rules';
+import { chooseConversion, conversionOptions, patDistance, quickConversion, startTwoPointTry, type TryKind } from './game/conversion';
+import { OT, overtimeLabel } from './game/overtime';
+import { callTimeout, cpuWantsTimeout } from './game/timeouts';
 import { enforcePenalties, type Enforcement } from './game/penalties';
 import { applyFieldGoal, applyReturn, kickoffOutOfBounds } from './game/specialTeams';
 import { crowdEdge, crowdIntensity, updateCrowd, type PlayForCrowd } from './game/crowd';
@@ -62,6 +65,8 @@ interface KickState {
   /** Phase 3b: layer 1 (hold for power) then layer 2 (tap to lock the aim needle). */
   stage: 'power' | 'aim';
   aimT: number;
+  /** Phase 3b: this field goal is the extra-point try. */
+  pat?: boolean;
 }
 
 export class App {
@@ -248,6 +253,7 @@ export class App {
   private nextSnap() {
     const g = this.game!;
     if (g.over) return this.showGameOver();
+    if (g.pendingConversion) return this.startConversion(g.pendingConversion);
     if (g.pendingKickoff) {
       if (this.settings.quickSim) {
         // Phase 1 behavior: no kickoff, the receiving team starts at its 25 (already set by the rules).
@@ -258,6 +264,65 @@ export class App {
     }
     if (this.game!.possession !== this.game!.userSide) return this.settings.simCpuDrives ? this.runCpuDrive() : this.enterDefense();
     this.enterPlaycall();
+  }
+
+  // ------------------------------------------------------------ tries (Phase 3b)
+
+  /** The try after a touchdown: the user chooses on a modal, the CPU by its chart. */
+  private startConversion(side: TeamSide) {
+    const g = this.game!;
+    this.playcall.hide();
+    this.setPhase('break');
+    const choose = (kind: TryKind) => {
+      this.modal.hide();
+      const st = this.game!;
+      if (kind === 'two') {
+        this.game = startTwoPointTry(st);
+        if (side === st.userSide) return this.enterPlaycall();
+        // CPU two-point play: defend it, unless CPU drives are simulated.
+        if (!this.settings.simCpuDrives && !this.settings.quickSim) return this.enterDefense();
+        return this.resolveQuickTry('two');
+      }
+      if (side === st.userSide && !this.settings.quickSim) {
+        const d = patDistance();
+        this.startUserKick('fieldGoal', side, { x: 0, y: 110 - d }, d);
+        this.kick!.pat = true;
+        this.hud.setPlayName(`EXTRA POINT · ${d} YDS`);
+        return;
+      }
+      this.resolveQuickTry('kick');
+    };
+    if (side !== g.userSide) return choose(chooseConversion(g, side));
+    const opts = conversionOptions(g);
+    this.modal.show(h('h2', {}, 'TOUCHDOWN: THE TRY'), h('p', {}, scoreLine(g)),
+      h('p', {}, opts.length === 1 ? `From the ${overtimeLabel(g)} on a touchdown must be followed by a two-point try.` : 'Kick the extra point (1) or run one play from the 3 (2).'),
+      h('div', { class: 'row' },
+        ...(opts.includes('kick') ? [button('KICK · 1 PT', () => choose('kick'))] : []),
+        button('GO FOR 2', () => choose('two'), 'primary')));
+  }
+
+  /** A try resolved without playing it (CPU kick, quick sim). */
+  private resolveQuickTry(kind: TryKind) {
+    const g = this.game!;
+    const side = g.pendingConversion ?? g.possession;
+    const r = quickConversion(g, kind, this.rng);
+    this.afterTry(g, side, r);
+  }
+
+  private afterTry(g: GameState, side: TeamSide, r: RulesResult) {
+    const crowd = updateCrowd(g.crowd, {
+      homeOffense: side === 'home', yards: 0, firstDown: false,
+      score: r.scored ? { home: r.scored.side === 'home', points: r.scored.points } : null,
+      turnover: false, sack: false, penaltyOnHome: null, failedFourthDown: false,
+    });
+    const ap = afterPlay({ ...r.state, crowd }, r.stop);
+    this.game = ap.state;
+    this.setPhase('break');
+    this.modal.show(h('h2', {}, r.headline), h('p', {}, scoreLine(this.game)),
+      h('div', { class: 'row' }, button('CONTINUE', () => {
+        this.modal.hide();
+        this.handleBreak(ap.brk);
+      }, 'primary')));
   }
 
   private enterPlaycall() {
@@ -277,7 +342,8 @@ export class App {
   /** Penalty chance per side for a user offense play: crowd edge, or off. */
   private penaltyBias() {
     const g = this.game!;
-    if (!this.settings.penalties) return { off: 0, def: 0 };
+    // No flags on tries (enforcement on a two-point play is not modelled).
+    if (!this.settings.penalties || g.conversionTry) return { off: 0, def: 0 };
     const edge = crowdEdge(g.crowd, this.settings.crowdEffect);
     const offHome = g.possession === 'home';
     return { off: offHome ? edge.homePenalty : edge.awayPenalty, def: offHome ? edge.awayPenalty : edge.homePenalty };
@@ -296,12 +362,19 @@ export class App {
 
   /** CPU ball: fourth-down decision, then the user's defensive play call. */
   private enterDefense() {
-    const g = this.game!;
-    if (g.down === 4) {
-      const trailingLate = g.clock.quarter >= 4 && g.clock.remaining < 300 && g.score[g.possession] < g.score[g.userSide];
-      const call = fourthDownCall({ down: g.down, toGo: g.toGo, yardline: g.ballY }, trailingLate);
+    let g = this.game!;
+    if (g.down === 4 && !g.conversionTry) {
+      const trailingLate = !!g.overtime || (g.clock.quarter >= 4 && g.clock.remaining < 300 && g.score[g.possession] < g.score[g.userSide]);
+      let call = fourthDownCall({ down: g.down, toGo: g.toGo, yardline: g.ballY }, trailingLate);
+      // Overtime: no punts; kick it when in range, otherwise go for it.
+      if (g.overtime && call === 'punt') call = fieldGoalDistance(g.ballY) <= 52 ? 'fieldGoal' : 'go';
       if (call === 'fieldGoal') return this.quickKick('fg');
       if (call === 'punt') return this.settings.quickSim ? this.quickKick('punt') : this.startCpuKick('punt');
+    }
+    const cpu = g.possession;
+    if (cpuWantsTimeout(g, cpu)) {
+      g = this.game = callTimeout(g, cpu)!;
+      this.flash(`TIMEOUT ${getTeam(g.teams[cpu]).abbr}`, `${g.timeouts[cpu]} left`);
     }
     this.defense = true;
     this.kick = null;
@@ -379,7 +452,7 @@ export class App {
     this.hud.setHint(this.playsRun < 6 ? `You are ${this.defSlot}. Left thumb moves him · JUMP plays the ball (time it!), dives at the runner or rips a block · SWITCH or the top buttons change player` : null);
     if (f.primaryPressed || left <= 0) {
       const g = this.game!;
-      this.game = { ...g, clock: snapClock(g.clock) };
+      this.game = { ...g, clock: g.conversionTry ? { ...snapClock(g.clock), running: false } : snapClock(g.clock) };
       this.waiveDelayOfGame = false;
       this.acc = 0;
       this.playsRun++;
@@ -448,7 +521,9 @@ export class App {
 
   private snap() {
     const g = this.game!;
-    this.game = { ...g, clock: snapClock(g.clock), tendencies: recordTendency(g.tendencies, this.play!.category) };
+    // Tries are untimed: the game clock does not run on them.
+    const clock = g.conversionTry ? { ...snapClock(g.clock), running: false } : snapClock(g.clock);
+    this.game = { ...g, clock, tendencies: recordTendency(g.tendencies, this.play!.category) };
     this.view.showRoutes(null);
     this.waiveDelayOfGame = false;
     this.acc = 0;
@@ -458,9 +533,11 @@ export class App {
 
   private timeout() {
     const g = this.game!;
-    if (!(this.phase === 'playcall' || this.phase === 'presnap') || g.timeouts[g.userSide] <= 0) return;
-    this.game = { ...g, timeouts: { ...g.timeouts, [g.userSide]: g.timeouts[g.userSide] - 1 }, clock: callTimeoutClock(g.clock) };
-    this.flash('TIMEOUT', `${this.game.timeouts[g.userSide]} left this half`);
+    if (!(this.phase === 'playcall' || this.phase === 'presnap')) return;
+    const st = callTimeout(g, g.userSide);
+    if (!st) return;
+    this.game = st;
+    this.flash('TIMEOUT', `${st.timeouts[g.userSide]} left ${st.overtime ? 'this period' : 'this half'}`);
     if (this.playcall.visible) this.playcall.update(this.game);
   }
 
@@ -520,8 +597,11 @@ export class App {
     this.setPhase('break');
     this.playcall.hide();
     const g = this.game!;
-    const title = brk === 'halftime' ? 'HALFTIME' : `END OF Q${g.clock.quarter - 1}`;
-    this.modal.show(h('h2', {}, title), h('p', {}, scoreLine(g)), brk === 'halftime' ? boxScore(g) : '',
+    const title = brk === 'halftime' ? 'HALFTIME' : brk === 'overtime' ? 'OVERTIME' : `END OF Q${g.clock.quarter - 1}`;
+    const otText = brk === 'overtime'
+      ? h('p', {}, `Tied after four quarters. ${getTeam(g.teams[other(g.overtime!.first)]).abbr} wins the toss and defers: ${getTeam(g.teams[g.overtime!.first]).abbr} has the ball first. Each team gets a possession from the ${OT.startYard}; from the 2nd overtime a touchdown needs a two-point try, from the 3rd it is one two-point play each.`)
+      : '';
+    this.modal.show(h('h2', {}, title), h('p', {}, scoreLine(g)), otText, brk === 'halftime' ? boxScore(g) : '',
       h('div', { class: 'row' }, button('CONTINUE', () => {
         this.modal.hide();
         this.nextSnap();
@@ -701,6 +781,11 @@ export class App {
     if (k.t > Math.min(fl.hang, posts) + 0.6) {
       const judged = judgeFieldGoal(fl);
       const g = this.game!;
+      if (k.pat) {
+        this.kick = null;
+        this.audio.react(judged.good ? { kind: 'cheer', intensity: 0.6 } : { kind: 'silence', intensity: 0.5 });
+        return this.afterTry(g, k.side, finishTry(g, 'kick', judged.good));
+      }
       const r = applyFieldGoal({ ...g, clock: tickClock(g.clock, 5).clock }, judged.good, k.fgDistance);
       const pfc: PlayForCrowd = {
         homeOffense: g.possession === 'home', yards: 0, firstDown: false,

@@ -10,6 +10,7 @@ import { ReturnSim } from '../src/play/returnSim';
 import { SIM_DT } from '../src/play/sim';
 import { applyFieldGoal, applyReturn } from '../src/game/specialTeams';
 import { newGame } from '../src/game/state';
+import { finishTry } from '../src/game/rules';
 
 const heldFor = (power: number) => power * ST.meter.fillTime;
 
@@ -184,9 +185,12 @@ describe('special-teams rules', () => {
 
   it('a return touchdown scores and the returning team kicks off next', () => {
     const r = applyReturn(g(), 'away', 'kickoff', 'touchdown', 100);
-    expect(r.state.score.home).toBe(7);
-    expect(r.state.pendingKickoff).toBe('home');
-    expect(r.state.possession).toBe('away');
+    expect(r.state.score.home).toBe(6);
+    expect(r.state.pendingConversion).toBe('home');
+    const t = finishTry(r.state, 'kick', true);
+    expect(t.state.score.home).toBe(7);
+    expect(t.state.pendingKickoff).toBe('home');
+    expect(t.state.possession).toBe('away');
   });
 
   it('the receiving team takes over where the return ends', () => {

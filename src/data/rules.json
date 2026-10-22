@@ -1,0 +1,12 @@
+{
+  "_doc": "Phase 3b game rules (game/conversion.ts, game/overtime.ts, game/timeouts.ts). conversion: tries are snapped from the opponent's `spot` yard line (college); the kick is a field goal of patDistance yards. quickKick / quickTwo: success chance when a try is resolved without playing it (quick sim, simulated CPU drives, CPU kicks). chart: the CPU goes for two from `fromQuarter` on when, after the touchdown, it trails by one of goForTwoTrailing or leads by one of goForTwoLeading. overtime (NCAA 2021): each team gets a possession from the opponent's startYard yard line; a touchdown must be followed by a two-point try from period twoPointRequiredFrom; from period shootoutFrom each possession is a single two-point play. timeouts: per half, and per overtime period.",
+  "conversion": {
+    "spot": 3,
+    "patDistance": 20,
+    "quickKick": 0.96,
+    "quickTwo": 0.45,
+    "chart": { "fromQuarter": 4, "goForTwoTrailing": [2, 5, 9, 10, 12, 16], "goForTwoLeading": [1, 4, 5, 12, 15, 19] }
+  },
+  "overtime": { "startYard": 25, "twoPointRequiredFrom": 2, "shootoutFrom": 3, "timeoutsPerPeriod": 1 },
+  "timeouts": { "perHalf": 3, "cpuLateSeconds": 120 }
+}

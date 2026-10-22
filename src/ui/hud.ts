@@ -2,6 +2,8 @@
 import { formatClock } from '../game/clock';
 import { ballOnText, downText, type GameState, type TeamSide } from '../game/state';
 import { getTeam } from '../data';
+import { OT, overtimeLabel } from '../game/overtime';
+import { TIMEOUTS } from '../game/timeouts';
 import type { EligibleSlot } from '../data/types';
 import { h } from './dom';
 
@@ -31,8 +33,8 @@ export interface KickMeterView {
 
 export class Hud {
   readonly root: HTMLElement;
-  private home = { name: h('span'), score: h('span', { class: 'score' }), box: h('div', { class: 'team' }) };
-  private away = { name: h('span'), score: h('span', { class: 'score' }), box: h('div', { class: 'team' }) };
+  private home = { name: h('span'), score: h('span', { class: 'score' }), box: h('div', { class: 'team' }), tos: h('span', { class: 'tos' }) };
+  private away = { name: h('span'), score: h('span', { class: 'score' }), box: h('div', { class: 'team' }), tos: h('span', { class: 'tos' }) };
   private quarter = h('span');
   private clock = h('span');
   private playClock = h('span', { class: 'pc' });
@@ -70,8 +72,9 @@ export class Hud {
   private last = '';
 
   constructor() {
-    this.home.box.append(this.home.name, this.home.score);
-    this.away.box.append(this.away.name, this.away.score);
+    // Phase 3b: each team's timeouts as dots under its name.
+    this.home.box.append(h('span', { class: 'nm' }, this.home.name, this.home.tos), this.home.score);
+    this.away.box.append(h('span', { class: 'nm' }, this.away.name, this.away.tos), this.away.score);
     const mid = h('div', { class: 'mid' }, this.quarter, this.clock, this.playClock);
     const bug = h('div', { id: 'scorebug' }, this.home.box, mid, this.away.box);
     this.pressure.append(this.pressureFill);
@@ -168,7 +171,7 @@ export class Hud {
       const pct = (v: number) => `${((Math.max(-1, Math.min(1, v)) + 1) / 2) * 100}%`;
       this.aimNeedle.style.left = pct(a.value);
       this.aimZone.style.left = pct(a.zone.center - a.zone.halfWidth);
-      this.aimZone.style.width = `${a.zone.halfWidth * 50}%`;
+      this.aimZone.style.width = `${a.zone.halfWidth * 100}%`; // 2 x halfWidth on a track 2 units wide
       this.aimLeft.textContent = a.left;
       this.aimRight.textContent = a.right;
       this.aimLabel.textContent = a.active ? `TAP KICK TO SET ${a.label}` : a.label;
@@ -195,7 +198,8 @@ export class Hud {
 
   update(s: GameState) {
     const key = [s.score.home, s.score.away, s.possession, s.clock.quarter, Math.ceil(s.clock.remaining), Math.ceil(s.clock.playClock),
-      s.clock.playClockRunning, s.down, s.toGo, s.ballY, s.timeouts[s.userSide]].join('|');
+      s.clock.playClockRunning, s.down, s.toGo, s.ballY, s.timeouts.home, s.timeouts.away, s.overtime?.period ?? 0, s.overtime?.done ?? 0,
+      s.conversionTry ?? '', s.pendingConversion ?? ''].join('|');
     if (key === this.last) return;
     this.last = key;
     for (const side of ['home', 'away'] as TeamSide[]) {
@@ -206,12 +210,17 @@ export class Hud {
       el.score.textContent = String(s.score[side]);
       el.box.classList.toggle('poss', s.possession === side);
     }
-    this.quarter.textContent = s.clock.quarter > 4 ? 'FINAL' : `Q${s.clock.quarter}`;
-    this.clock.textContent = formatClock(s.clock.remaining);
+    for (const side of ['home', 'away'] as TeamSide[]) {
+      const max = s.overtime ? OT.timeoutsPerPeriod : TIMEOUTS.perHalf;
+      this[side].tos.textContent = '●'.repeat(s.timeouts[side]) + '○'.repeat(Math.max(0, max - s.timeouts[side]));
+    }
+    this.quarter.textContent = s.overtime ? overtimeLabel(s) : s.clock.quarter > 4 ? 'FINAL' : `Q${s.clock.quarter}`;
+    // Overtime and tries are untimed.
+    this.clock.textContent = s.overtime ? '--:--' : formatClock(s.clock.remaining);
     const pc = Math.ceil(s.clock.playClock);
     this.playClock.textContent = s.clock.playClockRunning ? `:${String(pc).padStart(2, '0')}` : '';
     this.playClock.classList.toggle('low', pc <= 10);
-    this.situation.textContent = `${downText(s)}  ·  BALL ON ${ballOnText(s.ballY)}`;
+    this.situation.textContent = s.conversionTry ? `TWO-POINT TRY  ·  BALL ON ${ballOnText(s.ballY)}` : `${downText(s)}  ·  BALL ON ${ballOnText(s.ballY)}`;
     this.timeoutBtn.textContent = `T/O ${s.timeouts[s.userSide]}`;
   }
 

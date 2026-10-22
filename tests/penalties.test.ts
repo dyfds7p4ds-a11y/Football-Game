@@ -50,7 +50,7 @@ describe('penalty enforcement', () => {
   it('a touchdown stands over a defensive foul', () => {
     const s = game(80, 1, 10);
     const td = enforcePenalties(s, { outcome: 'touchdown', endY: 100, endX: 0 }, [makeFoul('holdingDefense', v2(0, 85), 1)]);
-    expect(td.result.scored?.points).toBe(7);
+    expect(td.result.scored?.points).toBe(6); // Phase 3b: the try follows
   });
 
   it('declined penalty: down and distance come from the play', () => {

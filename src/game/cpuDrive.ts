@@ -15,6 +15,8 @@ import { ballOnText, downText, other, type GameState } from './state';
 import { crowdEdge, updateCrowd } from './crowd';
 import { penaltyState } from './penalties';
 import { PENALTIES, makeFoul } from '../play/penalties';
+import { chooseConversion, quickConversion } from './conversion';
+import { callTimeout, cpuWantsTimeout } from './timeouts';
 
 export interface DriveEntry {
   clock: string;
@@ -87,7 +89,7 @@ export function simulateCpuDrive(start: GameState, diff: DifficultyConfig, rng: 
       r = { state: penaltyState(s, makeFoul('falseStart', { x: 0, y: s.ballY }, 0)), stop: 'penalty', possessionChanged: false, scored: null, headline: 'FALSE START' };
       text = 'False start, 5-yard penalty';
       penaltyOnHome = cpuHome;
-    } else if (s.down === 4 && !(s.toGo <= 1 && s.ballY > 40 && s.ballY < 65)) {
+    } else if (s.down === 4 && !(s.toGo <= 1 && s.ballY > 40 && s.ballY < 65) && !(s.overtime && fieldGoalDistance(s.ballY) > 52)) {
       run(rng.range(5, 7));
       if (fieldGoalDistance(s.ballY) <= 52) {
         const fg = attemptFieldGoal(s, rng);
@@ -146,6 +148,13 @@ export function simulateCpuDrive(start: GameState, diff: DifficultyConfig, rng: 
       }
       r = applyPlay(s, { outcome, endY: Math.min(endY, 100), endX: 0 });
       if (r.headline && outcome !== 'touchdown' && outcome !== 'incomplete') text += ` — ${r.headline.toLowerCase()}`;
+      if (r.state.pendingConversion === cpu) {
+        // Phase 3b: the try right after the touchdown (CPU chart), resolved without playing it.
+        const kind = chooseConversion(r.state, cpu);
+        const t = quickConversion(r.state, kind, rng, passEdge);
+        text += ` · ${t.headline.toLowerCase()}`;
+        r = { ...t, scored: { side: cpu, points: 6 + (t.scored?.points ?? 0) } };
+      }
     }
     entries.push({ clock, situation, text });
     const home = (side: string) => side === 'home';
@@ -158,6 +167,11 @@ export function simulateCpuDrive(start: GameState, diff: DifficultyConfig, rng: 
     });
     const ap = afterPlay({ ...r.state, crowd }, r.stop);
     s = ap.state;
+    // Late in a half the CPU offense stops the clock with a timeout.
+    if (!r.possessionChanged && cpuWantsTimeout(s, cpu)) {
+      s = callTimeout(s, cpu)!;
+      entries.push({ clock, situation, text: `Timeout ${s.teams[cpu].toUpperCase()} (${s.timeouts[cpu]} left)` });
+    }
     if (r.possessionChanged || r.scored) {
       headline = r.headline;
       if (ap.brk === 'halftime' || ap.brk === 'gameover') brk = ap.brk;
