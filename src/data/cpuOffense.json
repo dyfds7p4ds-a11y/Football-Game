@@ -1,14 +1,15 @@
 {
-  "_doc": "CPU quarterback and play-caller for interactive CPU drives (play/qbAI.ts). Times in seconds. Difficulty cpuOffense scales read speed and accuracy: readStart / cpuOffense, chargeSigma / cpuOffense, openMargin - (cpuOffense - 1) * 0.15.",
+  "_doc": "CPU quarterback and play-caller for interactive CPU drives (play/qbAI.ts). Times in seconds. openMargin: seconds a receiver must beat the closest defender by before the QB throws to him; readNoise: error (s) judging a window. Difficulty cpuOffense sets accuracy: release error = chargeSigma / cpuOffense^2 (sweet spot half-width is 0.09).",
   "drop": { "underCenter": 0.8, "shotgun": 0.35 },
   "readStart": 1.1,
   "readEvery": 0.25,
-  "openMargin": 0.2,
+  "openMargin": 0.35,
   "pressureBail": 0.7,
   "pressureMinTime": 1.6,
   "maxHold": 3.0,
   "throwAwayMargin": -0.3,
-  "chargeSigma": 0.05,
+  "chargeSigma": 0.03,
+  "readNoise": 0.2,
   "primaryBias": 0.1,
   "runner": { "lookAhead": 5, "avoid": 0.7 },
   "calls": {

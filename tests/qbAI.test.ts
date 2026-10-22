@@ -43,9 +43,13 @@ describe('CPU quarterback', () => {
   }, 120000);
 
   it('Hard CPU offense moves the ball better than Easy', () => {
-    const e = cpuGame('easy', 2);
-    const h = cpuGame('hard', 2);
-    expect(h.comp / h.att).toBeGreaterThan(e.comp / e.att);
+    const e = cpuGame('easy', Number(process.env.QB_SEEDS ?? 2));
+    const h = cpuGame('hard', Number(process.env.QB_SEEDS ?? 2));
+    if (process.env.QB_STATS) console.log('easy vs hard', e, h);
+    // Passer efficiency: completions minus three per interception, per attempt.
+    const eff = (x: typeof e) => (x.comp - 3 * x.int) / x.att;
+    expect(eff(h)).toBeGreaterThan(eff(e));
+    expect(h.int / h.att).toBeLessThanOrEqual(e.int / e.att + 0.01);
   }, 120000);
 
   it('play calls follow down and distance', () => {

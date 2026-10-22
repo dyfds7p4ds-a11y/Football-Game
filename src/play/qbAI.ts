@@ -3,8 +3,8 @@
  * that turns the current PlaySim state into a SimInput each step, plus the
  * CPU play-caller and fourth-down decision. Uses the same reads the balance
  * tests use (`windows.throwingWindow`: who is open right now?) and the same
- * charge/sweet-spot throw as the user, with an error that shrinks with the
- * difficulty's `cpuOffense`. Deterministic for a given Rng. Tunables in
+ * charge/sweet-spot throw as the user, with a release error that shrinks with
+ * the difficulty's `cpuOffense`. Deterministic for a given Rng. Tunables in
  * data/cpuOffense.json.
  */
 import type { Rng } from '../core/rng';
@@ -29,6 +29,7 @@ export const CPU_OFFENSE = cpuJson as {
   maxHold: number;
   throwAwayMargin: number;
   chargeSigma: number;
+  readNoise: number;
   primaryBias: number;
   runner: { lookAhead: number; avoid: number };
   calls: Record<'short' | 'normal' | 'long', CallMix>;
@@ -39,15 +40,17 @@ const toWA = (a: Actor): WindowActor => ({ pos: a.pos, vel: a.vel, maxSpeed: a.m
 
 export class CpuQB {
   private target: EligibleSlot | null = null;
-  /** Charge at which to release (sweet spot + this QB's error), set when the target is picked. */
-  private release = 0;
+  /** This throw's release error around the sweet spot (drawn when the target is picked). */
+  private releaseError = 0;
+  /** Nothing open under pressure or out of time: throw it out of bounds toward this sideline. */
+  private throwAway = 0;
   private nextRead: number;
   private dropTime = 0;
   private skill: number;
 
   constructor(private play: PlayData, diff: DifficultyConfig, private rng: Rng) {
     this.skill = diff.cpuOffense;
-    this.nextRead = CPU_OFFENSE.readStart / this.skill + rng.range(-0.15, 0.2);
+    this.nextRead = CPU_OFFENSE.readStart + rng.range(-0.15, 0.2);
   }
 
   input(sim: PlaySim): SimInput {
@@ -63,13 +66,18 @@ export class CpuQB {
     if (this.play.run || !sim.canThrow()) return inp;
     if (sim.t < this.dropTime) inp.move = v2(0, -1);
 
-    if (!this.target) this.pickTarget(sim);
-    if (this.target) {
+    if (!this.target && !this.throwAway) this.pickTarget(sim);
+    if (this.throwAway) {
+      inp.gazeYaw = this.throwAway * 1.1;
+      inp.throwHeld = sim.charge < 0.7;
+    } else if (this.target) {
       inp.target = this.target;
       const r = sim.get(this.target);
       inp.gazeYaw = Math.atan2(r.pos.x - qb.pos.x, r.pos.y - qb.pos.y);
-      // Hold the button until the charge reaches the chosen release point, then let go.
-      inp.throwHeld = sim.charge + SIM_DT / THROW.chargeTime < this.release;
+      // Hold the button until the charge reaches the sweet spot for the receiver's current
+      // distance (it moves with him, like the user's HUD window) plus this throw's error.
+      const release = throwWindow(dist(qb.pos, r.pos)).center + this.releaseError;
+      inp.throwHeld = sim.charge + SIM_DT / THROW.chargeTime < release;
     }
     return inp;
   }
@@ -84,26 +92,26 @@ export class CpuQB {
     this.nextRead = sim.t + CPU_OFFENSE.readEvery;
     const qb = sim.get('QB');
     const defenders = sim.actors.filter((a) => a.side === 'def' && !a.down).map(toWA);
-    const margin = CPU_OFFENSE.openMargin - (this.skill - 1) * 0.15;
     let best: { slot: EligibleSlot; m: number } | null = null;
     for (const slot of ELIGIBLE) {
       const r = sim.get(slot);
       if (r.down || r.route?.blocks) continue;
       const w = throwingWindow(qb.pos, toWA(r), defenders);
-      const m = w.margin + (slot === this.play.primary ? CPU_OFFENSE.primaryBias : 0) + this.rng.range(-0.05, 0.05);
+      // Weaker QBs misjudge windows (read noise shrinks with cpuOffense squared).
+      const m = w.margin + (slot === this.play.primary ? CPU_OFFENSE.primaryBias : 0) + this.rng.normal() * (CPU_OFFENSE.readNoise / (this.skill * this.skill));
       if (!best || m > best.m) best = { slot, m };
     }
     if (!best) return;
     const pressured = sim.pressure > CPU_OFFENSE.pressureBail && sim.t > CPU_OFFENSE.pressureMinTime;
     const late = sim.t > CPU_OFFENSE.maxHold;
-    if (best.m > margin || ((pressured || late) && best.m > CPU_OFFENSE.throwAwayMargin)) this.choose(sim, best.slot);
-    else if (late) this.choose(sim, best.slot); // nothing open and out of time: force it
+    if (best.m > CPU_OFFENSE.openMargin || ((pressured || late) && best.m > CPU_OFFENSE.throwAwayMargin)) this.choose(sim, best.slot);
+    else if (pressured || late) this.throwAway = Math.sign(qb.pos.x - sim.ballX) || 1;
   }
 
-  private choose(sim: PlaySim, slot: EligibleSlot) {
+  private choose(_sim: PlaySim, slot: EligibleSlot) {
     this.target = slot;
-    const d = dist(sim.get('QB').pos, sim.get(slot).pos);
-    this.release = throwWindow(d).center + this.rng.normal() * (CPU_OFFENSE.chargeSigma / this.skill);
+    // Accuracy is where the difficulty shows: release error shrinks with cpuOffense squared.
+    this.releaseError = this.rng.normal() * (CPU_OFFENSE.chargeSigma / (this.skill * this.skill));
   }
 
   /** Upfield, bending away from the nearest defender ahead of the runner. */
