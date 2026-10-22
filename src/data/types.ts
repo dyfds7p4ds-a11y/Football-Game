@@ -82,6 +82,8 @@ export interface RunDesign {
   aim: number;
   /** 'handoff' meshes with the QB, 'toss' pitches the ball outside. */
   style: 'handoff' | 'toss';
+  /** Phase 3b: blocking scheme (play/blocking.ts). Derived from style and aim when missing. */
+  scheme?: 'inside' | 'zone' | 'power' | 'toss' | 'draw';
 }
 
 /** Screen design: who catches it, which blockers release, and the timing window. */

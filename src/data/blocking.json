@@ -1,0 +1,56 @@
+{
+  "quality": {
+    "passBlockWeights": {
+      "blocking": 2,
+      "strength": 1
+    },
+    "passRushWeights": {
+      "passRush": 2,
+      "strength": 1,
+      "speed": 0.5
+    },
+    "runBlockWeights": {
+      "blocking": 1.5,
+      "strength": 1.5
+    },
+    "runDefWeights": {
+      "tackling": 1,
+      "strength": 1.5,
+      "awareness": 0.5
+    },
+    "scale": 18
+  },
+  "hold": {
+    "passBase": 4.4,
+    "runBase": 1.9,
+    "chipBase": 0.55,
+    "qualityExp": 0.8,
+    "noiseSigma": 0.3,
+    "min": 0.35,
+    "max": 9,
+    "doubleFactor": 2.4,
+    "qbHoldFactor": 0.3,
+    "runQualityExp": 1.5
+  },
+  "protection": {
+    "doubleRange": 4.0,
+    "doubleMaxToQb": 12,
+    "chipRange": 8.0,
+    "chipEdgeWidth": 3.0,
+    "chipSlow": 0.45,
+    "chipMax": 1.3
+  },
+  "run": {
+    "gapWidth": 2.4,
+    "zoneGaps": 2,
+    "gapGaps": 1,
+    "designBias": 1.2,
+    "blockedWeight": 0.35,
+    "winningWeight": 0.75,
+    "decideDepth": 1.6,
+    "climbAt": 0.5,
+    "drivePush": 0.9,
+    "laneEvalDepth": 1.0,
+    "openCap": 5.0
+  }
+}

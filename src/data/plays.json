@@ -3,35 +3,35 @@
     {
       "id": "hb_dive", "name": "HB Dive", "category": "run", "formation": "under_center",
       "description": "Quick handoff straight into the right A-gap.",
-      "run": { "aim": 1.3, "style": "handoff" },
+      "run": { "aim": 1.3, "style": "handoff", "scheme": "inside" },
       "routes": { "WR1": { "route": "block" }, "WR2": { "route": "block" }, "WR3": { "route": "block" },
                   "TE": { "route": "block" }, "RB": { "route": "block" } }
     },
     {
       "id": "hb_stretch", "name": "Outside Zone", "category": "run", "formation": "under_center",
       "description": "Stretch run to the right edge; cut up when a lane opens.",
-      "run": { "aim": 6.5, "style": "handoff" },
+      "run": { "aim": 6.5, "style": "handoff", "scheme": "zone" },
       "routes": { "WR1": { "route": "block" }, "WR2": { "route": "block" }, "WR3": { "route": "block" },
                   "TE": { "route": "block" }, "RB": { "route": "block" } }
     },
     {
       "id": "hb_toss", "name": "Toss Sweep", "category": "run", "formation": "under_center",
       "description": "Pitch to the RB racing for the left sideline.",
-      "run": { "aim": -10, "style": "toss" },
+      "run": { "aim": -10, "style": "toss", "scheme": "toss" },
       "routes": { "WR1": { "route": "block" }, "WR2": { "route": "block" }, "WR3": { "route": "block" },
                   "TE": { "route": "block" }, "RB": { "route": "block" } }
     },
     {
       "id": "counter", "name": "Pistol Counter", "category": "run", "formation": "pistol",
       "description": "Downhill run into the left B-gap behind pulling blockers.",
-      "run": { "aim": -2.6, "style": "handoff" },
+      "run": { "aim": -2.6, "style": "handoff", "scheme": "power" },
       "routes": { "WR1": { "route": "block" }, "WR2": { "route": "block" }, "WR3": { "route": "block" },
                   "TE": { "route": "block" }, "RB": { "route": "block" } }
     },
     {
       "id": "hb_draw", "name": "HB Draw", "category": "run", "formation": "shotgun",
       "description": "Sell the pass, then hand off late up the middle. Great vs. blitz.",
-      "run": { "aim": 0.6, "style": "handoff" },
+      "run": { "aim": 0.6, "style": "handoff", "scheme": "draw" },
       "routes": { "WR1": { "route": "go" }, "WR2": { "route": "go" }, "WR3": { "route": "block" },
                   "TE": { "route": "block" }, "RB": { "route": "block", "delay": 0.7 } }
     },
