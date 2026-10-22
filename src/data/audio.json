@@ -1,0 +1,19 @@
+{
+  "_doc": "Stadium sound (audio/crowdMix.ts, audio/crowdAudio.ts). Layer gains are linear in the crowd meter (0..100) between quiet and loud; the chant starts at chantFrom. Reactions are from the home crowd's view.",
+  "master": 0.9,
+  "layers": {
+    "murmur": { "quiet": 0.10, "loud": 0.22 },
+    "chatter": { "quiet": 0.05, "loud": 0.20 },
+    "chant": { "quiet": 0.0, "loud": 0.16 }
+  },
+  "chantFrom": 62,
+  "chantBpm": 84,
+  "reactions": {
+    "cheer": { "gain": 0.45, "attack": 0.25, "hold": 0.9, "release": 1.8 },
+    "roar": { "gain": 0.8, "attack": 0.15, "hold": 1.6, "release": 1.4 },
+    "boo": { "gain": 0.35, "attack": 0.4, "hold": 1.3, "release": 1.0 }
+  },
+  "silence": { "level": 0.12, "fall": 0.35, "hold": 2.6, "recover": 3.0 },
+  "bigPlayYards": 15,
+  "sfx": { "whistle": 0.09, "thump": 0.4 }
+}

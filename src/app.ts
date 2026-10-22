@@ -9,23 +9,26 @@
  */
 import { Rng } from './core/rng';
 import { DIFFICULTY, getTeam } from './data';
-import type { EligibleSlot, PlayData, TeamData } from './data/types';
+import type { DefSlot, EligibleSlot, PlayData, TeamData } from './data/types';
 import { ELIGIBLE } from './data/types';
 import { InputManager, type InputFrame } from './input/input';
 import { SceneView } from './render/view';
 import { SLOT_COLORS } from './render/fieldMesh';
 import { Cutscene } from './render/cutscene';
-import { PlaySim, SIM_DT, type PlayEvent, type SimInput } from './play/sim';
+import { PlaySim, SIM_DT, type PlayEvent, type PlayResult, type SimInput } from './play/sim';
 import { ReturnSim } from './play/returnSim';
-import { chooseDefense, recordTendency } from './play/defenseCalls';
-import { PENALTIES, calloutText, type Foul } from './play/penalties';
-import { ST, cpuRelease, judgeFieldGoal, kickFlight, kickZone, meterAngle, meterPower, releaseKick, type KickFlight, type KickKind } from './play/kicking';
-import { callTimeoutClock, snapClock, tickClock } from './game/clock';
+import { chooseDefense, emptyTendencies, recordTendency, type DefenseCall } from './play/defenseCalls';
+import { PENALTIES, calloutText, type Flag } from './play/penalties';
+import { ST, aimNeedle, aimToAngle, aimZone, cpuRelease, judgeFieldGoal, kickFlight, kickZone, meterPower, releaseKickAimed, type KickFlight, type KickKind } from './play/kicking';
+import { PLAY_CLOCK, snapClock, tickClock } from './game/clock';
 import { afterPlay, checkQuarter, type Break } from './game/flow';
-import { attemptFieldGoal, delayOfGame, fieldGoalDistance, punt, type RulesResult } from './game/rules';
-import { enforcePenalties } from './game/penalties';
+import { attemptFieldGoal, delayOfGame, fieldGoalDistance, finishTry, punt, type RulesResult } from './game/rules';
+import { chooseConversion, conversionOptions, patDistance, quickConversion, startTwoPointTry, type TryKind } from './game/conversion';
+import { OT, overtimeLabel } from './game/overtime';
+import { callTimeout, cpuWantsTimeout } from './game/timeouts';
+import { enforcePenalties, type Enforcement } from './game/penalties';
 import { applyFieldGoal, applyReturn, kickoffOutOfBounds } from './game/specialTeams';
-import { crowdEdge, crowdIntensity, updateCrowd } from './game/crowd';
+import { crowdEdge, crowdIntensity, updateCrowd, type PlayForCrowd } from './game/crowd';
 import { newGame, other, type GameState, type TeamSide } from './game/state';
 import { simulateCpuDrive } from './game/cpuDrive';
 import { loadSettings, saveSettings, type Settings } from './game/settings';
@@ -36,6 +39,9 @@ import { IntroOverlay } from './ui/intro';
 import { Modal, boxScore, button, driveSummary, helpContent, scoreLine, settingsPanel, titleScreen } from './ui/menus';
 import { h } from './ui/dom';
 import { CrowdAudio } from './audio/crowdAudio';
+import { CpuQB, chooseCpuPlay, fourthDownCall } from './play/qbAI';
+import { DEF_CONTROL } from './play/interception';
+import { reactionTo, reactionToFlag } from './audio/crowdMix';
 
 type Phase = 'title' | 'intro' | 'playcall' | 'presnap' | 'live' | 'postplay' | 'kick' | 'kickFlight' | 'return' | 'returnPost' | 'break' | 'gameover';
 
@@ -56,6 +62,11 @@ interface KickState {
   t: number;
   fgDistance: number;
   done: boolean;
+  /** Phase 3b: layer 1 (hold for power) then layer 2 (tap to lock the aim needle). */
+  stage: 'power' | 'aim';
+  aimT: number;
+  /** Phase 3b: this field goal is the extra-point try. */
+  pat?: boolean;
 }
 
 export class App {
@@ -86,7 +97,15 @@ export class App {
   private bannerTimer = 0;
   private lastTime = 0;
   private playsRun = 0;
-  private callouts: { at: number; foul: Foul }[] = [];
+  private callouts: { at: number; flag: Flag }[] = [];
+  /** A flag was thrown since the last snap: the next play-clock expiry is not a second penalty. */
+  private waiveDelayOfGame = false;
+  /** CPU has the ball and the user plays defense (interactive CPU drive). */
+  private defense = false;
+  private cpuQB: CpuQB | null = null;
+  /** Cornerback the user controls; kept from play to play. */
+  private defSlot: DefSlot = 'CB1';
+  private presnapTimer = 0;
 
   constructor(canvas: HTMLCanvasElement, ui: HTMLElement) {
     this.view = new SceneView(canvas);
@@ -96,6 +115,7 @@ export class App {
       onPunt: () => this.userKickFromPlaycall('punt'),
       onFieldGoal: () => this.userKickFromPlaycall('fieldGoal'),
       onTimeout: () => this.timeout(),
+      onDefense: (call) => this.callDefense(call),
     });
     ui.append(this.touch.root, this.hud.root, this.playcall.root, this.intro.root, this.modal.root,
       h('div', { id: 'rotate' }, 'Rotate your iPad to landscape for the best experience.'));
@@ -137,6 +157,7 @@ export class App {
     this.phase = p;
     const onField = p === 'presnap' || p === 'live' || p === 'postplay' || p === 'kick' || p === 'kickFlight' || p === 'return' || p === 'returnPost';
     this.touch.setVisible(onField);
+    if (!this.defense) this.touch.setDefenders(null);
     this.hud.root.classList.toggle('hidden', p === 'title' || p === 'intro');
     this.intro.show(p === 'intro');
     if (p !== 'kick') this.hud.setKickMeter(null);
@@ -232,6 +253,7 @@ export class App {
   private nextSnap() {
     const g = this.game!;
     if (g.over) return this.showGameOver();
+    if (g.pendingConversion) return this.startConversion(g.pendingConversion);
     if (g.pendingKickoff) {
       if (this.settings.quickSim) {
         // Phase 1 behavior: no kickoff, the receiving team starts at its 25 (already set by the rules).
@@ -240,12 +262,72 @@ export class App {
         return this.startKickoff(g.pendingKickoff);
       }
     }
-    if (this.game!.possession !== this.game!.userSide) return this.runCpuDrive();
+    if (this.game!.possession !== this.game!.userSide) return this.settings.simCpuDrives ? this.runCpuDrive() : this.enterDefense();
     this.enterPlaycall();
+  }
+
+  // ------------------------------------------------------------ tries (Phase 3b)
+
+  /** The try after a touchdown: the user chooses on a modal, the CPU by its chart. */
+  private startConversion(side: TeamSide) {
+    const g = this.game!;
+    this.playcall.hide();
+    this.setPhase('break');
+    const choose = (kind: TryKind) => {
+      this.modal.hide();
+      const st = this.game!;
+      if (kind === 'two') {
+        this.game = startTwoPointTry(st);
+        if (side === st.userSide) return this.enterPlaycall();
+        // CPU two-point play: defend it, unless CPU drives are simulated.
+        if (!this.settings.simCpuDrives && !this.settings.quickSim) return this.enterDefense();
+        return this.resolveQuickTry('two');
+      }
+      if (side === st.userSide && !this.settings.quickSim) {
+        const d = patDistance();
+        this.startUserKick('fieldGoal', side, { x: 0, y: 110 - d }, d);
+        this.kick!.pat = true;
+        this.hud.setPlayName(`EXTRA POINT · ${d} YDS`);
+        return;
+      }
+      this.resolveQuickTry('kick');
+    };
+    if (side !== g.userSide) return choose(chooseConversion(g, side));
+    const opts = conversionOptions(g);
+    this.modal.show(h('h2', {}, 'TOUCHDOWN: THE TRY'), h('p', {}, scoreLine(g)),
+      h('p', {}, opts.length === 1 ? `From the ${overtimeLabel(g)} on a touchdown must be followed by a two-point try.` : 'Kick the extra point (1) or run one play from the 3 (2).'),
+      h('div', { class: 'row' },
+        ...(opts.includes('kick') ? [button('KICK · 1 PT', () => choose('kick'))] : []),
+        button('GO FOR 2', () => choose('two'), 'primary')));
+  }
+
+  /** A try resolved without playing it (CPU kick, quick sim). */
+  private resolveQuickTry(kind: TryKind) {
+    const g = this.game!;
+    const side = g.pendingConversion ?? g.possession;
+    const r = quickConversion(g, kind, this.rng);
+    this.afterTry(g, side, r);
+  }
+
+  private afterTry(g: GameState, side: TeamSide, r: RulesResult) {
+    const crowd = updateCrowd(g.crowd, {
+      homeOffense: side === 'home', yards: 0, firstDown: false,
+      score: r.scored ? { home: r.scored.side === 'home', points: r.scored.points } : null,
+      turnover: false, sack: false, penaltyOnHome: null, failedFourthDown: false,
+    });
+    const ap = afterPlay({ ...r.state, crowd }, r.stop);
+    this.game = ap.state;
+    this.setPhase('break');
+    this.modal.show(h('h2', {}, r.headline), h('p', {}, scoreLine(this.game)),
+      h('div', { class: 'row' }, button('CONTINUE', () => {
+        this.modal.hide();
+        this.handleBreak(ap.brk);
+      }, 'primary')));
   }
 
   private enterPlaycall() {
     const g = this.game!;
+    this.defense = false;
     this.kick = null;
     this.setPhase('playcall');
     this.hud.showBanner(null);
@@ -260,10 +342,154 @@ export class App {
   /** Penalty chance per side for a user offense play: crowd edge, or off. */
   private penaltyBias() {
     const g = this.game!;
-    if (!this.settings.penalties) return { off: 0, def: 0 };
+    // No flags on tries (enforcement on a two-point play is not modelled).
+    if (!this.settings.penalties || g.conversionTry) return { off: 0, def: 0 };
     const edge = crowdEdge(g.crowd, this.settings.crowdEffect);
     const offHome = g.possession === 'home';
     return { off: offHome ? edge.homePenalty : edge.awayPenalty, def: offHome ? edge.awayPenalty : edge.homePenalty };
+  }
+
+  // ------------------------------------------------------------ defense (interactive CPU drives)
+
+  /** Down markers in the user's world: a CPU possession's yard lines are in the CPU's frame. */
+  private setMarkersFor(g: GameState) {
+    const flip = g.possession !== g.userSide;
+    const los = flip ? 100 - g.ballY : g.ballY;
+    const fd = flip ? 100 - (g.ballY + g.toGo) : g.ballY + g.toGo;
+    this.view.field.setMarkers(los, fd);
+    this.view.field.showMarkers(true);
+  }
+
+  /** CPU ball: fourth-down decision, then the user's defensive play call. */
+  private enterDefense() {
+    let g = this.game!;
+    if (g.down === 4 && !g.conversionTry) {
+      const trailingLate = !!g.overtime || (g.clock.quarter >= 4 && g.clock.remaining < 300 && g.score[g.possession] < g.score[g.userSide]);
+      let call = fourthDownCall({ down: g.down, toGo: g.toGo, yardline: g.ballY }, trailingLate);
+      // Overtime: no punts; kick it when in range, otherwise go for it.
+      if (g.overtime && call === 'punt') call = fieldGoalDistance(g.ballY) <= 52 ? 'fieldGoal' : 'go';
+      if (call === 'fieldGoal') return this.quickKick('fg');
+      if (call === 'punt') return this.settings.quickSim ? this.quickKick('punt') : this.startCpuKick('punt');
+    }
+    const cpu = g.possession;
+    if (cpuWantsTimeout(g, cpu)) {
+      g = this.game = callTimeout(g, cpu)!;
+      this.flash(`TIMEOUT ${getTeam(g.teams[cpu]).abbr}`, `${g.timeouts[cpu]} left`);
+    }
+    this.defense = true;
+    this.kick = null;
+    this.sim = null;
+    this.setPhase('playcall');
+    this.hud.showBanner(null);
+    this.hud.setPlayName(null);
+    this.hud.setHint(null);
+    this.view.showRoutes(null);
+    this.setMarkersFor(g);
+    this.playcall.showDefense(g);
+  }
+
+  /** The user picked a defense (null: let the coordinator call it); the CPU picks its play. */
+  private callDefense(call: DefenseCall | null) {
+    const g = this.game!;
+    if (!this.defense || this.phase !== 'playcall') return;
+    this.playcall.hide();
+    const diff = DIFFICULTY[g.difficulty];
+    const sit = { down: g.down, toGo: g.toGo, yardline: g.ballY };
+    const defense = call ?? chooseDefense(
+      { ...sit, halfSecondsLeft: (g.clock.quarter % 2 === 1 ? g.clock.quarterLength : 0) + g.clock.remaining, scoreDiff: g.score[g.possession] - g.score[g.userSide] },
+      emptyTendencies(), DIFFICULTY.normal, this.rng,
+    );
+    const play = chooseCpuPlay(sit, this.rng);
+    this.play = play;
+    // The defenders are the user's team: they cover at Normal. Difficulty shows in the CPU QB (cpuOffense) and the flag rate.
+    this.sim = new PlaySim({
+      play, defense, offenseTeam: this.cpuTeam, defenseTeam: this.userTeam, ballX: g.ballX, los: g.ballY,
+      difficulty: { ...DIFFICULTY.normal, penaltyRate: diff.penaltyRate }, seed: this.rng.int(1, 2 ** 31 - 1),
+      penaltyBias: this.penaltyBias(), userDefense: true,
+    });
+    this.sim.selectDefender(this.defSlot);
+    this.cpuQB = new CpuQB(play, diff, new Rng(this.rng.int(1, 2 ** 31 - 1)));
+    this.ret = null;
+    this.callouts = [];
+    this.target = null;
+    this.view.bindPlay(this.sim, this.cpuTeam, this.userTeam);
+    this.view.showRoutes(null);
+    this.setMarkersFor(g);
+    this.hud.setPlayName(`DEFENSE · ${defense.name}`);
+    this.presnapTimer = 0;
+    this.setPhase('presnap');
+  }
+
+  /**
+   * Phase 3b: any defender. The defender strip (touch) picks a slot directly; SWITCH (secondary
+   * button, X / Shift, pad 6 / 10) takes the defender nearest the ball (next in order before the
+   * snap); 1 / 2 / 3 still jump to CB1 / CB2 / NB.
+   */
+  private switchDefender(f: InputFrame, live: boolean) {
+    const keyMap: Partial<Record<EligibleSlot, DefSlot>> = { WR1: 'CB1', WR2: 'CB2', WR3: 'NB' };
+    const sim = this.sim!;
+    if (f.secondaryPressed) {
+      const s = sim.switchDefender(live);
+      if (s) this.defSlot = s;
+      return;
+    }
+    const slot = f.defenderPressed ?? (f.slotPressed ? keyMap[f.slotPressed] ?? null : null);
+    if (!slot) return;
+    sim.selectDefender(slot);
+    if (sim.userDefender?.slot === slot) this.defSlot = slot;
+  }
+
+  private presnapDefense(f: InputFrame, dt: number) {
+    this.presnapTimer += dt;
+    this.switchDefender(f, false);
+    const left = Math.max(0, DEF_CONTROL.presnapAutoSnap - this.presnapTimer);
+    this.touch.setPrimary(`READY ${Math.ceil(left)}`, 'snap');
+    this.touch.setSecondary('SWITCH');
+    this.touch.setSlots(null, new Set(), false);
+    this.touch.setDefenders(this.defSlot);
+    this.touch.setCharge(false, 0, null);
+    this.hud.setEdgeMarkers(null);
+    this.hud.setHint(this.playsRun < 6 ? `You are ${this.defSlot}. Left thumb moves him · JUMP plays the ball (time it!), dives at the runner or rips a block · SWITCH or the top buttons change player` : null);
+    if (f.primaryPressed || left <= 0) {
+      const g = this.game!;
+      this.game = { ...g, clock: g.conversionTry ? { ...snapClock(g.clock), running: false } : snapClock(g.clock) };
+      this.waiveDelayOfGame = false;
+      this.acc = 0;
+      this.playsRun++;
+      this.setPhase('live');
+    }
+  }
+
+  private liveDefense(f: InputFrame, dt: number) {
+    const sim = this.sim!;
+    this.switchDefender(f, true);
+    // The camera looks back at the offense: stick up = toward the line of scrimmage.
+    const def = { move: { x: -f.move.x, y: -f.move.y }, jump: f.primaryPressed };
+    this.acc += dt;
+    let first = true;
+    while (this.acc >= SIM_DT) {
+      const inp = this.cpuQB!.input(sim);
+      inp.defense = first ? def : { ...def, jump: false };
+      sim.step(inp);
+      first = false;
+      this.acc -= SIM_DT;
+      const t = tickClock(this.game!.clock, SIM_DT);
+      this.game = { ...this.game!, clock: t.clock };
+      this.onEvents(sim.drainEvents());
+      if (sim.result) break;
+    }
+    this.checkCallouts();
+    const c = sim.carrier;
+    const runner = !!c && c.side === 'off' && (c.slot !== 'QB' || sim.pastLos(c));
+    const blocked = sim.blockStates().some((b) => b.defender === sim.userDefId);
+    this.touch.setPrimary(runner ? 'DIVE' : blocked && sim.ball.state !== 'air' ? 'RIP' : 'JUMP', 'throw');
+    this.touch.setSecondary('SWITCH');
+    this.touch.setSlots(null, new Set(), false);
+    this.touch.setDefenders(this.defSlot);
+    this.touch.setCharge(false, 0, null);
+    this.hud.setEdgeMarkers(null);
+    this.hud.setHint(null);
+    if (sim.result) this.whistle();
   }
 
   private callPlay(play: PlayData) {
@@ -295,8 +521,11 @@ export class App {
 
   private snap() {
     const g = this.game!;
-    this.game = { ...g, clock: snapClock(g.clock), tendencies: recordTendency(g.tendencies, this.play!.category) };
+    // Tries are untimed: the game clock does not run on them.
+    const clock = g.conversionTry ? { ...snapClock(g.clock), running: false } : snapClock(g.clock);
+    this.game = { ...g, clock, tendencies: recordTendency(g.tendencies, this.play!.category) };
     this.view.showRoutes(null);
+    this.waiveDelayOfGame = false;
     this.acc = 0;
     this.playsRun++;
     this.setPhase('live');
@@ -304,9 +533,11 @@ export class App {
 
   private timeout() {
     const g = this.game!;
-    if (!(this.phase === 'playcall' || this.phase === 'presnap') || g.timeouts[g.userSide] <= 0) return;
-    this.game = { ...g, timeouts: { ...g.timeouts, [g.userSide]: g.timeouts[g.userSide] - 1 }, clock: callTimeoutClock(g.clock) };
-    this.flash('TIMEOUT', `${this.game.timeouts[g.userSide]} left this half`);
+    if (!(this.phase === 'playcall' || this.phase === 'presnap')) return;
+    const st = callTimeout(g, g.userSide);
+    if (!st) return;
+    this.game = st;
+    this.flash('TIMEOUT', `${st.timeouts[g.userSide]} left ${st.overtime ? 'this period' : 'this half'}`);
     if (this.playcall.visible) this.playcall.update(this.game);
   }
 
@@ -320,9 +551,10 @@ export class App {
     const res = this.sim!.result!;
     // Flags stayed on the field during the play; now the penalty is applied.
     const enf = enforcePenalties(g, res, res.fouls);
+    if (res.fouls.length) this.waiveDelayOfGame = true;
     const r = enf.result;
     const st = { ...r.state, stats: { ...r.state.stats } };
-    const side = g.userSide;
+    const side = g.possession;
     const s = { ...st.stats[side] };
     // A play wiped out by an accepted penalty doesn't count in the box score.
     if (!enf.enforced && !enf.offsetting) {
@@ -341,16 +573,22 @@ export class App {
       if (res.turnover) s.turnovers++;
     }
     st.stats[side] = s;
-    st.crowd = updateCrowd(g.crowd, {
+    st.crowd = updateCrowd(g.crowd, this.playForCrowd(g, res, enf));
+    const ap = afterPlay(st, r.stop);
+    this.game = ap.state;
+    this.handleBreak(ap.brk);
+  }
+
+  /** A finished scrimmage play from the home crowd's view (crowd meter and crowd sound). */
+  private playForCrowd(g: GameState, res: PlayResult, enf: Enforcement): PlayForCrowd {
+    const r = enf.result;
+    return {
       homeOffense: g.possession === 'home', yards: enf.enforced ? 0 : res.yards, firstDown: r.headline === 'FIRST DOWN',
       score: r.scored ? { home: r.scored.side === 'home', points: r.scored.points } : null,
       turnover: res.turnover && !enf.enforced, sack: res.outcome === 'sack',
       penaltyOnHome: enf.enforced ? (enf.enforced.side === 'off') === (g.possession === 'home') : null,
       failedFourthDown: r.headline === 'TURNOVER ON DOWNS',
-    });
-    const ap = afterPlay(st, r.stop);
-    this.game = ap.state;
-    this.handleBreak(ap.brk);
+    };
   }
 
   private handleBreak(brk: Break) {
@@ -359,8 +597,11 @@ export class App {
     this.setPhase('break');
     this.playcall.hide();
     const g = this.game!;
-    const title = brk === 'halftime' ? 'HALFTIME' : `END OF Q${g.clock.quarter - 1}`;
-    this.modal.show(h('h2', {}, title), h('p', {}, scoreLine(g)), brk === 'halftime' ? boxScore(g) : '',
+    const title = brk === 'halftime' ? 'HALFTIME' : brk === 'overtime' ? 'OVERTIME' : `END OF Q${g.clock.quarter - 1}`;
+    const otText = brk === 'overtime'
+      ? h('p', {}, `Tied after four quarters. ${getTeam(g.teams[other(g.overtime!.first)]).abbr} wins the toss and defers: ${getTeam(g.teams[g.overtime!.first]).abbr} has the ball first. Each team gets a possession from the ${OT.startYard}; from the 2nd overtime a touchdown needs a two-point try, from the 3rd it is one two-point play each.`)
+      : '';
+    this.modal.show(h('h2', {}, title), h('p', {}, scoreLine(g)), otText, brk === 'halftime' ? boxScore(g) : '',
       h('div', { class: 'row' }, button('CONTINUE', () => {
         this.modal.hide();
         this.nextSnap();
@@ -437,7 +678,7 @@ export class App {
   }
 
   private startUserKick(kind: KickKind, side: TeamSide, spot: { x: number; y: number }, fgDistance: number) {
-    this.kick = { kind, side, spot, held: 0, holding: false, flight: null, t: 0, fgDistance, done: false };
+    this.kick = { kind, side, spot, held: 0, holding: false, flight: null, t: 0, fgDistance, done: false, stage: 'power', aimT: 0 };
     this.sim = null;
     this.ret = null;
     this.view.resetCamera();
@@ -467,6 +708,8 @@ export class App {
       kind, flight, kickingTeam: this.teamOf(kicking), receivingTeam: this.teamOf(other(kicking)), userReturns,
       // The CPU's tackling scales with difficulty when the user returns; the user's cover team is neutral.
       tackling: userReturns ? diff.tackling : 1, seed: this.rng.int(1, 2 ** 31 - 1),
+      // Phase 3b: on the user's own kicks the user plays a cover man.
+      userCovers: kicking === g.userSide,
     });
     this.retInfo = { kind, kicking };
     this.kick = null;
@@ -482,37 +725,52 @@ export class App {
     const k = this.kick!;
     const diff = DIFFICULTY[this.game!.difficulty];
     if (this.phase === 'kick') {
-      if (f.primaryHeld && !k.done) {
-        k.holding = true;
-        k.held += dt;
-      } else if (k.holding && !f.primaryHeld) {
-        // Release: lock power (and the punt angle), kick it.
-        k.done = true;
-        const rel = releaseKick(k.kind, k.held, diff.kickWindow, k.fgDistance);
-        k.flight = kickFlight(rel, k.spot, k.kind === 'fieldGoal' ? 0 : k.spot.x * 0.3, this.rng);
-        this.audio.thump();
-        if (k.kind === 'fieldGoal') {
-          k.t = 0;
-          this.setPhase('kickFlight');
-        } else {
-          this.startReturn(k.kind as 'kickoff' | 'punt', k.side, k.flight, false);
+      if (k.stage === 'power') {
+        if (f.primaryHeld && !k.done) {
+          k.holding = true;
+          k.held += dt;
+        } else if (k.holding && !f.primaryHeld) {
+          // Layer 1 done: power locked. Layer 2: the aim needle starts sweeping.
+          k.stage = 'aim';
+          k.aimT = 0;
+          k.holding = false;
         }
-        return;
+      } else {
+        k.aimT += dt;
+        // Tap locks the needle (it locks itself after a few sweeps so the game never stalls).
+        if (f.primaryPressed || k.aimT > ST.meter.aim.period * 6) {
+          k.done = true;
+          const rel = releaseKickAimed(k.kind, k.held, aimNeedle(k.aimT), diff.kickWindow, k.fgDistance);
+          k.flight = kickFlight(rel, k.spot, k.kind === 'fieldGoal' ? 0 : k.spot.x * 0.3, this.rng);
+          this.audio.thump();
+          if (k.kind === 'fieldGoal') {
+            k.t = 0;
+            this.setPhase('kickFlight');
+          } else {
+            this.startReturn(k.kind as 'kickoff' | 'punt', k.side, k.flight, false);
+          }
+          return;
+        }
       }
       const zone = kickZone(k.kind, diff.kickWindow, k.fgDistance);
       const P = ST.meter.punt;
+      const aiming = k.stage === 'aim';
+      const needle = aiming ? aimNeedle(k.aimT) : -1;
+      const punt = k.kind === 'punt';
       this.hud.setKickMeter({
-        title: k.kind === 'kickoff' ? 'KICKOFF' : k.kind === 'punt' ? 'PUNT' : `FIELD GOAL ${k.fgDistance} YDS`,
+        title: k.kind === 'kickoff' ? 'KICKOFF' : punt ? 'PUNT' : `FIELD GOAL ${k.fgDistance} YDS`,
         power: meterPower(k.held),
         zone,
-        angle: k.kind === 'punt' ? { value: meterAngle(k.held), min: P.angleMin, max: P.angleMax, ideal: P.idealAngle, halfWidth: P.angleHalfWidth * diff.kickWindow } : undefined,
-        sub: k.kind === 'punt' ? 'Hold for power, release when the needle is in the green.' : 'Hold KICK, release in the green zone.',
+        step: aiming ? 2 : 1,
+        angle: punt ? { value: aimToAngle(needle), min: P.angleMin, max: P.angleMax, ideal: P.idealAngle, halfWidth: P.angleHalfWidth * diff.kickWindow } : undefined,
+        aim: aiming ? { value: needle, zone: aimZone(k.kind, diff.kickWindow), left: punt ? 'LOW' : 'LEFT', right: punt ? 'HIGH' : 'RIGHT', active: true, label: punt ? 'ANGLE' : 'ACCURACY' } : undefined,
+        sub: aiming ? (punt ? 'Tap when the needle is in the green: the hang angle.' : 'Tap when the needle is in the green: straight through.') : 'Hold KICK, release in the green zone for power.',
       });
-      this.touch.setPrimary(k.holding ? 'RELEASE' : 'KICK', 'kick');
+      this.touch.setPrimary(aiming ? 'TAP' : k.holding ? 'RELEASE' : 'KICK', 'kick');
       this.touch.setSlots(null, new Set(), false);
       this.touch.setSecondary(null);
       this.touch.setCharge(false, 0, null);
-      this.hud.setHint(this.playsRun < 6 ? 'Hold KICK to fill the meter, release in the green zone.' : null);
+      this.hud.setHint(this.playsRun < 6 ? (aiming ? 'Second tap: stop the needle in the green.' : 'Hold KICK to fill the meter, release in the green zone.') : null);
       return;
     }
     // Field goal in the air.
@@ -523,13 +781,19 @@ export class App {
     if (k.t > Math.min(fl.hang, posts) + 0.6) {
       const judged = judgeFieldGoal(fl);
       const g = this.game!;
+      if (k.pat) {
+        this.kick = null;
+        this.audio.react(judged.good ? { kind: 'cheer', intensity: 0.6 } : { kind: 'silence', intensity: 0.5 });
+        return this.afterTry(g, k.side, finishTry(g, 'kick', judged.good));
+      }
       const r = applyFieldGoal({ ...g, clock: tickClock(g.clock, 5).clock }, judged.good, k.fgDistance);
-      const crowd = updateCrowd(g.crowd, {
+      const pfc: PlayForCrowd = {
         homeOffense: g.possession === 'home', yards: 0, firstDown: false,
         score: r.scored ? { home: r.scored.side === 'home', points: 3 } : null, turnover: false, sack: false, penaltyOnHome: null,
         failedFourthDown: false,
-      });
-      if (judged.good) this.audio.roar(0.7);
+      };
+      const crowd = updateCrowd(g.crowd, pfc);
+      this.audio.react(judged.good ? reactionTo(pfc) : { kind: g.possession === 'home' ? 'silence' : 'cheer', intensity: 0.7 });
       const ap = afterPlay({ ...r.state, crowd }, r.stop);
       this.game = ap.state;
       this.setPhase('break');
@@ -549,7 +813,11 @@ export class App {
       this.acc += dt;
       let first = true;
       while (this.acc >= SIM_DT) {
-        rs.step({ move: rs.userReturns ? f.move : { x: 0, y: 0 }, dash: first && rs.userReturns && (f.secondaryPressed || f.primaryPressed) });
+        rs.step({
+          move: rs.userReturns ? f.move : { x: 0, y: 0 }, dash: first && rs.userReturns && (f.secondaryPressed || f.primaryPressed),
+          // Covering the user's own kick: the camera looks back at the returner, so the stick is mirrored (as on defense).
+          cover: rs.coverMan ? { move: { x: -f.move.x, y: -f.move.y }, dive: first && f.primaryPressed, switch: first && f.secondaryPressed } : undefined,
+        });
         first = false;
         this.acc -= SIM_DT;
         const t = tickClock(this.game!.clock, SIM_DT);
@@ -558,18 +826,24 @@ export class App {
         if (rs.result) break;
       }
       const carrying = rs.userReturns && rs.carrier === rs.returner;
-      this.touch.setPrimary(carrying ? 'DASH' : '', carrying ? 'juke' : 'none');
-      this.touch.setSecondary(null);
+      if (rs.coverMan) {
+        this.touch.setPrimary(rs.coverBlocked ? 'RIP' : 'DIVE', 'throw');
+        this.touch.setSecondary('SWITCH');
+      } else {
+        this.touch.setPrimary(carrying ? 'DASH' : '', carrying ? 'juke' : 'none');
+        this.touch.setSecondary(null);
+      }
       this.touch.setSlots(null, new Set(), false);
       this.touch.setCharge(false, 0, null);
-      this.hud.setHint(rs.userReturns && this.playsRun < 8 ? (carrying ? 'Steer with your left thumb · DASH for a burst' : 'Get under the ball...') : null);
+      this.hud.setHint(rs.coverMan && this.playsRun < 10 ? 'Cover the kick: left thumb runs your man down · DIVE to tackle (RIP when blocked) · SWITCH = man nearest the ball'
+        : rs.userReturns && this.playsRun < 8 ? (carrying ? 'Steer with your left thumb · DASH for a burst' : 'Get under the ball...') : null);
       if (rs.result) {
         this.audio.whistle();
         this.postTimer = 0;
         this.setPhase('returnPost');
         const res = rs.result;
         const head = res.outcome === 'touchdown' ? 'TOUCHDOWN!' : res.outcome === 'touchback' ? 'TOUCHBACK' : res.outcome === 'downed' ? 'DOWNED' : res.outcome === 'outOfBoundsKick' ? 'OUT OF BOUNDS' : 'RETURN';
-        if (res.outcome === 'touchdown') this.audio.roar(1);
+        if (res.outcome === 'touchdown' && this.retInfo) this.audio.react(other(this.retInfo.kicking) === 'home' ? { kind: 'roar', intensity: 1 } : { kind: 'silence', intensity: 1 });
         this.flash(head, res.description, POSTPLAY_TIME + 1);
       }
       return;
@@ -670,7 +944,15 @@ export class App {
       this.game = q.state;
       if (q.brk !== 'none') return this.handleBreak(q.brk);
     }
-    if (t.playClockExpired) {
+    if (t.playClockExpired && this.defense) {
+      // The CPU offense is waiting on the user's defensive call: no delay of game for that.
+      this.game = { ...this.game, clock: { ...this.game.clock, playClock: PLAY_CLOCK } };
+    } else if (t.playClockExpired && this.waiveDelayOfGame) {
+      // No penalty chains: the first expiry after a flagged play only resets the play clock.
+      this.waiveDelayOfGame = false;
+      this.game = { ...this.game, clock: { ...this.game.clock, playClock: PLAY_CLOCK } };
+    } else if (t.playClockExpired) {
+      this.waiveDelayOfGame = true;
       const r = delayOfGame(this.game);
       const ap = afterPlay(r.state, r.stop);
       this.game = ap.state;
@@ -701,6 +983,7 @@ export class App {
   }
 
   private presnap(f: InputFrame, dt: number) {
+    if (this.defense) return this.presnapDefense(f, dt);
     this.updateGaze(f, dt);
     // Picking a receiver pre-snap only marks him; the QB does not turn his head.
     if (f.slotPressed) this.target = f.slotPressed;
@@ -747,6 +1030,7 @@ export class App {
   }
 
   private live(f: InputFrame, dt: number) {
+    if (this.defense) return this.liveDefense(f, dt);
     const sim = this.sim!;
     this.updateGaze(f, dt);
     const inp = this.simInput(f);
@@ -763,16 +1047,22 @@ export class App {
     }
     this.checkCallouts();
     this.updateLiveControls();
-    if (sim.result) {
+    if (sim.result) this.whistle();
+  }
+
+  /** Whistle: result banner and crowd reaction, then the post-play phase. */
+  private whistle() {
+    const r = this.sim!.result!;
+    const g = this.game!;
+    {
       this.setPhase('postplay');
       this.postTimer = 0;
       this.audio.whistle();
-      const r = sim.result;
-      const g = this.game!;
       const headline = { noPlay: 'NO PLAY', touchdown: 'TOUCHDOWN!', interception: 'INTERCEPTED!', sack: 'SACKED!', safety: 'SAFETY!', incomplete: 'INCOMPLETE', outOfBounds: 'OUT OF BOUNDS', tackle: r.yards >= g.toGo ? 'FIRST DOWN!' : 'DOWN' }[r.outcome];
-      if (r.outcome === 'touchdown') this.audio.roar(1);
-      else if (r.yards >= 20) this.audio.roar(0.6);
-      const sub = r.fouls.length ? `FLAG: ${enforcePenalties(g, r, r.fouls).text}` : `${r.description} · vs ${r.defenseCall}`;
+      const enf = enforcePenalties(g, r, r.fouls);
+      // Flags get their boos at the call-out; interceptions already got their reaction at the catch.
+      if (r.outcome !== 'interception') this.audio.react(reactionTo({ ...this.playForCrowd(g, r, enf), penaltyOnHome: null }));
+      const sub = r.fouls.length ? `FLAG: ${enf.text}` : this.defense ? `${r.description} · ${this.play!.name}` : `${r.description} · vs ${r.defenseCall}`;
       this.flash(headline, sub, POSTPLAY_TIME + 1);
     }
   }
@@ -782,10 +1072,15 @@ export class App {
       if (e.type === 'deflection') this.flash('BROKEN UP', '', 1);
       if (e.type === 'drop') this.flash('DROPPED', '', 1);
       if (e.type === 'brokenTackle') this.flash('BROKEN TACKLE', '', 0.7);
-      if (e.type === 'interception') this.audio.roar(0.4);
+      if (e.type === 'timing' && this.sim?.lastTiming) {
+        const gr = this.sim.lastTiming.grade;
+        const early = this.sim.lastTiming.offset < 0;
+        if (gr !== 'none') this.flash(gr === 'perfect' ? 'PERFECT JUMP' : gr === 'good' ? 'GOOD JUMP' : early ? 'JUMPED TOO EARLY' : 'JUMPED TOO LATE', '', 0.9);
+      }
+      if (e.type === 'interception' && this.game) this.audio.react(this.game.possession === 'home' ? { kind: 'silence', intensity: 1 } : { kind: 'roar', intensity: 0.8 });
       if (e.type === 'flag' && this.sim) {
         const fl = this.sim.flags[this.sim.flags.length - 1];
-        this.callouts.push({ at: fl.t0 + fl.T + PENALTIES.flag.calloutDelay, foul: fl.foul });
+        this.callouts.push({ at: fl.t0 + fl.T + PENALTIES.flag.calloutDelay, flag: fl });
       }
     }
   }
@@ -798,7 +1093,8 @@ export class App {
     for (const c of this.callouts.filter((x) => sim.t >= x.at)) {
       const off = getTeam(g.teams[g.possession]).name;
       const def = getTeam(g.teams[other(g.possession)]).name;
-      const t = calloutText(c.foul, off, def);
+      const t = calloutText(c.flag.foul, off, def);
+      this.audio.react(reactionToFlag((c.flag.foul.side === 'off') === (g.possession === 'home')));
       this.hud.showCallout(t.title, t.sub);
     }
     this.callouts = this.callouts.filter((x) => sim.t < x.at);

@@ -5,20 +5,23 @@
  * off. Simplified enforcement (documented in ARCHITECTURE.md):
  *  - all fouls are enforced from the previous spot, except spot fouls (DPI),
  *  - half the distance to the goal when the yardage would cross it,
- *  - offsetting fouls replay the down,
+ *  - one flag per play: if several fouls reach enforcement, only the most
+ *    severe is called (play/penalties.ts callFoul), so there are no
+ *    offsetting fouls and no chains,
  *  - defensive fouls with autoFirst give a first down; other accepted fouls
  *    replay the down with the new distance.
  */
 import { clamp } from '../core/vec';
-import type { Foul } from '../play/penalties';
+import { callFoul, type Foul } from '../play/penalties';
 import { applyPlay, type RulesPlay, type RulesResult } from './rules';
 import type { GameState } from './state';
 
 export interface Enforcement {
   result: RulesResult;
-  /** The foul that was enforced (null: declined or offsetting). */
+  /** The foul that was enforced (null: declined). */
   enforced: Foul | null;
   declined: Foul | null;
+  /** Always false since Phase 3a (one flag per play); kept for callers. */
   offsetting: boolean;
   /** Text for the post-play banner, e.g. "HOLDING, OFFENSE: 10 yards, replay 2nd down". */
   text: string;
@@ -54,14 +57,8 @@ export function enforcePenalties(s: GameState, play: RulesPlay, fouls: readonly 
   const playResult = applyPlay(s, play);
   if (fouls.length === 0) return { result: playResult, enforced: null, declined: null, offsetting: false, text: '' };
   const off = s.possession;
-  const offFoul = fouls.find((f) => f.side === 'off');
-  const defFoul = fouls.find((f) => f.side === 'def');
   const replay: RulesResult = { state: s, stop: 'penalty', possessionChanged: false, scored: null, headline: 'PENALTY' };
-
-  if (offFoul && defFoul) {
-    return { result: { ...replay, headline: 'OFFSETTING PENALTIES' }, enforced: null, declined: null, offsetting: true, text: 'Offsetting fouls, replay the down' };
-  }
-  const f = (offFoul ?? defFoul)!;
+  const f = fouls.reduce<Foul | null>((cur, x) => callFoul(cur, x), null)!;
   const accepted: RulesResult = { ...replay, state: penaltyState(s, f), headline: f.label.toUpperCase() };
   if (f.dead) return { result: accepted, enforced: f, declined: null, offsetting: false, text: `${f.label}: ${f.yards} yards, replay the down` };
 

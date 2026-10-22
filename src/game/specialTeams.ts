@@ -10,7 +10,7 @@ import type { Vec2 } from '../core/vec';
 import { clamp } from '../core/vec';
 import { ST } from '../play/kicking';
 import { other, type GameState, type TeamSide } from './state';
-import type { RulesResult } from './rules';
+import { scoreTouchdown, startPossession, type RulesResult } from './rules';
 
 export function toReceivingFrame(p: Vec2): Vec2 {
   return { x: -p.x, y: 100 - p.y };
@@ -31,9 +31,8 @@ export type ReturnOutcome = 'tackle' | 'outOfBounds' | 'touchdown' | 'touchback'
 export function applyReturn(s: GameState, kicking: TeamSide, kind: 'kickoff' | 'punt', outcome: ReturnOutcome, endY: number): RulesResult {
   const recv = other(kicking);
   if (outcome === 'touchdown') {
-    // Return TD: the returning team scores and will kick off.
-    const st = possession(addScore(s, recv, 7), kicking, ST.rules.touchback);
-    return { state: { ...st, pendingKickoff: recv }, stop: 'score', possessionChanged: true, scored: { side: recv, points: 7 }, headline: kind === 'kickoff' ? 'KICK RETURN TOUCHDOWN!' : 'PUNT RETURN TOUCHDOWN!' };
+    // Return TD: the returning team scores, has its try, then kicks off.
+    return scoreTouchdown({ ...s, possession: recv }, recv, kind === 'kickoff' ? 'KICK RETURN TOUCHDOWN!' : 'PUNT RETURN TOUCHDOWN!');
   }
   if (outcome === 'safety') {
     // Returner downed in his own end zone after bringing it out: safety, he free-kicks.
@@ -54,6 +53,11 @@ export function kickoffOutOfBounds(s: GameState, kicking: TeamSide): RulesResult
 export function applyFieldGoal(s: GameState, good: boolean, distance: number): RulesResult {
   const off = s.possession;
   const def = other(off);
+  if (s.overtime) {
+    // Overtime: made or missed, the possession is over (game/overtime.ts).
+    const st = startPossession(good ? addScore(s, off, 3) : s, def, 0);
+    return { state: st, stop: good ? 'score' : 'possession', possessionChanged: true, scored: good ? { side: off, points: 3 } : null, headline: `${distance}-YD FIELD GOAL ${good ? 'IS GOOD' : 'MISSED'}` };
+  }
   if (good) {
     const st = possession(addScore(s, off, 3), def, ST.rules.touchback);
     return { state: { ...st, pendingKickoff: off }, stop: 'score', possessionChanged: true, scored: { side: off, points: 3 }, headline: `${distance}-YD FIELD GOAL IS GOOD` };

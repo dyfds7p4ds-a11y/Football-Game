@@ -1,8 +1,21 @@
 {
   "verticalConcepts": {
-    "four_verts": ["WR1", "WR2", "WR3", "TE"],
-    "pa_shot": ["WR1", "WR2", "WR3"],
-    "deep_post": ["WR1", "WR2", "WR3"]
+    "four_verts": [
+      "WR1",
+      "WR2",
+      "WR3",
+      "TE"
+    ],
+    "pa_shot": [
+      "WR1",
+      "WR2",
+      "WR3"
+    ],
+    "deep_post": [
+      "WR1",
+      "WR2",
+      "WR3"
+    ]
   },
   "difficulty": "normal",
   "sampleTime": 2.4,
@@ -10,5 +23,23 @@
   "seedsPerDefense": 12,
   "openMargin": 0.2,
   "maxOpenRate": 0.45,
-  "maxOpenRateRoute1": 0.4
+  "maxOpenRateRoute1": 0.4,
+  "targets": {
+    "_doc": "Phase 3b balance at Normal (tests/targets.test.ts): CPU QB against an all-CPU defense over every pass play and defense call. A throw 'goes to' the defender nearest the target receiver at the release. cbTargetShare counts CB1, CB2 and NB; outsideCbTargetShare only CB1 and CB2. intPerGame = interceptions per attempt x attemptsPerGame.",
+    "difficulty": "normal",
+    "seeds": 8,
+    "attemptsPerGame": 32,
+    "cbTargetShare": [
+      0.35,
+      0.65
+    ],
+    "outsideCbTargetShare": [
+      0.2,
+      0.45
+    ],
+    "intPerGame": [
+      0.4,
+      1.8
+    ]
+  }
 }

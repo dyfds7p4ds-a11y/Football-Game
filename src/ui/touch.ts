@@ -3,7 +3,8 @@
  * receiver buttons + primary action button (bottom right). Multi-touch safe:
  * every control tracks its own pointerId.
  */
-import type { EligibleSlot } from '../data/types';
+import type { DefSlot, EligibleSlot } from '../data/types';
+import { DEF_UNITS } from '../play/defenseSelect';
 import type { InputManager } from '../input/input';
 import { VirtualJoystick } from '../input/joystick';
 import { h } from './dom';
@@ -22,6 +23,8 @@ export class TouchControls {
   readonly chargeBox: HTMLElement;
   readonly secondary: HTMLButtonElement;
   private slotBtns = new Map<EligibleSlot, HTMLButtonElement>();
+  private defBtns = new Map<DefSlot, HTMLButtonElement>();
+  private defStrip: HTMLElement;
   private joy = new VirtualJoystick(60);
   private joyId: number | null = null;
   private lookId: number | null = null;
@@ -65,7 +68,23 @@ export class TouchControls {
       this.slotBtns.set(slot, btn);
       actions.append(btn);
     }
-    this.root = h('div', { id: 'touch' }, joyzone, lookzone, this.base, this.knob, actions);
+    // Defense (Phase 3b): a strip with every defender, grouped DL | LB | DB; tap one to take him over.
+    const strip = h('div', { id: 'defstrip', class: 'hidden' });
+    for (const unit of Object.values(DEF_UNITS)) {
+      const group = h('div', { class: 'defgroup' });
+      for (const slot of unit) {
+        const btn = h('button', { class: 'defbtn' }, slot);
+        btn.addEventListener('pointerdown', (e) => {
+          e.preventDefault();
+          input.pressDefender(slot);
+        });
+        this.defBtns.set(slot, btn);
+        group.append(btn);
+      }
+      strip.append(group);
+    }
+    this.defStrip = strip;
+    this.root = h('div', { id: 'touch' }, joyzone, lookzone, this.base, this.knob, actions, strip);
 
     // Primary button: hold state.
     this.primary.addEventListener('pointerdown', (e) => {
@@ -152,6 +171,12 @@ export class TouchControls {
       btn.classList.toggle('blocking', blocking.has(slot));
       btn.classList.toggle('hidden', !visible);
     }
+  }
+
+  /** Defender strip on defense (null hides it); `selected` is the one under control. */
+  setDefenders(selected: DefSlot | null) {
+    this.defStrip.classList.toggle('hidden', !selected);
+    for (const [slot, btn] of this.defBtns) btn.classList.toggle('selected', slot === selected);
   }
 
   /** Secondary action button (SLIDE / DASH); null hides it. */

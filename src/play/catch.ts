@@ -20,6 +20,8 @@ export interface CatchCandidate {
   coverage: number;
   /** Defender was in phase with the targeted receiver when the ball arrived. */
   inPhase?: boolean;
+  /** User-timed jump (play/interception.ts): added breakup / interception chance and reach (yd). */
+  timing?: { breakup: number; int: number; reach: number };
 }
 
 export interface CatchInput {
@@ -39,6 +41,10 @@ export interface CatchInput {
   catchFactor?: number;
   /** Extra interception chance (screens thrown late). */
   intBonus?: number;
+  /** Base pick share of a defender's hands-on plays (default 0.3, Phase 2). */
+  intBase?: number;
+  /** Extra pick share when no receiver is within reach (default 0.2, Phase 2). */
+  noReceiverInt?: number;
   rng: Rng;
 }
 
@@ -52,7 +58,8 @@ export type CatchOutcome =
 function nearest(cands: CatchCandidate[], p: Vec2): { c: CatchCandidate; d: number } | null {
   let best: { c: CatchCandidate; d: number } | null = null;
   for (const c of cands) {
-    const d = dist(c.pos, p);
+    // A well-timed jump extends a defender's reach.
+    const d = Math.max(0, dist(c.pos, p) - (c.timing?.reach ?? 0));
     if (!best || d < best.d) best = { c, d };
   }
   return best;
@@ -76,9 +83,10 @@ export function resolveCatch(inp: CatchInput): CatchOutcome {
   if (def && defIn) {
     const leverage = off ? clamp((off.d - def.d) * 0.25, -0.3, 0.4) : 0.4;
     const phase = def.c.inPhase ? 1 : 0;
-    const p = clamp((0.3 + 0.35 * (1 - def.d / CATCH.reach) + leverage + phase * (inp.inPhaseBreakup ?? 0)) * (def.c.coverage / 85) * inp.ballSkills, 0.03, 0.92);
+    const tm = def.c.timing;
+    const p = clamp((0.3 + 0.35 * (1 - def.d / CATCH.reach) + leverage + phase * (inp.inPhaseBreakup ?? 0)) * (def.c.coverage / 85) * inp.ballSkills + (tm?.breakup ?? 0), 0.03, 0.92);
     if (inp.rng.chance(p)) {
-      const pInt = clamp(0.3 * (def.c.catching / 70) * inp.ballSkills + (off && offIn ? 0 : 0.2) + phase * (inp.inPhaseInt ?? 0) + (inp.intBonus ?? 0), 0.05, 0.75);
+      const pInt = clamp((inp.intBase ?? 0.3) * (def.c.catching / 70) * inp.ballSkills + (off && offIn ? 0 : inp.noReceiverInt ?? 0.2) + phase * (inp.inPhaseInt ?? 0) + (inp.intBonus ?? 0) + (tm?.int ?? 0), tm ? 0.02 : 0.05, 0.75);
       if (inp.rng.chance(pInt)) return { kind: 'interception', id: def.c.id, probability: p * pInt };
       return { kind: 'deflection', id: def.c.id, probability: p };
     }

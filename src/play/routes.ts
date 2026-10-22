@@ -5,6 +5,9 @@
 import type { RouteAssignment, RouteType } from '../data/types';
 import { clamp, type Vec2 } from '../core/vec';
 import { FIELD } from './field';
+import routesJson from '../data/routes.json';
+
+export const ROUTE_BOUNDS = routesJson as { sidelineMargin: number; turnUpfieldAt: number; endLineMargin: number; holdInside: number };
 
 export interface Route {
   type: RouteType;
@@ -31,10 +34,9 @@ export function buildRoute(a: RouteAssignment, start: Vec2, ballX: number): Rout
   const d = a.depth ?? DEFAULT_DEPTH[a.route] ?? 10;
   const { x, y } = start;
   const losY = Math.round(start.y + 0.5); // receivers start just behind the LOS
-  const P = (px: number, py: number): Vec2 => ({
-    x: clamp(px, -FIELD.halfWidth + 1, FIELD.halfWidth - 1),
-    y: py,
-  });
+  const xMax = FIELD.halfWidth - ROUTE_BOUNDS.sidelineMargin;
+  const yMax = FIELD.length + FIELD.endzone - ROUTE_BOUNDS.endLineMargin;
+  const P = (px: number, py: number): Vec2 => ({ x: clamp(px, -xMax, xMax), y: Math.min(py, yMax) });
   let pts: Vec2[];
   switch (a.route) {
     case 'go': pts = [P(x + o * 0.6, losY + 6), P(x + o * 1.2, losY + 60)]; break;
@@ -67,4 +69,29 @@ export function buildRoute(a: RouteAssignment, start: Vec2, ballX: number): Rout
     delay: a.delay ?? 0,
     blocks: a.route === 'block' || a.route === 'check' || a.route === 'fake',
   };
+}
+
+/**
+ * Boundary logic for a route runner's desired velocity (pure). Past his last
+ * waypoint (`continuing`), an outward drift near the sideline turns upfield
+ * at the same speed; at the margin the
+ * outward component is dropped, and nobody runs past the end line. Ball
+ * carriers are not limited: they may step out of bounds on purpose.
+ */
+export function boundRouteVelocity(pos: Vec2, vel: Vec2, continuing: boolean): Vec2 {
+  const xMax = FIELD.halfWidth - ROUTE_BOUNDS.sidelineMargin;
+  const yMax = FIELD.length + FIELD.endzone - ROUTE_BOUNDS.endLineMargin;
+  let { x, y } = vel;
+  const side = Math.sign(pos.x);
+  const outward = side !== 0 && Math.sign(x) === side;
+  if (outward && continuing && Math.abs(pos.x) >= xMax - ROUTE_BOUNDS.turnUpfieldAt) {
+    const speed = Math.hypot(x, y);
+    // Fade the outward part out over the last few yards, keep the speed upfield.
+    const k = clamp((xMax - Math.abs(pos.x)) / ROUTE_BOUNDS.turnUpfieldAt, 0, 1);
+    x *= k;
+    y = Math.sign(y || 1) * Math.sqrt(Math.max(0, speed * speed - x * x));
+  }
+  if (outward && Math.abs(pos.x) >= xMax) x = 0;
+  if (pos.y >= yMax && y > 0) y = 0;
+  return { x, y };
 }

@@ -22,8 +22,8 @@ interface StandSpec {
   gap?: [number, number];
 }
 
-/** Players' tunnel: under the west stand, opening onto the field at this yard line. */
-export const TUNNEL = { y: 40, halfWidth: 3.5, height: 3.2 };
+/** Players' tunnel: under the west stand, opening onto the field at this yard line; `depth` yards long. */
+export const TUNNEL = { y: 40, halfWidth: 3.5, height: 3.2, depth: 17 };
 
 const ROW_DEPTH = 0.95;
 const ROW_RISE = 0.5;
@@ -41,12 +41,16 @@ export class Stadium {
 
   constructor(homeColors: string[], awayColors: string[]) {
     const side = FIELD.halfWidth + 9;
+    const endFront = FIELD.length + FIELD.endzone + 9;
+    // Side and end stands meet at the four corner pivots (±side, endFront / -endFront + 100);
+    // curved corner sections fill the quadrant behind each pivot.
+    const sideLen = 2 * (endFront - 50);
     const stands: StandSpec[] = [
       // Local x runs along the stand; for the west stand local x = field y - 50.
-      { cx: -side, cy: 50, rotY: Math.PI / 2, length: 130, gap: [TUNNEL.y - 50 - TUNNEL.halfWidth, TUNNEL.y - 50 + TUNNEL.halfWidth] },
-      { cx: side, cy: 50, rotY: -Math.PI / 2, length: 130 },
-      { cx: 0, cy: 110 + 9, rotY: 0, length: 74 },
-      { cx: 0, cy: -10 - 9, rotY: Math.PI, length: 74 },
+      { cx: -side, cy: 50, rotY: Math.PI / 2, length: sideLen, gap: [TUNNEL.y - 50 - TUNNEL.halfWidth, TUNNEL.y - 50 + TUNNEL.halfWidth] },
+      { cx: side, cy: 50, rotY: -Math.PI / 2, length: sideLen },
+      { cx: 0, cy: endFront, rotY: 0, length: 2 * side },
+      { cx: 0, cy: 100 - endFront, rotY: Math.PI, length: 2 * side },
     ];
     const concrete = new THREE.MeshLambertMaterial({ color: 0x8e9196 });
     const steps = this.stepTexture();
@@ -108,8 +112,9 @@ export class Stadium {
         deck.position.set(0, h0 + rise / 2, -(z0 + depth / 2) - 0.5);
         g.add(deck);
         (deck.material as THREE.MeshLambertMaterial).map!.repeat.set(s.length / 6, rows);
-        const under = new THREE.Mesh(new THREE.BoxGeometry(s.length, 1, depth), concrete);
-        under.position.set(0, h0 - 0.5, -(z0 + depth / 2) - 0.5);
+        // Thin underside so the players' tunnel (TUNNEL.height < PODIUM) fits beneath it.
+        const under = new THREE.Mesh(new THREE.BoxGeometry(s.length, 0.2, depth), concrete);
+        under.position.set(0, h0 - 0.1, -(z0 + depth / 2) - 0.5);
         g.add(under);
         // Spectators on each row.
         for (let r = 0; r < rows; r++) {
@@ -139,6 +144,7 @@ export class Stadium {
       roof.rotation.x = -0.06;
       g.add(roof);
       // Light rig along the roof edge.
+      if (s.gap) g.add(this.tunnel(s.gap, wallMat, concrete, lampMat));
       for (let x = -s.length / 2 + 6; x <= s.length / 2 - 6; x += 12) {
         const lamp = new THREE.Mesh(new THREE.BoxGeometry(5, 1.2, 0.4), lampMat);
         lamp.position.set(x, topH + 5.2, backZ + roofDepth - 1.4);
@@ -151,6 +157,12 @@ export class Stadium {
       g.add(band);
     }
 
+    // Corner stands so the bowl reads as closed.
+    for (const sx of [-1, 1]) {
+      for (const sy of [-1, 1]) {
+        this.corner(sx * side, sy > 0 ? endFront : 100 - endFront, sx, sy, { stepMat: steps, concrete, facade, roofMat, wallMat }, palette, rng, matrices, colors);
+      }
+    }
     const crowd = new THREE.InstancedMesh(person, this.crowdMat, matrices.length);
     matrices.forEach((mx, i) => {
       crowd.setMatrixAt(i, mx);
@@ -160,14 +172,135 @@ export class Stadium {
     if (crowd.instanceColor) crowd.instanceColor.needsUpdate = true;
     crowd.frustumCulled = false;
     this.group.add(crowd);
+  }
 
-    // Corner fill so the bowl reads as closed.
-    for (const [x, y] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
-      const corner = new THREE.Mesh(new THREE.CylinderGeometry(14, 18, 30, 8, 1, true, 0, Math.PI / 2), facade);
-      corner.position.copy(W(x * (side + 4), y < 0 ? -14 : 114, 15));
-      corner.rotation.y = Math.atan2(x, y) + Math.PI * 0.75;
-      this.group.add(corner);
+  /**
+   * Players' tunnel built into a stand (local frame of that stand): an
+   * open-mouthed concrete passage from the gap in the podium wall back under
+   * the lower tier, lit along the ceiling, with a padded portal frame and a
+   * glowing locker-room door at the far end. Nothing closes the field end.
+   */
+  private tunnel(gap: [number, number], wallMat: THREE.Material, concrete: THREE.Material, lampMat: THREE.Material): THREE.Group {
+    const t = new THREE.Group();
+    const w = gap[1] - gap[0];
+    const cx = (gap[0] + gap[1]) / 2;
+    const d = TUNNEL.depth;
+    // Emissive so the passage reads as lit from within, not as a dark hole.
+    const inner = new THREE.MeshLambertMaterial({ color: 0x6b707a, emissive: 0x2c3036, side: THREE.DoubleSide });
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(w, d), new THREE.MeshLambertMaterial({ color: 0x3d4a3a, emissive: 0x151a15 }));
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.set(cx, 0.02, -d / 2);
+    const ceil = new THREE.Mesh(new THREE.PlaneGeometry(w, d), inner);
+    ceil.rotation.x = Math.PI / 2;
+    ceil.position.set(cx, TUNNEL.height, -d / 2);
+    t.add(floor, ceil);
+    for (const x of gap) {
+      const wall = new THREE.Mesh(new THREE.PlaneGeometry(d, TUNNEL.height), inner);
+      wall.rotation.y = Math.PI / 2;
+      wall.position.set(x, TUNNEL.height / 2, -d / 2);
+      t.add(wall);
     }
+    // Far end: wall with a lit doorway.
+    const end = new THREE.Mesh(new THREE.PlaneGeometry(w, TUNNEL.height), concrete);
+    end.position.set(cx, TUNNEL.height / 2, -d);
+    const door = new THREE.Mesh(new THREE.PlaneGeometry(w * 0.5, TUNNEL.height * 0.8), lampMat);
+    door.position.set(cx, TUNNEL.height * 0.4, -d + 0.05);
+    t.add(end, door);
+    for (let z = -2; z > -d + 1; z -= 3) {
+      const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.06, 1.6), lampMat);
+      lamp.position.set(cx, TUNNEL.height - 0.05, z);
+      t.add(lamp);
+    }
+    // Portal: padded posts and a header in the wall color, flush with the podium wall.
+    for (const x of gap) {
+      const post = new THREE.Mesh(new THREE.BoxGeometry(0.5, PODIUM, 0.7), wallMat);
+      post.position.set(x + (x < cx ? -0.25 : 0.25), PODIUM / 2, 0);
+      t.add(post);
+    }
+    const header = new THREE.Mesh(new THREE.BoxGeometry(w + 1, PODIUM - TUNNEL.height, 0.7), wallMat);
+    header.position.set(cx, (PODIUM + TUNNEL.height) / 2, 0);
+    t.add(header);
+    return t;
+  }
+
+  /**
+   * Curved corner stand between a side stand and an end stand. `px, py` is the
+   * pivot where both front edges meet; rows fan out over the quadrant behind
+   * it (outward x direction sx, outward y direction sy), matching the tiers,
+   * concourse, back facade and roof of the straight stands.
+   */
+  private corner(px: number, py: number, sx: number, sy: number,
+    mats: { stepMat: THREE.Texture; concrete: THREE.Material; facade: THREE.Material; roofMat: THREE.Material; wallMat: THREE.Material },
+    palette: string[], rng: () => number, matrices: THREE.Matrix4[], colors: THREE.Color[]) {
+    const SEG = 14;
+    const dir = (u: number) => ({ x: Math.cos(u * Math.PI / 2) * sx, y: Math.sin(u * Math.PI / 2) * sy });
+    const at = (u: number, r: number, h: number) => {
+      const d = dir(u);
+      return W(px + d.x * r, py + d.y * r, h);
+    };
+    /** A ring-sector strip from (r0, h0) to (r1, h1); vertical when r0 == r1. */
+    const strip = (r0: number, h0: number, r1: number, h1: number, mat: THREE.Material, vRepeat = 1) => {
+      const pos: number[] = [];
+      const uv: number[] = [];
+      const idx: number[] = [];
+      const arc = ((r0 + r1) / 2) * Math.PI / 2;
+      for (let i = 0; i <= SEG; i++) {
+        const u = i / SEG;
+        const a = at(u, r0, h0);
+        const b = at(u, r1, h1);
+        pos.push(a.x, a.y, a.z, b.x, b.y, b.z);
+        uv.push((u * arc) / 6, 0, (u * arc) / 6, vRepeat);
+        if (i < SEG) idx.push(i * 2, i * 2 + 1, i * 2 + 2, i * 2 + 1, i * 2 + 3, i * 2 + 2);
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+      geo.setIndex(idx);
+      geo.computeVertexNormals();
+      const mesh = new THREE.Mesh(geo, mat);
+      this.group.add(mesh);
+      return mesh;
+    };
+    const steps = mats.stepMat.clone();
+    steps.repeat.set(1, 1);
+    steps.needsUpdate = true;
+    const stepMat = new THREE.MeshLambertMaterial({ map: steps, color: 0xb5b8bc, side: THREE.DoubleSide });
+    const q = new THREE.Quaternion();
+    const m = new THREE.Matrix4();
+    const tiers: [number, number, number][] = [
+      [0, LOWER_ROWS, PODIUM],
+      [LOWER_ROWS * ROW_DEPTH + CONCOURSE, UPPER_ROWS, PODIUM + LOWER_ROWS * ROW_RISE + UPPER_LIFT],
+    ];
+    for (const [z0, rows, h0] of tiers) {
+      const depth = rows * ROW_DEPTH;
+      strip(z0 + 0.5, h0, z0 + depth + 0.5, h0 + rows * ROW_RISE, stepMat, rows);
+      strip(z0 + 0.5, 0, z0 + 0.5, h0, mats.facade).material = new THREE.MeshLambertMaterial({ color: 0x3b4250, side: THREE.DoubleSide });
+      for (let r = 0; r < rows; r++) {
+        const rad = z0 + r * ROW_DEPTH + ROW_DEPTH * 0.6 + 0.5;
+        const h = h0 + r * ROW_RISE + 0.02;
+        const n = Math.floor((rad * Math.PI / 2) / SEAT);
+        for (let k = 0; k < n; k++) {
+          if (rng() < 0.07) continue;
+          const u = (k + 0.5 + (rng() - 0.5) * 0.15) / n;
+          const d = dir(u);
+          const pos = at(u, rad, h);
+          // Face the pivot (the field corner): front of the figure is local -z.
+          q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.atan2(d.x, -d.y) + (rng() - 0.5) * 0.4);
+          const sc = 0.9 + rng() * 0.2;
+          m.compose(pos, q, new THREE.Vector3(sc, sc, sc));
+          matrices.push(m.clone());
+          colors.push(new THREE.Color(palette[Math.floor(rng() * palette.length)]));
+        }
+      }
+    }
+    const backR = LOWER_ROWS * ROW_DEPTH + CONCOURSE + UPPER_ROWS * ROW_DEPTH + 1.5;
+    const topH = PODIUM + LOWER_ROWS * ROW_RISE + UPPER_LIFT + UPPER_ROWS * ROW_RISE;
+    const dark = new THREE.MeshLambertMaterial({ color: 0x3b4250, side: THREE.DoubleSide });
+    strip(backR, 0, backR, topH + 6, dark);
+    const roofDepth = UPPER_ROWS * ROW_DEPTH + 6;
+    strip(backR - roofDepth + 1, topH + 6.6, backR + 0.5, topH + 6, mats.roofMat);
+    // Concourse floor between the tiers.
+    strip(LOWER_ROWS * ROW_DEPTH + 0.5, PODIUM + LOWER_ROWS * ROW_RISE + 0.05, LOWER_ROWS * ROW_DEPTH + CONCOURSE + 0.5, PODIUM + LOWER_ROWS * ROW_RISE + 0.05, dark);
   }
 
   dispose() {

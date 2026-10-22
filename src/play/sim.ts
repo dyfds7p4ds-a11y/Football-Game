@@ -13,7 +13,7 @@ import type {
 } from '../data/types';
 import { ELIGIBLE, OL_SLOTS, DEF_SLOTS, OFF_SLOTS } from '../data/types';
 import { FORMATIONS, playerFor } from '../data';
-import { buildRoute, type Route } from './routes';
+import { ROUTE_BOUNDS, boundRouteVelocity, buildRoute, type Route } from './routes';
 import { ZONES, type DefAssignment, type DefenseCall } from './defenseCalls';
 import { computeThrow, ballHeightAt, THROW, throwWindow, type ThrowWindow } from './throw';
 import { resolveCatch, type CatchCandidate } from './catch';
@@ -23,7 +23,14 @@ import { inPhase, throwingWindow } from './windows';
 import { TACKLE, resolveTackle, type ContactKind } from './tackle';
 import { SCREEN, screenTiming, type ScreenTiming } from './screen';
 import { nearestOfficial, setupOfficials, updateOfficials, type Official } from './officials';
-import { PENALTIES, makeFoul, rollFoul, type Flag, type Foul, type FoulType, type PenaltyBias } from './penalties';
+import { PENALTIES, callFoul, makeFoul, rollFoul, type Flag, type Foul, type FoulType, type PenaltyBias } from './penalties';
+import { DEF_CONTROL, combinedEffect, jumpTiming, readGrade, type JumpGrade, type ReadGrade } from './interception';
+import {
+  BLOCKING, assignProtection, blockQuality, holdTime, laneCandidates, pickLane, planRunBlocks, progressRate,
+  type BlockAssignment, type BlockMode, type BlockRole, type LaneDefender, type Unit,
+} from './blocking';
+import { BLITZ, blitzDesign, blitzPath, classifyBlitz, recognizeChance, type BlitzFacts, type BlitzOutcome, type BlitzPath } from './blitz';
+import { switchTarget } from './defenseSelect';
 import pocketJson from '../data/pocket.json';
 
 export const POCKET = pocketJson.pocket;
@@ -59,6 +66,8 @@ export interface Actor {
   history: Vec2[];
   /** Contact animation the renderer should play (tackles, broken tackles, slides). */
   anim: ContactAnim | null;
+  /** Sim time of the user defender's last JUMP press (-Infinity: none). */
+  jumpT: number;
 }
 
 export interface ContactAnim {
@@ -94,6 +103,8 @@ export interface SimInput {
   juke: boolean;
   /** Edge-triggered: QB slides (gives himself up) while scrambling. */
   slide?: boolean;
+  /** User on defense: stick for the selected defender and the edge-triggered JUMP button. */
+  defense?: { move: Vec2; jump: boolean };
 }
 
 export const idleInput = (): SimInput => ({
@@ -139,7 +150,7 @@ export interface Ball {
 export type PlayEventType =
   | 'snap' | 'handoff' | 'pitch' | 'throw' | 'catch' | 'interception' | 'deflection' | 'drop'
   | 'incomplete' | 'tackle' | 'sack' | 'touchdown' | 'outOfBounds' | 'brokenTackle' | 'juke' | 'safety'
-  | 'scramble' | 'shed' | 'slide' | 'flag';
+  | 'scramble' | 'shed' | 'slide' | 'flag' | 'jump' | 'timing' | 'chip' | 'hurry' | 'pickup' | 'rip';
 
 export interface PlayEvent {
   t: number;
@@ -179,14 +190,45 @@ export interface SimOptions {
   seed: number;
   /** Penalty chance scale per side (crowd noise etc.); 0 turns fouls off. Default 1. */
   penaltyBias?: PenaltyBias;
+  /** The user plays defense: `SimInput.defense` moves the selected defender (CB1 first). */
+  userDefense?: boolean;
 }
 
 interface Engagement {
   blocker: number;
   defender: number;
   t: number;
-  /** The line doesn't hold perfectly: some reps are lost early, at this engagement time. */
-  loseAt: number;
+  /** Phase 3b: matchup grade (blocking.ts), hold time and how much of it is used up. */
+  mode: BlockMode;
+  quality: number;
+  holdT: number;
+  progress: number;
+}
+
+/** A blitzing non-lineman: his path, where he is on it, and what has happened to him. */
+interface BlitzRun {
+  path: BlitzPath;
+  delay: number;
+  points: Vec2[];
+  idx: number;
+  facts: BlitzFacts;
+}
+
+export interface BlitzReport {
+  id: number;
+  slot: DefSlot;
+  path: BlitzPath;
+  outcome: BlitzOutcome;
+}
+
+/** Read-only view of a block for the renderer, HUD and tests. */
+export interface BlockState {
+  blocker: number;
+  defender: number;
+  role: BlockRole;
+  quality: number;
+  /** 0..1 share of the hold time used up. */
+  progress: number;
 }
 
 const SPEED = (r: number) => 4.8 + 5.0 * (r / 100);
@@ -212,12 +254,24 @@ export class PlaySim {
   readonly officials: Official[];
   readonly fouls: Foul[] = [];
   readonly flags: Flag[] = [];
+  /** User-controlled defender (-1: the user plays offense). Every other defender stays CPU. */
+  userDefId = -1;
+  /** Timing grade of the user defender's jump on the last pass that arrived near him. */
+  lastTiming: { grade: JumpGrade; offset: number; read: ReadGrade; margin: number } | null = null;
+
 
   private rng: Rng;
   private steps = 0;
   private events: PlayEvent[] = [];
   private engagements: Engagement[] = [];
   private passBlock = new Map<number, number>();
+  private blockRoles = new Map<number, BlockAssignment>();
+  /** Chip-and-release backs who already let go of their chip. */
+  private chipDone = new Set<number>();
+  private laneX: number | null = null;
+  private blitzers = new Map<number, BlitzRun>();
+  private lastRip = -Infinity;
+  private laneEvalAt = 0;
   private shedFrom = new Map<number, { blocker: number; until: number }>();
   private throwArmed = false;
   private keep = false;
@@ -240,6 +294,8 @@ export class PlaySim {
   /** Separate stream so turning penalties on or off never changes the football. */
   private penRng: Rng;
   private penaltyBias: PenaltyBias;
+  /** Block rep variance on its own stream, so blocking draws never shift the rest of the play. */
+  private blockRng: Rng;
 
   constructor(opts: SimOptions) {
     this.play = opts.play;
@@ -252,8 +308,11 @@ export class PlaySim {
     this.setupDefense(opts.defenseTeam);
     this.coverage = new CoverageReader(this.diff.coverageRead, this.rng.fork());
     this.penRng = this.rng.fork();
-    this.penaltyBias = opts.penaltyBias ?? { off: 1, def: 1 };
+    this.blockRng = this.penRng.fork();
+    const bias = opts.penaltyBias ?? { off: 1, def: 1 };
+    this.penaltyBias = { off: bias.off * this.diff.penaltyRate, def: bias.def * this.diff.penaltyRate };
     this.officials = setupOfficials(this.los, this.ballX);
+    if (opts.userDefense) this.userDefId = this.getDef('CB1').id;
     const qb = this.get('QB');
     this.controlledId = qb.id;
     const center = this.get('C');
@@ -269,6 +328,7 @@ export class PlaySim {
       looseVel: { x: 0, y: 0, h: 0 },
     };
     if (!underCenter) this.launchLateral(center.pos, qb, 0.4);
+    this.setupBlitzes();
     this.assignPassProtection();
     this.emit('snap');
   }
@@ -297,6 +357,7 @@ export class PlaySim {
       down: false,
       history: [],
       anim: null,
+      jumpT: -Infinity,
     };
     this.actors.push(a);
     this.bySlot.set(`${side}:${slot}`, a);
@@ -375,35 +436,83 @@ export class PlaySim {
   }
 
   private assignPassProtection() {
-    if (this.play.run) return;
+    const unit = (a: Actor, kind: Unit['kind']): Unit => ({ id: a.id, x: a.pos.x, y: a.pos.y, kind });
+    const defs = this.actors.filter((a) => a.side === 'def');
+    if (this.play.run) {
+      const blockers = OL_SLOTS.map((s) => unit(this.get(s), 'ol'));
+      if (this.play.routes.TE?.route === 'block') blockers.push(unit(this.get('TE'), 'block'));
+      // The box: the front, linebackers and any defender walked down within 6 yd of the ball.
+      const inBox = (d: Actor) => Math.abs(d.pos.x - this.ballX) < 6 && d.pos.y < this.los + 8;
+      const box = defs.filter((d) => d.position === 'DL' || d.position === 'LB' || inBox(d)).map((d) => ({
+        ...unit(d, 'def'), rushing: d.position === 'DL' || d.assignment?.kind === 'rush', lb: d.position !== 'DL',
+      }));
+      for (const a of planRunBlocks(this.play.run, this.ballX, blockers, box)) this.blockRoles.set(a.blocker, a);
+      this.laneX = this.ballX + this.play.run.aim;
+      return;
+    }
     const qb = this.get('QB');
-    const rushers = this.actors
-      .filter((a) => a.side === 'def' && a.assignment?.kind === 'rush')
-      .sort((a, b) => Math.abs(a.pos.x - this.ballX) - Math.abs(b.pos.x - this.ballX));
-    const blockers = OL_SLOTS.map((s) => this.get(s));
+    const rushers = defs.filter((a) => a.assignment?.kind === 'rush').map((d) => unit(d, 'def'));
+    const blockers = OL_SLOTS.map((s) => unit(this.get(s), 'ol'));
     for (const s of ELIGIBLE) {
       const a = this.get(s);
-      if (a.route?.blocks) blockers.push(a);
+      if (a.route?.blocks && a.route.type !== 'fake') blockers.push(unit(a, a.route.type === 'check' ? 'check' : 'block'));
     }
-    const free = new Set(blockers.map((b) => b.id));
-    for (const r of rushers) {
-      let best: Actor | null = null;
-      for (const b of blockers) {
-        if (!free.has(b.id)) continue;
-        if (!best || dist(b.pos, r.pos) < dist(best.pos, r.pos)) best = b;
+    // The protection may not see every blitz (path, line awareness): an unseen blitzer comes free.
+    const ol = OL_SLOTS.map((s) => this.get(s));
+    const awareness = ol.reduce((t, a) => t + a.player.ratings.awareness, 0) / ol.length;
+    const seen = new Set<number>();
+    for (const [id, bz] of this.blitzers) if (this.blockRng.chance(recognizeChance(bz.path, awareness))) seen.add(id);
+    const recognized = (r: Unit) => !this.blitzers.has(r.id) || seen.has(r.id);
+    for (const a of assignProtection(blockers, rushers, qb.pos, this.ballX, recognized)) {
+      this.blockRoles.set(a.blocker, a);
+      if (a.target !== null) this.passBlock.set(a.blocker, a.target);
+    }
+  }
+
+  private setupBlitzes() {
+    const qb = this.get('QB');
+    const launch = v2(qb.pos.x, Math.min(qb.pos.y, this.los - 1) - 2);
+    for (const d of this.actors) {
+      if (d.side !== 'def' || d.assignment?.kind !== 'rush' || d.position === 'DL') continue;
+      const design = blitzDesign(this.defense.id, d.slot as DefSlot, d.pos.x, this.ballX);
+      this.blitzers.set(d.id, {
+        ...design, points: blitzPath(design.path, d.pos, this.ballX, this.los, launch), idx: 0,
+        facts: { sacked: false, closest: Infinity, atRelease: Infinity, engaged: false },
+      });
+    }
+  }
+
+  /** One outcome per blitzer (sack, hurry, blocked, late); final once the play is over. */
+  blitzReport(): BlitzReport[] {
+    return [...this.blitzers.entries()].map(([id, b]) => ({
+      id, slot: this.actors[id].slot as DefSlot, path: b.path, outcome: classifyBlitz(b.facts),
+    }));
+  }
+
+  private trackBlitzes() {
+    const qb = this.get('QB');
+    if (this.ball.holder !== qb.id || this.passThrown) return;
+    for (const [id, b] of this.blitzers) {
+      const d = this.actors[id];
+      b.facts.closest = Math.min(b.facts.closest, dist(d.pos, qb.pos));
+      if (!b.facts.engaged && this.engagersOf(d) > 0) {
+        b.facts.engaged = true;
+        this.emit('pickup', id);
       }
-      if (best) {
-        this.passBlock.set(best.id, r.id);
-        free.delete(best.id);
-      }
     }
-    // Leftover OL double-team the rusher nearest the QB's launch point.
-    for (const id of free) {
-      const b = this.actors[id];
-      if (b.position !== 'OL' || rushers.length === 0) continue;
-      const r = rushers.reduce((m, x) => (dist(x.pos, b.pos) < dist(m.pos, b.pos) ? x : m));
-      if (dist(r.pos, qb.pos) < 12) this.passBlock.set(b.id, r.id);
-    }
+  }
+
+  /** Current blocks with their role, matchup grade and how close they are to breaking. */
+  blockStates(): BlockState[] {
+    return this.engagements.map((e) => ({
+      blocker: e.blocker, defender: e.defender, role: this.blockRoles.get(e.blocker)?.role ?? (e.mode === 'run' ? 'runBlock' : 'passSet'),
+      quality: e.quality, progress: clamp(e.progress / e.holdT, 0, 1),
+    }));
+  }
+
+  /** Protection / run-block responsibility given at the snap. */
+  blockRole(blocker: number): BlockAssignment | undefined {
+    return this.blockRoles.get(blocker);
   }
 
   // ---------------------------------------------------------------- helpers
@@ -482,8 +591,10 @@ export class PlaySim {
     this.updateReads();
     this.defenseAI(desired);
     this.updateEngagements(dt, desired);
+    this.trackBlitzes();
     this.integrate(dt, desired);
     this.separate();
+    this.keepInBounds();
     this.updateBall(dt);
     if (!this.result) this.handleThrowing(input);
     if (!this.result) this.checkTackles();
@@ -514,10 +625,20 @@ export class PlaySim {
 
   // ---------------------------------------------------------------- penalties
 
+  /**
+   * At most one flag per play: the first foul throws it; a later, more severe
+   * foul replaces the call (the flag already on the field stands for it), a
+   * lesser one is not called. `fouls` therefore never holds more than one.
+   */
   private addFoul(type: FoulType, spot: Vec2) {
-    if (this.fouls.some((f) => f.type === type)) return;
-    const foul = makeFoul(type, spot, this.t);
-    this.fouls.push(foul);
+    const current = this.fouls[0] ?? null;
+    const foul = callFoul(current, makeFoul(type, spot, this.t));
+    if (foul === current) return;
+    this.fouls[0] = foul;
+    if (this.flags.length) {
+      this.flags[0].foul = foul;
+      return;
+    }
     const official = nearestOfficial(this.officials, spot);
     const o = this.officials[official];
     this.flags.push({ foul, official, from: { ...o.pos }, to: { ...spot }, t0: this.t + PENALTIES.flag.throwDelay, T: PENALTIES.flag.flightTime });
@@ -569,7 +690,69 @@ export class PlaySim {
 
   // ---------------------------------------------------------------- user control
 
+  /** User defense: hand control to another defender (CPU takes over the previous one). */
+  selectDefender(slot: DefSlot) {
+    if (this.userDefId < 0) return;
+    const d = this.getDef(slot);
+    if (!d.down) this.userDefId = d.id;
+  }
+
+  /** SWITCH button: nearest the ball during the play, next in order before the snap. */
+  switchDefender(live: boolean): DefSlot | null {
+    const cur = this.userDefender;
+    if (!cur) return null;
+    const cands = this.actors.filter((a) => a.side === 'def').map((a) => ({ slot: a.slot as DefSlot, pos: a.pos, down: a.down }));
+    const slot = switchTarget(cands, cur.slot as DefSlot, this.ball.pos, live);
+    this.selectDefender(slot);
+    return this.userDefender!.slot as DefSlot;
+  }
+
+  get userDefender(): Actor | null {
+    return this.userDefId >= 0 ? this.actors[this.userDefId] : null;
+  }
+
+  /** The selected defender: stick movement plus a timed JUMP toward the ball, the carrier or his man. */
+  private controlDefender(inp: { move: Vec2; jump: boolean } | undefined, desired: Map<number, Vec2>) {
+    const d = this.userDefender;
+    if (!d || d.down || (this.contact && this.contact.tackler === d.id)) return;
+    const J = DEF_CONTROL.jump;
+    if (this.t - d.jumpT < J.duration) {
+      desired.set(d.id, d.vel); // airborne: momentum only
+      return;
+    }
+    const move = clampLen(inp?.move ?? v2(), 1);
+    desired.set(d.id, scale(move, d.maxSpeed * DEF_CONTROL.moveSpeed));
+    if (!inp?.jump) return;
+    const eng = this.engagements.find((e) => e.defender === d.id);
+    if (eng && !(this.ball.state === 'air' && this.ball.flight && !this.ball.flight.lateral)) {
+      // Engaged by a blocker: JUMP is a rip move that eats into the block's hold time.
+      if (this.t - this.lastRip < DEF_CONTROL.rip.cooldown) return;
+      this.lastRip = this.t;
+      eng.progress += DEF_CONTROL.rip.progress * (d.player.ratings.passRush / 75);
+      this.emit('rip', d.id);
+      return;
+    }
+    if (this.t - d.jumpT < J.cooldown) return;
+    const f = this.ball.state === 'air' && this.ball.flight && !this.ball.flight.lateral ? this.ball.flight : null;
+    const c = this.carrier;
+    const asg = d.assignment;
+    const aim = f ? f.landing
+      : c && c.side === 'off' ? c.pos
+        : asg?.kind === 'man' ? this.get(asg.target).pos
+          : this.nearestEligible(d.pos).pos;
+    const dir = norm(sub(aim, d.pos));
+    d.jumpT = this.t;
+    d.vel = scale(dir, Math.min(d.maxSpeed + J.lunge, len(d.vel) + J.lunge));
+    desired.set(d.id, d.vel);
+    this.emit('jump', d.id);
+  }
+
+  private nearestEligible(p: Vec2): Actor {
+    return ELIGIBLE.map((s) => this.get(s)).reduce((m, a) => (dist(a.pos, p) < dist(m.pos, p) ? a : m));
+  }
+
   private controlUser(input: SimInput, desired: Map<number, Vec2>) {
+    if (this.userDefId >= 0) this.controlDefender(input.defense, desired);
     const qb = this.get('QB');
     const c = this.carrier;
     const controlled = c && c.side === 'off' ? c : this.passThrown || this.handedOff ? null : qb;
@@ -641,12 +824,37 @@ export class PlaySim {
   }
 
   private autoRunDirection(a: Actor): Vec2 {
+    if (a.slot === 'RB' && this.play.run && this.handedOff) this.readLane(a);
     while (this.carrierIdx < this.carrierPath.length && a.slot === 'RB') {
       const p = this.carrierPath[this.carrierIdx];
       if (dist(a.pos, p) < 1.2 || p.y < a.pos.y - 0.5) this.carrierIdx++;
       else return norm(sub(p, a.pos));
     }
     return v2(0, 1);
+  }
+
+  /**
+   * Run plays: the carrier reads how the blocks are going and takes the most
+   * open gap of the design (zone runs have more options, toss none).
+   */
+  private readLane(rb: Actor) {
+    const run = this.play.run!;
+    if (run.style === 'toss' || this.t < this.laneEvalAt || rb.pos.y > this.los - BLOCKING.run.decideDepth + 1.5) return;
+    this.laneEvalAt = this.t + 0.1;
+    const defs: LaneDefender[] = [];
+    for (const d of this.actors) {
+      if (d.side !== 'def' || d.down || dist(d.pos, rb.pos) > 12) continue;
+      const e = this.engagements.find((x) => x.defender === d.id);
+      const state = !e ? 'free' : e.progress / e.holdT < 0.6 ? 'held' : 'even';
+      defs.push({ x: d.pos.x, y: d.pos.y, state });
+    }
+    const lane = pickLane(laneCandidates(run, this.ballX), this.los, defs);
+    this.laneX = lane.x;
+    const i = Math.max(0, this.carrierIdx);
+    if (i < this.carrierPath.length - 1) {
+      this.carrierPath[i] = v2(lane.x, this.carrierPath[i].y);
+      this.carrierPath[i + 1] = v2(lane.x + run.aim * 0.15, this.carrierPath[i + 1].y);
+    }
   }
 
   private handoff(rb: Actor) {
@@ -680,6 +888,19 @@ export class PlaySim {
 
   private throwBall(qb: Actor, input: SimInput) {
     const target = input.target ? this.get(input.target) : null;
+    // A free rusher in the QB's face at the release hurries the throw.
+    let hurrier: Actor | null = null;
+    for (const d of this.actors) {
+      if (d.side !== 'def' || d.down || !this.isRushing(d) || this.engagersOf(d) > 0) continue;
+      const dd = dist(d.pos, qb.pos);
+      const bz = this.blitzers.get(d.id);
+      if (bz) bz.facts.atRelease = dd;
+      if (dd <= BLITZ.hurryRadius && (!hurrier || dd < dist(hurrier.pos, qb.pos))) hurrier = d;
+    }
+    if (hurrier) {
+      this.pressure = Math.max(this.pressure, BLITZ.hurryPressure);
+      this.emit('hurry', hurrier.id);
+    }
     const tgtPos = target ? target.pos : add(qb.pos, fromHeading(input.gazeYaw, 8 + this.charge * 40));
     const sol = computeThrow({
       from: qb.pos,
@@ -690,7 +911,7 @@ export class PlaySim {
       accuracy: qb.player.ratings.throwAccuracy,
       power: qb.player.ratings.throwPower,
       qbSpeed: len(qb.vel),
-      windowScale: this.diff.throwWindow,
+      windowScale: this.userDefId >= 0 ? 1 : this.diff.throwWindow, // the throw-window difficulty is the user QB's; a CPU QB uses data/cpuOffense.json
       rng: this.rng,
     });
     this.ball.state = 'air';
@@ -781,7 +1002,14 @@ export class PlaySim {
         continue;
       }
       if (a.route?.blocks) {
-        const checkRelease = a.route.type === 'check' && this.t > 1.5 && !this.isEngaged(a);
+        const role = this.blockRoles.get(a.id);
+        const chipping = role?.role === 'chip' && !this.chipDone.has(a.id);
+        if (chipping && this.t > BLOCKING.protection.chipMax && !this.isEngaged(a)) this.chipDone.add(a.id);
+        // Check-release: a back with a blitzer to pick up stays in while that man is still coming.
+        const man = role?.role === 'passSet' && role.target !== null ? this.actors[role.target] : null;
+        const manComing = !!man && !man.down && this.isRushing(man) && man.pos.y > this.get('QB').pos.y - 1;
+        const checkRelease = a.route.type === 'check' && !this.isEngaged(a) && !manComing &&
+          (role?.role === 'chip' ? this.chipDone.has(a.id) : this.t > 1.5);
         if (checkRelease) {
           a.route = buildRoute({ route: 'flat' }, a.pos, this.ballX);
           a.route.points.forEach((p) => (p.y = Math.max(p.y, this.los + 1.5)));
@@ -790,7 +1018,7 @@ export class PlaySim {
           continue;
         }
       }
-      desired.set(a.id, this.followRoute(a));
+      desired.set(a.id, boundRouteVelocity(a.pos, this.followRoute(a), a.routeIdx >= (a.route?.points.length ?? 0)));
     }
   }
 
@@ -823,7 +1051,8 @@ export class PlaySim {
     for (const d of this.actors) {
       if (d.side !== 'def' || d.down || !this.isRushing(d)) continue;
       if (this.engagersOf(d) > 0) continue;
-      if ([...this.passBlock.entries()].some(([bid, rid]) => rid === d.id && bid !== b.id && !this.actors[bid].down)) continue;
+      // Someone else still has him (a beaten blocker on cooldown doesn't count).
+      if ([...this.passBlock.entries()].some(([bid, rid]) => rid === d.id && bid !== b.id && !this.actors[bid].down && this.actors[bid].blockCooldown <= 0)) continue;
       if (dist(d.pos, b.pos) > range) continue;
       if (!r || dist(d.pos, qb.pos) < dist(r.pos, qb.pos)) r = d;
     }
@@ -842,7 +1071,8 @@ export class PlaySim {
     }
     let rid = this.passBlock.get(b.id);
     let r = rid !== undefined ? this.actors[rid] : null;
-    if (!r || r.down || (this.engagersOf(r) > 0 && !this.isEngaged(b))) {
+    const doubling = this.blockRoles.get(b.id)?.role === 'double' && r && this.engagersOf(r) < 2;
+    if (!r || r.down || (this.engagersOf(r) > 0 && !this.isEngaged(b) && !doubling)) {
       // Find an unblocked rusher threatening the QB (backs scan further).
       r = this.freeRusher(b, b.position === 'OL' ? 4 : 7);
       if (r) this.passBlock.set(b.id, r.id);
@@ -860,8 +1090,25 @@ export class PlaySim {
   }
 
   private runBlock(b: Actor, ref?: Actor): Vec2 {
+    const plan = !ref && this.play.run ? this.blockRoles.get(b.id) : undefined;
+    const eng = this.isEngaged(b);
+    if (plan?.climbAt !== undefined && this.t >= plan.climbAt && plan.climbTo != null) {
+      // Gap scheme: the second man of the double team comes off and climbs to the linebacker.
+      if (eng && eng.defender === plan.target) this.engagements = this.engagements.filter((e) => e !== eng);
+      plan.target = plan.climbTo;
+      plan.climbTo = null;
+      plan.role = 'runBlock';
+    }
     if (this.isEngaged(b)) return v2();
     const carrier = ref ?? this.carrier ?? this.get('RB');
+    const tgt = plan && plan.target !== null ? this.actors[plan.target] : null;
+    if (tgt && !tgt.down && this.carrier !== tgt && dist(tgt.pos, b.pos) < 9 && !this.pastLos(carrier)) {
+      // Designed block: get on the man, between him and the lane.
+      const laneX = this.laneX ?? carrier.pos.x;
+      const spot = add(tgt.pos, scale(norm(v2(laneX - tgt.pos.x, -1.2)), 0.8));
+      if (this.engagersOf(tgt) < 2 || plan!.role === 'double') this.tryEngage(b, tgt);
+      return this.seek(b, spot, 1);
+    }
     let best: Actor | null = null;
     let bestScore = Infinity;
     for (const d of this.actors) {
@@ -920,8 +1167,25 @@ export class PlaySim {
     if (this.engagersOf(d) >= 2) return;
     const c = this.carrier;
     if (c === d || (c && c.side === 'off' && dist(c.pos, d.pos) < 1.6)) return;
-    const quick = this.rng.chance(POCKET.quickLossChance * this.diff.pocketPressure);
-    this.engagements.push({ blocker: b.id, defender: d.id, t: 0, loseAt: quick ? this.rng.range(POCKET.quickLossMin, POCKET.quickLossMax) : Infinity });
+    const mode = this.blockMode(b);
+    const quality = blockQuality(b.player.ratings, d.player.ratings, mode);
+    const holdT = holdTime(quality, { mode, passRush: this.diff.passRush * (mode === 'pass' ? this.diff.pocketPressure : 1), rng: this.blockRng });
+    this.engagements.push({ blocker: b.id, defender: d.id, t: 0, mode, quality, holdT, progress: 0 });
+    if (mode !== 'run' && this.blitzers.has(d.id)) {
+      // Blitz pickup: both lose most of their momentum, so a fast blitzer can't slide past the block.
+      d.vel = scale(d.vel, 0.35);
+      b.vel = scale(b.vel, 0.35);
+    }
+  }
+
+  private passRushing(): boolean {
+    const qb = this.get('QB');
+    return !this.handedOff && !this.play.run && !(this.carrier && this.carrier !== qb) && !this.passThrown;
+  }
+
+  private blockMode(b: Actor): BlockMode {
+    if (!this.passRushing()) return 'run';
+    return this.blockRoles.get(b.id)?.role === 'chip' && !this.chipDone.has(b.id) ? 'chip' : 'pass';
   }
 
   // ---------------------------------------------------------------- defense AI
@@ -981,6 +1245,12 @@ export class PlaySim {
    * around the tackle and come at him from the side and from behind.
    */
   private rushGoal(d: Actor, qb: Actor): Vec2 {
+    const bz = this.blitzers.get(d.id);
+    if (bz && !this.scrambling) {
+      if (this.t < bz.delay) return d.pos; // disguise: hold the alignment until the delay
+      while (bz.idx < bz.points.length - 1 && (dist(d.pos, bz.points[bz.idx]) < BLITZ.waypointRadius || bz.points[bz.idx].y > d.pos.y + 0.5)) bz.idx++;
+      return bz.idx < bz.points.length - 1 ? bz.points[bz.idx] : qb.pos;
+    }
     const startX = d.history.length ? d.history[0].x : d.pos.x;
     const side = Math.sign(startX - this.ballX);
     if (Math.abs(startX - this.ballX) < POCKET.edgeStartWidth || this.scrambling) return qb.pos;
@@ -1221,22 +1491,32 @@ export class PlaySim {
       const d = this.actors[e.defender];
       e.t += dt;
       if (b.down || d.down || this.carrier === d || dist(b.pos, d.pos) > 2.2) continue;
-      const rushing = !this.handedOff && !this.play.run && !(this.carrier && this.carrier !== qb) && !this.passThrown;
-      const dr = d.player.ratings;
-      const br = b.player.ratings;
-      const defStat = rushing ? (dr.passRush * 2 + dr.strength) / 3 : (dr.tackling + dr.strength) / 2;
-      const blkStat = (br.blocking * 2 + br.strength) / 3;
+      const rushing = this.passRushing();
+      const mode: BlockMode = e.mode === 'chip' && rushing ? 'chip' : rushing ? 'pass' : 'run';
+      if (mode !== e.mode) {
+        // Pass set turns into a run block (handoff, catch): a new rep for the new job.
+        e.mode = mode;
+        e.quality = blockQuality(b.player.ratings, d.player.ratings, mode);
+        e.holdT = holdTime(e.quality, { mode, passRush: this.diff.passRush, rng: this.blockRng });
+        e.progress = 0;
+      }
       const n = this.engagersOf(d);
-      const ratio = defStat / Math.max(20, blkStat);
-      // Hazard grows with time engaged and with how long the QB holds the ball.
-      const hold = rushing ? 1 + POCKET.holdFactor * Math.max(0, this.t - POCKET.holdGrace) * this.diff.pocketPressure : 1;
-      const rate = (rushing ? 0.05 * e.t * hold : 0.05 + 0.08 * e.t) * ratio * ratio * ratio * this.diff.passRush / n;
-      if ((rushing && e.t >= e.loseAt && n === 1) || this.rng.chance(rate * dt)) {
+      // A QB who holds the ball past the grace period wears the line down faster.
+      const hold = rushing ? 1 + BLOCKING.hold.qbHoldFactor * Math.max(0, this.t - POCKET.holdGrace) * this.diff.pocketPressure : 1;
+      e.progress += dt * progressRate(n, hold);
+      if (e.progress >= e.holdT) {
+        if (mode === 'chip') {
+          // The chip did its job (slowed the rusher); the back releases into his route.
+          this.chipDone.add(b.id);
+          b.blockCooldown = 5;
+          this.emit('chip', b.id);
+          continue;
+        }
         if (rollFoul('holdingOffense', this.penaltyBias, this.penRng)) {
           // Beaten blocker grabs on instead of letting go.
           this.addFoul('holdingOffense', b.pos);
-          e.loseAt = Infinity;
-          e.t = 0;
+          e.progress = 0;
+          e.holdT = Infinity;
           keep.push(e);
           continue;
         }
@@ -1245,19 +1525,24 @@ export class PlaySim {
         this.emit('shed', d.id);
         continue;
       }
+      const defStat = -e.quality;
       keep.push(e);
       // Defender fights toward his goal slowly; blocker mirrors in front.
       const goalVel = desired.get(d.id) ?? v2();
-      const push = clamp(0.35 + (defStat - blkStat) / 45, 0.08, 1.2) * this.diff.passRush / n;
+      const chipSlow = mode === 'chip' ? BLOCKING.protection.chipSlow : 1;
+      const push = clamp(0.35 + defStat * 0.31, 0.08, 1.2) * this.diff.passRush * chipSlow / n;
       let dv = scale(norm(goalVel), push * (rushing ? 1 + e.t * 0.25 : 0.8));
       if (!rushing) {
-        // Drive block: push the defender away from the ball carrier.
-        const away = norm(sub(d.pos, carrier.pos));
-        dv = add(dv, scale(away, clamp((blkStat - defStat) / 40 + 0.3, 0, 0.9)));
+        // Drive block: push the defender out of the lane (run plan) or away from the carrier.
+        const drive = this.blockRoles.get(b.id)?.drive;
+        const away = this.play.run && this.laneX !== null && drive !== undefined && !this.pastLos(carrier)
+          ? norm(v2(drive || Math.sign(d.pos.x - this.laneX) || 1, 0.5))
+          : norm(sub(d.pos, carrier.pos));
+        dv = add(dv, scale(away, clamp(e.quality * BLOCKING.run.drivePush + 0.3, 0, 0.9)));
       }
       desired.set(d.id, dv);
       const front = add(d.pos, scale(norm(sub(rushing ? qb.pos : carrier.pos, d.pos)), 0.85));
-      desired.set(b.id, scale(sub(front, b.pos), 8));
+      desired.set(b.id, add(scale(sub(front, b.pos), 8), d.vel));
     }
     this.engagements = keep;
   }
@@ -1277,6 +1562,18 @@ export class PlaySim {
       if (sp > 0.5 && !(a.slot === 'QB' && a.side === 'off' && this.controlledId === a.id)) {
         a.facing = Math.atan2(a.vel.x, a.vel.y);
       }
+    }
+  }
+
+  /** Players without the ball stop at the sideline instead of drifting out (momentum, pushes). */
+  private keepInBounds() {
+    const xMax = FIELD.halfWidth - ROUTE_BOUNDS.holdInside;
+    const c = this.carrier;
+    for (const a of this.actors) {
+      if (a === c || a.down || Math.abs(a.pos.x) <= xMax) continue;
+      const side = Math.sign(a.pos.x);
+      a.pos = { x: side * xMax, y: a.pos.y };
+      if (Math.sign(a.vel.x) === side) a.vel = { x: 0, y: a.vel.y };
     }
   }
 
@@ -1346,7 +1643,7 @@ export class PlaySim {
         f.tipChecked.add(d.id);
         const p = clamp(0.3 * (d.player.ratings.coverage / 80) * this.diff.ballSkills * (b.h < 2.4 ? 1 : 0.5), 0.02, 0.6);
         if (this.rng.chance(p)) {
-          if (this.rng.chance(0.3 * this.diff.ballSkills)) {
+          if (this.rng.chance(COVERAGE.undercutInt * this.diff.ballSkills)) {
             this.finishInterception(d);
           } else {
             this.emit('deflection', d.id);
@@ -1375,11 +1672,11 @@ export class PlaySim {
       }
     }
     const defense = this.actors.filter((a) => a.side === 'def' && !a.down)
-      .map((a) => ({ ...toCand(a), inPhase: !!target && inPhase(target, a, COVERAGE.inPhaseDist) }));
+      .map((a) => ({ ...toCand(a), inPhase: !!target && inPhase(target, a, COVERAGE.inPhaseDist), timing: this.userTiming(a, f) }));
     const out = resolveCatch({
       landing: f.landing, quality: f.quality, speed: f.speed, offense, defense,
       ballSkills: this.diff.ballSkills, inPhaseBreakup: COVERAGE.inPhaseBreakup, inPhaseInt: COVERAGE.inPhaseInt,
-      catchFactor: f.screen?.catchFactor, intBonus: f.screen?.intBonus, rng: this.rng,
+      catchFactor: f.screen?.catchFactor, intBonus: f.screen?.intBonus, intBase: COVERAGE.intBase, noReceiverInt: COVERAGE.noReceiverInt, rng: this.rng,
     });
     const b = this.ball;
     switch (out.kind) {
@@ -1412,6 +1709,18 @@ export class PlaySim {
     }
   }
 
+  /** Timing bonus for the user defender's jump when the ball arrives near him (none for CPU defenders). */
+  private userTiming(a: Actor, f: Flight) {
+    if (a.id !== this.userDefId || dist(a.pos, f.landing) > 4) return undefined;
+    const t = jumpTiming(Number.isFinite(a.jumpT) ? a.jumpT : null, this.t);
+    const tgt = f.targetId !== null ? this.actors[f.targetId] : this.nearestEligible(f.landing);
+    const margin = dist(tgt.pos, f.landing) - dist(a.pos, f.landing);
+    const read = readGrade(margin);
+    this.lastTiming = { ...t, read, margin };
+    this.emit('timing', a.id);
+    return combinedEffect(t.grade, read);
+  }
+
   private incomplete(at: Vec2) {
     const f = this.ball.flight;
     this.ball.state = 'loose';
@@ -1436,10 +1745,12 @@ export class PlaySim {
     if (!c || c.side !== 'off' || this.contact) return;
     for (const d of this.actors) {
       if (d.side !== 'def' || d.down || d.tackleCooldown > 0) continue;
-      if (dist(d.pos, c.pos) > TACKLE.range) continue;
+      // The user defender's JUMP doubles as a diving tackle: longer range, a little more stopping power.
+      const diving = d.id === this.userDefId && this.t - d.jumpT < DEF_CONTROL.jump.duration;
+      if (dist(d.pos, c.pos) > (diving ? DEF_CONTROL.tackle.diveRange : TACKLE.range)) continue;
       const engaged = !!this.isEngaged(d);
       if (engaged && dist(d.pos, c.pos) > TACKLE.engagedRange) continue;
-      let factor = this.diff.tackling;
+      let factor = this.diff.tackling * (diving ? DEF_CONTROL.tackle.diveFactor : 1);
       if (c.slot === 'QB' && !this.pastLos(c)) factor *= TACKLE.pocketSackFactor; // sacks: QB is a sitting duck
       else if (c.slot === 'QB') factor *= SCRAMBLE.tackleBonus; // a scrambling QB is no running back
       const out = resolveTackle({
@@ -1457,6 +1768,7 @@ export class PlaySim {
         d.vel = c.vel;
         const sack = c.slot === 'QB' && c.pos.y < this.los && !this.passThrown && !this.handedOff;
         this.contact = { carrier: c.id, tackler: d.id, whistleAt: this.t + out.contactTime, sack };
+        if (sack) { const bz = this.blitzers.get(d.id); if (bz) bz.facts.sacked = true; }
         if (rollFoul('facemask', this.penaltyBias, this.penRng)) this.addFoul('facemask', c.pos);
         return;
       }

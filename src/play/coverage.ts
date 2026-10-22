@@ -58,6 +58,12 @@ export interface CoverageTuning {
   /** Extra breakup / interception chance when the defender is in phase at the catch point. */
   inPhaseBreakup: number;
   inPhaseInt: number;
+  /** Phase 3b: share of a defender's hands-on-the-ball plays that are picks (before ratings and bonuses). */
+  intBase: number;
+  /** Phase 3b: extra pick share when no receiver is within reach of the ball. */
+  noReceiverInt: number;
+  /** Phase 3b: share of in-flight tips (undercut throws) that are caught (Phase 2: 0.3). */
+  undercutInt: number;
 }
 
 export const COVERAGE = coverageJson as CoverageTuning;

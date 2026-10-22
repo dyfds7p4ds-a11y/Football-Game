@@ -6,19 +6,28 @@
  * play, a gradient sky, fog for depth, the stadium bowl from stadium.ts.
  */
 import * as THREE from 'three';
-import type { TeamData, EligibleSlot } from '../data/types';
+import type { DefSlot, TeamData, EligibleSlot } from '../data/types';
+import { unitOf, type DefUnit } from '../play/defenseSelect';
 import { ELIGIBLE } from '../data/types';
 import { lerp as lerp2 } from '../core/vec';
 import { PlaySim, type Actor } from '../play/sim';
 import type { ReturnSim } from '../play/returnSim';
 import { flagPosition } from '../play/penalties';
+import { jumpHeight } from '../play/interception';
 import { flightPos, type KickFlight } from '../play/kicking';
 import { FieldView, SLOT_COLORS } from './fieldMesh';
 import { PlayerMesh } from './playerMesh';
 import { PALETTE } from './palette';
 import { headingToRotY, setFrameFlip, toWorld } from './coords';
+import cameraJson from '../data/camera.json';
+
+type CamRig = { back: number; height: number; lookAhead: number; lookHeight: number };
+type DefRig = CamRig & { lookToBall: number; follow: number };
+export const CAMERA = cameraJson as { pocket: CamRig & { gazePan: number }; carrier: CamRig; followDepth: number; followLateral: number; lateralShare: number; fov: number; fovPortrait: number; hideOfficialsWithin: number; defense: DefRig; defenseUnits: Record<DefUnit, Partial<DefRig>> };
 
 export type CameraMode = 'firstPerson' | 'behindQB';
+/** Defense (user controls a cornerback): camera behind the selected defender, looking at the offense. */
+export const USER_DEF_LABELS: Partial<Record<string, string>> = { CB1: 'CB1', CB2: 'CB2', NB: 'NB' };
 
 export interface ViewInput {
   gazeYaw: number;
@@ -62,6 +71,8 @@ export class SceneView {
   private camPos = new THREE.Vector3();
   private camLook = new THREE.Vector3();
   private camInit = false;
+  /** Actor id of the defender currently carrying the user's label (-1: none). */
+  private labeledDef = -1;
   private routeGroup = new THREE.Group();
   private tmp = new THREE.Vector3();
   private tmp2 = new THREE.Vector3();
@@ -170,7 +181,18 @@ export class SceneView {
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
     // Keep a sensible horizontal FOV in portrait.
-    this.camera.fov = w / h < 1 ? 85 : 70;
+    this.applyFov(this.broadcastFov);
+  }
+
+  private broadcastFov = false;
+
+  /** QB eyes and cutscenes use the wide FOV, the broadcast view a narrower one. */
+  private applyFov(broadcast: boolean) {
+    this.broadcastFov = broadcast;
+    const portrait = this.camera.aspect < 1;
+    const fov = broadcast ? (portrait ? CAMERA.fovPortrait : CAMERA.fov) : portrait ? 85 : 70;
+    if (fov === this.camera.fov) return;
+    this.camera.fov = fov;
     this.camera.updateProjectionMatrix();
   }
 
@@ -189,12 +211,16 @@ export class SceneView {
       const pm = this.players[i];
       const team = a.side === 'off' ? offense : defense;
       pm.setLook(team.colors, a.player.number, PALETTE.skin[(a.player.number * 7 + a.id) % PALETTE.skin.length]);
-      const isElig = scrimmage && a.side === 'off' && (ELIGIBLE as readonly string[]).includes(a.slot);
-      pm.setLabel(isElig ? LABELS[a.slot as EligibleSlot] : null, isElig ? LABEL_HEX[a.slot as EligibleSlot] : undefined);
+      const userDefense = scrimmage && sim.userDefId >= 0;
+      const isElig = scrimmage && !userDefense && a.side === 'off' && (ELIGIBLE as readonly string[]).includes(a.slot);
+      // On defense the user's cornerbacks are labelled instead of the CPU's receivers.
+      const defLabel = userDefense && a.side === 'def' ? USER_DEF_LABELS[a.slot] ?? null : null;
+      pm.setLabel(isElig ? LABELS[a.slot as EligibleSlot] : defLabel, isElig ? LABEL_HEX[a.slot as EligibleSlot] : undefined);
       pm.root.visible = true;
     });
     for (let i = sim.actors.length; i < this.players.length; i++) this.players[i].root.visible = false;
     for (const o of this.officials) o.root.visible = true;
+    this.labeledDef = -1;
     this.camInit = false;
   }
 
@@ -240,6 +266,7 @@ export class SceneView {
     this.field.setTargetRing(null, 0);
     this.field.hideReceiverRings();
     this.field.setFlags([]);
+    this.applyFov(false);
     this.camera.position.copy(toWorld(ballX + Math.sin(this.time * 0.1) * 6, ballY - 14, 6));
     this.camera.lookAt(toWorld(ballX, ballY + 10, 0));
     this.followSun(ballX, ballY);
@@ -266,7 +293,7 @@ export class SceneView {
     actors.forEach((a, i) => {
       const pm = this.players[i];
       const p = lerp2(a.prevPos, a.pos, alpha);
-      pm.root.position.copy(toWorld(p.x, p.y));
+      pm.root.position.copy(toWorld(p.x, p.y, jumpHeight(simT - a.jumpT)));
       pm.root.rotation.y = headingToRotY(a.facing);
       const speed = Math.hypot(a.vel.x, a.vel.y);
       const stance = presnap && a.position !== 'QB' && a.position !== 'WR' && a.position !== 'CB' && a.position !== 'S';
@@ -280,8 +307,11 @@ export class SceneView {
     sim.officials.forEach((o, i) => {
       const pm = this.officials[i];
       const p = lerp2(o.prevPos, o.pos, alpha);
-      pm.root.visible = true;
       pm.root.position.copy(toWorld(p.x, p.y));
+      // An official right under the broadcast camera would block the view of the QB.
+      const dx = pm.root.position.x - this.camera.position.x;
+      const dz = pm.root.position.z - this.camera.position.z;
+      pm.root.visible = !this.broadcastFov || dx * dx + dz * dz > CAMERA.hideOfficialsWithin ** 2;
       pm.root.rotation.y = headingToRotY(o.facing);
       pm.animate(dt, Math.hypot(o.vel.x, o.vel.y), false, false);
     });
@@ -313,11 +343,14 @@ export class SceneView {
       this.updateReturn(sim, alpha, dt);
       return;
     }
-    setFrameFlip(false);
+    // A CPU offense (user on defense) runs in the CPU's frame: draw it flipped into the user's world.
+    const userDef = sim.userDefender;
+    setFrameFlip(!!userDef);
     const qb = sim.get('QB');
     const carrier = sim.carrier;
     // First person while the play is "through the QB's eyes"; chase cam once someone else has the ball.
-    const firstPerson = inp.cameraMode === 'firstPerson' && !(carrier && carrier !== qb);
+    // A scramble switches QB eyes to the broadcast view so the field axis stays put.
+    const firstPerson = !userDef && inp.cameraMode === 'firstPerson' && !(carrier && carrier !== qb) && !sim.scrambling;
     this.drawActors(sim.actors, alpha, dt, sim.t, inp.presnap, firstPerson ? qb.id : -1, inp.target);
     this.drawOfficials(sim, alpha, dt);
     this.drawFlags(sim);
@@ -340,13 +373,23 @@ export class SceneView {
     }
 
     // Every eligible receiver carries a marker ring; the selected one pulses.
-    const showMarkers = !sim.result && (sim.canThrow() || inp.presnap);
+    const showMarkers = !userDef && !sim.result && (sim.canThrow() || inp.presnap);
     for (const slot of ELIGIBLE) {
       const r = sim.get(slot);
       const rp = lerp2(r.prevPos, r.pos, alpha);
       this.field.setReceiverRing(slot, showMarkers && slot !== inp.target ? toWorld(rp.x, rp.y) : null, !!r.route?.blocks);
     }
-    if (inp.target && showMarkers) {
+    if (userDef && userDef.id !== this.labeledDef) {
+      // Phase 3b: any defender can be selected; he carries his slot label while he is the user's.
+      const prev = this.labeledDef >= 0 ? sim.actors[this.labeledDef] : null;
+      if (prev) this.players[prev.id]?.setLabel(USER_DEF_LABELS[prev.slot] ?? null);
+      this.players[userDef.id]?.setLabel(userDef.slot);
+      this.labeledDef = userDef.id;
+    }
+    if (userDef && !userDef.down) {
+      const dp = lerp2(userDef.prevPos, userDef.pos, alpha);
+      this.field.setTargetRing(toWorld(dp.x, dp.y), this.time);
+    } else if (inp.target && showMarkers) {
       const r = sim.get(inp.target);
       const rp = lerp2(r.prevPos, r.pos, alpha);
       this.field.setTargetRing(toWorld(rp.x, rp.y), this.time);
@@ -356,7 +399,38 @@ export class SceneView {
 
     const focus = carrier ?? qb;
     this.followSun(focus.pos.x, focus.pos.y + 8);
-    this.updateCamera(sim, alpha, dt, inp, firstPerson);
+    if (userDef) this.updateDefenseCamera(sim, userDef, alpha, dt);
+    else this.updateCamera(sim, alpha, dt, inp, firstPerson);
+  }
+
+  /**
+   * Defense: behind the selected cornerback (on the far side from the offense),
+   * looking past him toward the ball. The axis is the field axis; it only
+   * leans toward the ball, so switching cornerbacks or chasing never spins it.
+   */
+  private updateDefenseCamera(sim: PlaySim, d: Actor, alpha: number, dt: number) {
+    const C = { ...CAMERA.defense, ...CAMERA.defenseUnits[unitOf(d.slot as DefSlot)] };
+    const dp = lerp2(d.prevPos, d.pos, alpha);
+    const b = sim.ball.pos;
+    // Look point: ahead of him toward the offense, leaning a little toward the ball;
+    // the camera sits behind him on that line so he stays in the middle of the screen.
+    const look = { x: dp.x + (b.x - dp.x) * C.lookToBall, y: Math.min(dp.y, b.y) - C.lookAhead };
+    const dx = look.x - dp.x;
+    const dy = look.y - dp.y;
+    const l = Math.hypot(dx, dy) || 1;
+    const desiredPos = toWorld(dp.x - (dx / l) * C.back, dp.y - (dy / l) * C.back, C.height);
+    const desiredLook = toWorld(look.x, look.y, C.lookHeight);
+    if (!this.camInit) {
+      this.camPos.copy(desiredPos);
+      this.camLook.copy(desiredLook);
+      this.camInit = true;
+    }
+    const k = Math.min(1, dt * C.follow);
+    this.camPos.lerp(desiredPos, k);
+    this.camLook.lerp(desiredLook, k);
+    this.applyFov(true);
+    this.camera.position.copy(this.camPos);
+    this.camera.lookAt(this.camLook);
   }
 
   /** Kick returns: chase cam behind the returner, looking at the ball while it is in the air. */
@@ -384,7 +458,25 @@ export class SceneView {
     let desiredLook: THREE.Vector3;
     // Stay in front of the goalposts (they stand on the end line, y = -10).
     const camY = (y: number) => Math.max(y, -8.5);
-    if (b.state === 'air') {
+    const cover = sim.coverMan;
+    if (cover && cover.id !== this.labeledDef) {
+      if (this.labeledDef >= 0) this.players[this.labeledDef]?.setLabel(null);
+      this.players[cover.id]?.setLabel(cover.slot);
+      this.labeledDef = cover.id;
+    }
+    if (cover) {
+      // Phase 3b coverage: behind the user's cover man, looking at the ball / returner (same rig as defense).
+      const C = CAMERA.defense;
+      const cp = lerp2(cover.prevPos, cover.pos, alpha);
+      if (!cover.down) this.field.setTargetRing(toWorld(cp.x, cp.y), this.time);
+      const focus = b.state === 'held' ? rp : bp;
+      const look = { x: cp.x + (focus.x - cp.x) * 0.5, y: Math.min(cp.y, focus.y + 6) - C.lookAhead * 0.5 };
+      const dx = look.x - cp.x;
+      const dy = look.y - cp.y;
+      const l = Math.hypot(dx, dy) || 1;
+      desiredPos = toWorld(cp.x - (dx / l) * C.back, cp.y - (dy / l) * C.back, C.height + 1);
+      desiredLook = toWorld(look.x, look.y, b.state === 'air' ? Math.max(1, bh * 0.4) : C.lookHeight);
+    } else if (b.state === 'air') {
       // Behind the returner, looking up at the ball coming down.
       desiredPos = toWorld(rp.x, camY(rp.y - 9), 5.2);
       desiredLook = toWorld(bp.x * 0.5 + rp.x * 0.5, (bp.y + rp.y) / 2, Math.max(2, bh * 0.6));
@@ -400,6 +492,7 @@ export class SceneView {
     const k = Math.min(1, dt * 4);
     this.camPos.lerp(desiredPos, k);
     this.camLook.lerp(desiredLook, k);
+    this.applyFov(false);
     this.camera.position.copy(this.camPos);
     this.camera.lookAt(this.camLook);
     this.followSun(rp.x, rp.y + 6);
@@ -456,6 +549,7 @@ export class SceneView {
     }
     this.camPos.lerp(desiredPos, Math.min(1, dt * 4));
     this.camLook.lerp(desiredLook, Math.min(1, dt * 4));
+    this.applyFov(false);
     this.camera.position.copy(this.camPos);
     this.camera.lookAt(this.camLook);
     this.followSun(spot.x, spot.y + 10);
@@ -498,7 +592,8 @@ export class SceneView {
       this.camPos.copy(desiredPos);
       this.camLook.lerp(desiredLook, Math.min(1, dt * 14));
     } else {
-      const focus = carrier ?? (sim.ball.state === 'air' ? null : qb);
+      // Before the snap the center holds the ball; the broadcast view frames the QB.
+      const focus = carrier && carrier.slot !== 'C' ? carrier : inp.presnap || sim.ball.state !== 'air' || !sim.ball.flight ? qb : null;
       let fx: number;
       let fy: number;
       if (focus) {
@@ -509,21 +604,28 @@ export class SceneView {
         fx = sim.ball.pos.x;
         fy = sim.ball.pos.y;
       }
-      const behindQB = !carrier || carrier.id === qb.id;
-      const back = behindQB ? 6 : 8;
-      const height = behindQB ? 3.6 : 4.2;
-      const yawOffset = behindQB ? inp.gazeYaw * 0.5 : 0;
-      desiredPos = toWorld(fx - Math.sin(yawOffset) * back, fy - Math.cos(yawOffset) * back, height);
-      desiredLook = toWorld(fx + Math.sin(yawOffset) * 8, fy + Math.cos(yawOffset) * 8, 1.0);
+      // Broadcast view on a fixed field axis: never rotates with the QB, so a
+      // scramble only moves it along (depth) and a little across (lateral).
+      const c = focus === qb || !focus ? CAMERA.pocket : CAMERA.carrier;
+      const pan = c === CAMERA.pocket && !sim.scrambling && sim.ball.state !== 'air' ? Math.sin(inp.gazeYaw) * CAMERA.pocket.gazePan : 0;
+      const cx = sim.ballX + (fx - sim.ballX) * CAMERA.lateralShare;
+      desiredPos = toWorld(cx, fy - c.back, c.height);
+      desiredLook = toWorld(cx + pan, fy + c.lookAhead, c.lookHeight);
       if (!this.camInit) {
         this.camPos.copy(desiredPos);
         this.camLook.copy(desiredLook);
         this.camInit = true;
       }
-      const k = Math.min(1, dt * 5);
-      this.camPos.lerp(desiredPos, k);
-      this.camLook.lerp(desiredLook, k);
+      // Depth (world z) follows faster than the lateral position (world x).
+      const kd = Math.min(1, dt * CAMERA.followDepth);
+      const kl = Math.min(1, dt * CAMERA.followLateral);
+      for (const v of [[this.camPos, desiredPos], [this.camLook, desiredLook]] as const) {
+        v[0].x += (v[1].x - v[0].x) * kl;
+        v[0].y += (v[1].y - v[0].y) * kd;
+        v[0].z += (v[1].z - v[0].z) * kd;
+      }
     }
+    this.applyFov(!firstPerson);
     cam.position.copy(this.camPos);
     cam.lookAt(this.camLook);
   }

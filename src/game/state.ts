@@ -45,6 +45,21 @@ export interface GameState {
   pendingKickoff: TeamSide | null;
   /** Crowd pulse 0..100 (home crowd's energy). */
   crowd: number;
+  /** Phase 3b: the side that scored a touchdown and still has its try (kick or two) to play; null = none. */
+  pendingConversion: TeamSide | null;
+  /** Phase 3b: a two-point try is live (the possession is a single play from the opponent's 3). */
+  conversionTry: 'two' | null;
+  /** Phase 3b: overtime (college rules, game/overtime.ts); null in regulation. */
+  overtime: OvertimeState | null;
+}
+
+export interface OvertimeState {
+  /** 1, 2, 3, ... */
+  period: number;
+  /** Side with the first possession of this period. */
+  first: TeamSide;
+  /** Possessions finished in this period (0, 1; the period ends at 2). */
+  done: number;
 }
 
 export interface NewGameOptions {
@@ -77,6 +92,9 @@ export function newGame(o: NewGameOptions): GameState {
     // Opening kickoff: the CPU kicks to the user's team.
     pendingKickoff: other(o.userSide),
     crowd: crowdStart(),
+    pendingConversion: null,
+    conversionTry: null,
+    overtime: null,
   };
 }
 

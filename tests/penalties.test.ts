@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { v2 } from '../src/core/vec';
 import { newGame } from '../src/game/state';
 import { enforcePenalties, penaltyState } from '../src/game/penalties';
-import { makeFoul, flagPosition, PENALTIES } from '../src/play/penalties';
+import { callFoul, makeFoul, flagPosition, PENALTIES } from '../src/play/penalties';
+import { DIFFICULTY } from '../src/data';
 import { homeSpot, setupOfficials, updateOfficials } from '../src/play/officials';
 import { runPlay } from './simHarness';
 
@@ -46,14 +47,83 @@ describe('penalty enforcement', () => {
     expect(off.result.state.ballY).toBe(30);
   });
 
-  it('a touchdown stands over a defensive foul; offsetting fouls replay the down', () => {
+  it('a touchdown stands over a defensive foul', () => {
     const s = game(80, 1, 10);
     const td = enforcePenalties(s, { outcome: 'touchdown', endY: 100, endX: 0 }, [makeFoul('holdingDefense', v2(0, 85), 1)]);
-    expect(td.result.scored?.points).toBe(7);
-    const both = enforcePenalties(s, { outcome: 'tackle', endY: 90, endX: 0 }, [makeFoul('holdingDefense', v2(0, 85), 1), makeFoul('holdingOffense', v2(0, 79), 1)]);
-    expect(both.offsetting).toBe(true);
-    expect(both.result.state.ballY).toBe(80);
-    expect(both.result.state.down).toBe(1);
+    expect(td.result.scored?.points).toBe(6); // Phase 3b: the try follows
+  });
+
+  it('declined penalty: down and distance come from the play', () => {
+    // 3rd and 4 at the 40, defensive holding on a 12-yard gain: decline, first down at the 52.
+    const r = enforcePenalties(game(40, 3, 4), { outcome: 'tackle', endY: 52, endX: 0 }, [makeFoul('holdingDefense', v2(0, 44), 1)]);
+    expect(r.declined?.type).toBe('holdingDefense');
+    expect(r.result.state.ballY).toBe(52);
+    expect(r.result.state.down).toBe(1);
+    expect(r.result.state.toGo).toBe(10);
+    // 3rd and 5, offensive holding on an 8-yard loss: defense declines, 4th and 13.
+    const d = enforcePenalties(game(40, 3, 5), { outcome: 'tackle', endY: 32, endX: 0 }, [makeFoul('holdingOffense', v2(0, 38), 1)]);
+    expect(d.declined?.type).toBe('holdingOffense');
+    expect(d.result.state.down).toBe(4);
+    expect(d.result.state.toGo).toBe(13);
+  });
+
+  it('accepted penalty: offside covering the line to gain is a first down', () => {
+    // Offside 5 yards covers the 2 to go: first down.
+    const r = enforcePenalties(game(40, 3, 2), { outcome: 'incomplete', endY: 40, endX: 0 }, [makeFoul('offside', v2(0, 41), 0)]);
+    expect(r.enforced?.type).toBe('offside');
+    expect(r.result.state.ballY).toBe(45);
+    expect(r.result.state.down).toBe(1);
+    expect(r.result.state.toGo).toBe(10);
+  });
+});
+
+describe('one flag per play', () => {
+  it('callFoul keeps the more severe foul; a tie keeps the first', () => {
+    const hold = makeFoul('holdingOffense', v2(0, 29), 1);
+    const dpi = makeFoul('passInterference', v2(5, 50), 2);
+    const off = makeFoul('offside', v2(0, 31), 0);
+    expect(callFoul(null, hold)).toBe(hold);
+    expect(callFoul(hold, dpi)).toBe(dpi);
+    expect(callFoul(dpi, hold)).toBe(dpi);
+    expect(callFoul(hold, off)).toBe(hold);
+    const hold2 = makeFoul('holdingDefense', v2(0, 35), 2);
+    expect(callFoul(hold, hold2)).toBe(hold);
+  });
+
+  it('several fouls reaching enforcement: only the most severe is enforced, no offsetting', () => {
+    const s = game(40, 2, 10);
+    const r = enforcePenalties(s, { outcome: 'incomplete', endY: 40, endX: 0 },
+      [makeFoul('holdingOffense', v2(0, 39), 1), makeFoul('passInterference', v2(-8, 62), 2)]);
+    expect(r.offsetting).toBe(false);
+    expect(r.enforced?.type).toBe('passInterference');
+    expect(r.result.state.ballY).toBe(62);
+    expect(r.result.state.down).toBe(1);
+  });
+
+  it('a play never has more than one flag or foul, even at very high foul rates', () => {
+    let multiCandidates = 0;
+    for (let s = 0; s < 60; s++) {
+      const r = runPlay('four_verts', s % 2 ? 'cover1' : 'cover0', s, { throwAt: 2.2, target: 'WR1', dropFor: 0.6, penalties: 400 });
+      expect(r.sim.flags.length).toBeLessThanOrEqual(1);
+      expect(r.result!.fouls.length).toBeLessThanOrEqual(1);
+      expect(r.events.filter((e) => e.type === 'flag').length).toBeLessThanOrEqual(1);
+      if (r.sim.flags.length) {
+        expect(r.sim.flags[0].foul).toBe(r.result!.fouls[0]);
+        multiCandidates++;
+      }
+    }
+    expect(multiCandidates).toBeGreaterThan(10);
+  });
+
+  it('difficulty penaltyRate keeps flags rare and scales them', () => {
+    expect(DIFFICULTY.easy.penaltyRate).toBeLessThanOrEqual(DIFFICULTY.normal.penaltyRate);
+    expect(DIFFICULTY.normal.penaltyRate).toBeLessThanOrEqual(DIFFICULTY.hard.penaltyRate);
+    let flagged = 0, n = 0;
+    for (const p of ['four_verts', 'slants', 'mesh', 'hb_dive']) for (let s = 0; s < 30; s++) {
+      n++;
+      if (runPlay(p, 'cover1', s, { throwAt: 2.2, target: 'WR1', dropFor: 0.6, penalties: 1 }).sim.flags.length) flagged++;
+    }
+    expect(flagged / n).toBeLessThan(0.12);
   });
 
   it('a false start is a dead-ball foul: no play, 5 yards back', () => {

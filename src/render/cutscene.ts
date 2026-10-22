@@ -40,19 +40,7 @@ export class Cutscene {
       home: OFF_SLOTS.map((s) => playerFor(home, s)),
       away: DEF_SLOTS.map((s) => playerFor(away, s)),
     };
-    // Tunnel: a lit concrete tube through the side stand.
-    const len = TUNNEL_X1 - TUNNEL_X0;
-    const tunnel = new THREE.Mesh(
-      new THREE.BoxGeometry(len, TUNNEL.height, TUNNEL.halfWidth * 2),
-      new THREE.MeshLambertMaterial({ color: 0x4a505a, side: THREE.BackSide }),
-    );
-    tunnel.position.copy(W((TUNNEL_X0 + TUNNEL_X1) / 2 - 0.3, TUNNEL_Y, TUNNEL.height / 2));
-    this.props.add(tunnel);
-    for (let x = TUNNEL_X0 + 2; x < TUNNEL_X1; x += 3) {
-      const lamp = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.06, 0.5), new THREE.MeshBasicMaterial({ color: 0xfff3c4 }));
-      lamp.position.copy(W(x, TUNNEL_Y, TUNNEL.height - 0.05));
-      this.props.add(lamp);
-    }
+    // The tunnel itself is part of the stadium (render/stadium.ts); the cutscene only adds the banner.
     const banner = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.6, TUNNEL.halfWidth * 2 + 0.4), new THREE.MeshLambertMaterial({ color: new THREE.Color(home.colors.primary) }));
     banner.position.copy(W(TUNNEL_X1 + 0.3, TUNNEL_Y, TUNNEL.height - 0.3));
     this.props.add(banner);
@@ -159,7 +147,7 @@ export class Cutscene {
     const lead = TUNNEL_X0 + 2 + Math.max(0, t - 0.4) * 6.5;
     const k = Math.min(1, t / this.durations[0]);
     // Inside the tunnel behind the players, then out and up to reveal the bowl.
-    const camX = Math.min(lead - 9, TUNNEL_X1 + 6);
+    const camX = Math.max(TUNNEL_X0 + 1, Math.min(lead - 9, TUNNEL_X1 + 6));
     // Stay under the tunnel roof until the camera is out on the field, then rise.
     const out = Math.max(0, camX - TUNNEL_X1);
     const camH = 1.7 + Math.min(10, out * 1.6);

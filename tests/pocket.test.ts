@@ -37,7 +37,7 @@ describe('pocket', () => {
       }
     }
     expect(late).toBeGreaterThan(early);
-    expect(early).toBeGreaterThan(0); // some reps are lost quickly
+    // Phase 3b: early losses come from weak matchups, not a fixed roll (tests/blocking.test.ts).
   });
 
   it('shows a pocket cue when a free rusher closes in', () => {

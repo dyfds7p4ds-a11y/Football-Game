@@ -18,6 +18,8 @@ export interface PenaltyDef {
   /** Ball goes to the spot of the foul. */
   spotFoul?: boolean;
   autoFirst?: boolean;
+  /** Which foul is called when several happen on one play (higher wins). */
+  severity: number;
   /** Base chance per opportunity (see PlaySim for what counts as one). */
   chance: number;
 }
@@ -67,6 +69,15 @@ export function makeFoul(type: FoulType, spot: Vec2, t: number): Foul {
     type, side: d.side, spot: { ...spot }, t, yards: d.yards, autoFirst: !!d.autoFirst, spotFoul: !!d.spotFoul,
     dead: !!d.dead, label: d.label,
   };
+}
+
+/**
+ * One flag per play: of the current call and a new candidate foul, the more
+ * severe one is called (a tie keeps the current call). Returns the foul to call.
+ */
+export function callFoul(current: Foul | null, candidate: Foul): Foul {
+  if (!current) return candidate;
+  return PENALTIES.types[candidate.type].severity > PENALTIES.types[current.type].severity ? candidate : current;
 }
 
 /** Roll for a foul of this type, scaled by the side's bias and an optional extra factor. */
