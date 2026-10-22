@@ -3,7 +3,7 @@ import type { Difficulty, EligibleSlot } from '../src/data/types';
 import { dist } from '../src/core/vec';
 import { DEFENSE_CALLS, getDefenseCall } from '../src/play/defenseCalls';
 import { inPhase, throwingWindow } from '../src/play/windows';
-import { PlaySim, SIM_DT, idleInput, type PlayEvent } from '../src/play/sim';
+import { PlaySim, SIM_DT, idleInput, type PlayEvent, type SimInput } from '../src/play/sim';
 import { THROW, throwWindow } from '../src/play/throw';
 
 export interface Script {
@@ -16,6 +16,8 @@ export interface Script {
   dropFor?: number;
   /** Called after every step (balance probes sample the sim here). */
   onStep?: (sim: PlaySim) => void;
+  /** Adjust the input before each step (custom movement, slides, ...). */
+  script?: (sim: PlaySim, inp: SimInput) => void;
 }
 
 export function runPlay(playId: string, defId: string, seed: number, script: Script, difficulty: Difficulty = 'normal') {
@@ -40,6 +42,7 @@ export function runPlay(playId: string, defId: string, seed: number, script: Scr
       }
       inp.throwHeld = sim.t < chargeUntil;
     }
+    script.script?.(sim, inp);
     sim.step(inp);
     script.onStep?.(sim);
     events.push(...sim.drainEvents());

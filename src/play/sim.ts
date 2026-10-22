@@ -20,10 +20,14 @@ import { resolveCatch, type CatchCandidate } from './catch';
 import { FIELD } from './field';
 import { COVERAGE, CoverageReader, carrySpot, inPhaseSpot, overTop, type Helper, type ReadTarget } from './coverage';
 import { inPhase, throwingWindow } from './windows';
+import { TACKLE, resolveTackle, type ContactKind } from './tackle';
+import pocketJson from '../data/pocket.json';
+
+export const POCKET = pocketJson.pocket;
+export const SCRAMBLE = pocketJson.scramble;
 
 export const SIM_DT = 1 / 60;
 const HISTORY = 90;
-const TACKLE_RANGE = 1.2;
 const MAX_PLAY_TIME = 25;
 
 export type Side = 'off' | 'def';
@@ -50,6 +54,28 @@ export interface Actor {
   tackleCooldown: number;
   down: boolean;
   history: Vec2[];
+  /** Contact animation the renderer should play (tackles, broken tackles, slides). */
+  anim: ContactAnim | null;
+}
+
+export interface ContactAnim {
+  kind: ContactKind;
+  role: 'carrier' | 'tackler';
+  /** Sim time the contact started. */
+  t: number;
+  duration: number;
+  /** Carrier went down (vs. broke the tackle). */
+  down: boolean;
+  /** Heading the contact comes from / falls toward. */
+  heading: number;
+}
+
+/** A successful tackle in progress: the whistle blows when the carrier hits the turf. */
+interface Contact {
+  carrier: number;
+  tackler: number;
+  whistleAt: number;
+  sack: boolean;
 }
 
 export interface SimInput {
@@ -63,11 +89,21 @@ export interface SimInput {
   handoff: boolean;
   /** Edge-triggered: juke move for the ball carrier. */
   juke: boolean;
+  /** Edge-triggered: QB slides (gives himself up) while scrambling. */
+  slide?: boolean;
 }
 
 export const idleInput = (): SimInput => ({
-  move: v2(), gazeYaw: 0, throwHeld: false, target: null, handoff: false, juke: false,
+  move: v2(), gazeYaw: 0, throwHeld: false, target: null, handoff: false, juke: false, slide: false,
 });
+
+/** Where the most dangerous rusher is coming from, for the pocket cue. */
+export interface PocketCue {
+  /** Field heading from the QB to the rusher (0 = downfield, + = right). */
+  heading: number;
+  /** 0..1, how close he is to getting home. */
+  level: number;
+}
 
 interface Flight {
   from: Vec2;
@@ -98,7 +134,7 @@ export interface Ball {
 export type PlayEventType =
   | 'snap' | 'handoff' | 'pitch' | 'throw' | 'catch' | 'interception' | 'deflection' | 'drop'
   | 'incomplete' | 'tackle' | 'sack' | 'touchdown' | 'outOfBounds' | 'brokenTackle' | 'juke' | 'safety'
-  | 'scramble' | 'shed';
+  | 'scramble' | 'shed' | 'slide';
 
 export interface PlayEvent {
   t: number;
@@ -140,6 +176,8 @@ interface Engagement {
   blocker: number;
   defender: number;
   t: number;
+  /** The line doesn't hold perfectly: some reps are lost early, at this engagement time. */
+  loseAt: number;
 }
 
 const SPEED = (r: number) => 4.8 + 5.0 * (r / 100);
@@ -157,6 +195,9 @@ export class PlaySim {
   /** Which actor the user currently controls (QB, then the ball carrier). */
   controlledId: number;
   pressure = 0;
+  pocketCue: PocketCue | null = null;
+  /** QB is running with the ball (out of the pocket or past the LOS). */
+  scrambling = false;
   charge = 0;
   charging = false;
 
@@ -181,6 +222,7 @@ export class PlaySim {
   readonly coverage: CoverageReader;
   /** Underneath defender id -> vertical receiver id he is carrying. */
   private carry = new Map<number, number>();
+  private contact: Contact | null = null;
 
   constructor(opts: SimOptions) {
     this.play = opts.play;
@@ -234,6 +276,7 @@ export class PlaySim {
       tackleCooldown: 0,
       down: false,
       history: [],
+      anim: null,
     };
     this.actors.push(a);
     this.bySlot.set(`${side}:${slot}`, a);
@@ -416,6 +459,7 @@ export class PlaySim {
     if (!this.result) this.handleThrowing(input);
     if (!this.result) this.checkTackles();
     if (!this.result) this.checkBoundaries();
+    if (!this.result && this.contact && this.t >= this.contact.whistleAt) this.whistleContact();
     if (!this.result && this.t > MAX_PLAY_TIME) {
       const c = this.carrier;
       this.finish(c ? 'tackle' : 'incomplete', c ?? this.get('QB'));
@@ -451,6 +495,11 @@ export class PlaySim {
     const controlled = c && c.side === 'off' ? c : this.passThrown || this.handedOff ? null : qb;
     this.controlledId = controlled ? controlled.id : -1;
     if (!controlled) return;
+    if (this.contact) {
+      // Going down: momentum carries the runner, the stick does nothing.
+      desired.set(controlled.id, controlled.vel);
+      return;
+    }
 
     let move = clampLen(input.move, 1);
     if (controlled !== qb && len(move) < 0.15) {
@@ -469,9 +518,18 @@ export class PlaySim {
     desired.set(controlled.id, v);
     if (controlled === qb) {
       qb.facing = input.gazeYaw;
-      if (this.ball.holder === qb.id && this.pastLos(qb) && !this.handedOff && this.runRecognizedAt === Infinity) {
+      const holds = this.ball.holder === qb.id && !this.handedOff && !this.passThrown;
+      if (holds && !this.scrambling && this.t > SCRAMBLE.minTime && len(qb.vel) > SCRAMBLE.speedToScramble && qb.vel.y > -1) {
+        this.scrambling = true; // out of the pocket: the head follows the running path
+      }
+      if (holds && this.pastLos(qb) && this.runRecognizedAt === Infinity) {
+        this.scrambling = true;
         this.runRecognizedAt = this.t;
         this.emit('scramble', qb.id);
+      }
+      if (input.slide && holds && this.pastLos(qb) && !this.result) {
+        this.slide(qb);
+        return;
       }
     }
 
@@ -489,7 +547,16 @@ export class PlaySim {
     }
   }
 
-  private pastLos(a: Actor) {
+  /** QB gives himself up: down at the spot plus a little slide, no hit. */
+  private slide(qb: Actor) {
+    const dur = TACKLE.contactTime.slide;
+    qb.vel = scale(norm(qb.vel), SCRAMBLE.slideGain / dur);
+    qb.anim = { kind: 'slide', role: 'carrier', t: this.t, duration: dur, down: true, heading: Math.atan2(qb.vel.x, qb.vel.y) };
+    this.contact = { carrier: qb.id, tackler: -1, whistleAt: this.t + dur, sack: false };
+    this.emit('slide', qb.id);
+  }
+
+  pastLos(a: Actor) {
     return a.pos.y > this.los + 0.3;
   }
 
@@ -596,8 +663,9 @@ export class PlaySim {
         desired.set(a.id, this.followRoute(a));
         continue;
       }
+      const qbRun = this.runRecognizedAt < Infinity && carrier === qb;
       if (a.position === 'OL') {
-        desired.set(a.id, this.play.run || this.handedOff || (carrier && carrier !== qb) ? this.runBlock(a) : this.passPro(a));
+        desired.set(a.id, this.play.run || this.handedOff || (carrier && carrier !== qb) || qbRun ? this.runBlock(a) : this.passPro(a));
         continue;
       }
       // Eligible receivers.
@@ -616,7 +684,7 @@ export class PlaySim {
         continue;
       }
       const afterCatch = carrier && carrier.side === 'off' && carrier !== qb;
-      if (afterCatch || this.handedOff || this.play.run) {
+      if (afterCatch || this.handedOff || this.play.run || qbRun) {
         desired.set(a.id, this.runBlock(a));
         continue;
       }
@@ -656,24 +724,42 @@ export class PlaySim {
     return scale(d, s / l);
   }
 
+  /** Nearest rusher nobody is blocking (within `range` of the blocker). */
+  private freeRusher(b: Actor, range: number): Actor | null {
+    const qb = this.get('QB');
+    let r: Actor | null = null;
+    for (const d of this.actors) {
+      if (d.side !== 'def' || d.down || !this.isRushing(d)) continue;
+      if (this.engagersOf(d) > 0) continue;
+      if ([...this.passBlock.entries()].some(([bid, rid]) => rid === d.id && bid !== b.id && !this.actors[bid].down)) continue;
+      if (dist(d.pos, b.pos) > range) continue;
+      if (!r || dist(d.pos, qb.pos) < dist(r.pos, qb.pos)) r = d;
+    }
+    return r;
+  }
+
   private passPro(b: Actor): Vec2 {
     const qb = this.get('QB');
-    if (this.isEngaged(b)) return v2(); // engagement code positions engaged blockers
+    const eng = this.isEngaged(b);
+    if (eng) {
+      // The second man in a double team peels off to pick up a free rusher.
+      const free = this.engagersOf(this.actors[eng.defender]) > 1 ? this.freeRusher(b, 4.5) : null;
+      if (!free) return v2(); // engagement code positions engaged blockers
+      this.engagements = this.engagements.filter((e) => e !== eng);
+      this.passBlock.set(b.id, free.id);
+    }
     let rid = this.passBlock.get(b.id);
     let r = rid !== undefined ? this.actors[rid] : null;
-    if (!r || r.down) {
-      // Find an unblocked rusher threatening the QB.
-      r = null;
-      for (const d of this.actors) {
-        if (d.side !== 'def' || d.down || d.assignment?.kind !== 'rush') continue;
-        if (this.engagersOf(d) > 0) continue;
-        if (dist(d.pos, b.pos) > 4) continue;
-        if (!r || dist(d.pos, qb.pos) < dist(r.pos, qb.pos)) r = d;
-      }
+    if (!r || r.down || (this.engagersOf(r) > 0 && !this.isEngaged(b))) {
+      // Find an unblocked rusher threatening the QB (backs scan further).
+      r = this.freeRusher(b, b.position === 'OL' ? 4 : 7);
       if (r) this.passBlock.set(b.id, r.id);
     }
     if (!r) {
-      const home = v2(b.pos.x, Math.max(qb.pos.y + 1.5, this.los - 2.2));
+      // Backs and tight ends set up beside the QB instead of walking through him.
+      const home = b.position === 'OL'
+        ? v2(b.pos.x, Math.max(qb.pos.y + 1.5, this.los - 2.2))
+        : v2(qb.pos.x + (Math.sign(b.pos.x - qb.pos.x) || 1) * POCKET.backBlockerSide, qb.pos.y + 0.6);
       return this.seek(b, home, 0.5);
     }
     const spot = add(r.pos, scale(norm(sub(qb.pos, r.pos)), 0.9));
@@ -709,7 +795,8 @@ export class PlaySim {
     if (this.engagersOf(d) >= 2) return;
     const c = this.carrier;
     if (c === d || (c && c.side === 'off' && dist(c.pos, d.pos) < 1.6)) return;
-    this.engagements.push({ blocker: b.id, defender: d.id, t: 0 });
+    const quick = this.rng.chance(POCKET.quickLossChance * this.diff.pocketPressure);
+    this.engagements.push({ blocker: b.id, defender: d.id, t: 0, loseAt: quick ? this.rng.range(POCKET.quickLossMin, POCKET.quickLossMax) : Infinity });
   }
 
   // ---------------------------------------------------------------- defense AI
@@ -764,6 +851,28 @@ export class PlaySim {
     }
   }
 
+  /**
+   * Rush lanes: interior rushers push straight at the QB, edge rushers arc
+   * around the tackle and come at him from the side and from behind.
+   */
+  private rushGoal(d: Actor, qb: Actor): Vec2 {
+    const startX = d.history.length ? d.history[0].x : d.pos.x;
+    const side = Math.sign(startX - this.ballX);
+    if (Math.abs(startX - this.ballX) < POCKET.edgeStartWidth || this.scrambling) return qb.pos;
+    const beside = Math.abs(d.pos.x - qb.pos.x) < POCKET.edgeArcWidth + 0.6;
+    if (d.pos.y <= qb.pos.y + POCKET.edgeArcDepth && beside) return qb.pos; // turned the corner
+    return v2(qb.pos.x + side * POCKET.edgeArcWidth, qb.pos.y - POCKET.edgeArcDepth);
+  }
+
+  /** Rushers, plus man defenders whose receiver stayed in to block (green dog). */
+  private isRushing(d: Actor): boolean {
+    const a = d.assignment;
+    if (a?.kind === 'rush') return true;
+    if (a?.kind !== 'man' || this.t <= 1.2) return false;
+    const r = this.get(a.target).route;
+    return !!r?.blocks && !(r.type === 'check' && this.t > 1.5);
+  }
+
   /** Defender is level with or behind his receiver, so his back is to the QB. */
   private trailing(d: Actor, r: Actor): boolean {
     return d.pos.y < r.pos.y + 0.5 && len(r.vel) > 3;
@@ -786,6 +895,10 @@ export class PlaySim {
     const runMode = carrier && carrier.side === 'off' && (carrier !== qb || this.runRecognizedAt < Infinity);
     for (const d of this.actors) {
       if (d.side !== 'def' || d.down || desired.has(d.id)) continue;
+      if (this.contact && d.id === this.contact.tackler) {
+        desired.set(d.id, this.actors[this.contact.carrier].vel); // ride the carrier to the turf
+        continue;
+      }
       const asg = d.assignment!;
       const isDeep = asg.kind === 'zone' && ZONES[asg.zone].deep;
       let goal: Vec2;
@@ -793,7 +906,7 @@ export class PlaySim {
 
       if (carrier && carrier.side === 'def') {
         goal = d.pos;
-      } else if (runMode && this.t > this.runRecognizedAt + d.reaction + (isDeep ? 0.35 : 0)) {
+      } else if (runMode && this.t > this.runRecognizedAt + d.reaction * (carrier === qb ? SCRAMBLE.reactFactor : 1) + (isDeep ? 0.35 : 0)) {
         goal = this.pursuit(d, carrier!);
       } else if (flight && asg.kind === 'man' && this.get(asg.target).id === flight.targetId && this.trailing(d, this.get(asg.target))) {
         // Trailing man defender can't see the ball: play through the receiver's hands.
@@ -883,7 +996,7 @@ export class PlaySim {
   private coverageGoal(d: Actor, asg: DefAssignment, qb: Actor): Vec2 {
     switch (asg.kind) {
       case 'rush':
-        return qb.pos;
+        return this.rushGoal(d, qb);
       case 'spy':
         return v2(qb.pos.x, Math.max(this.los + 4, qb.pos.y + 5));
       case 'man': {
@@ -972,9 +1085,10 @@ export class PlaySim {
       const blkStat = (br.blocking * 2 + br.strength) / 3;
       const n = this.engagersOf(d);
       const ratio = defStat / Math.max(20, blkStat);
-      // Hazard grows linearly with time engaged: pressure builds the longer the QB holds it.
-      const rate = (rushing ? 0.05 * e.t : 0.05 + 0.08 * e.t) * ratio * ratio * ratio * this.diff.passRush / n;
-      if (this.rng.chance(rate * dt)) {
+      // Hazard grows with time engaged and with how long the QB holds the ball.
+      const hold = rushing ? 1 + POCKET.holdFactor * Math.max(0, this.t - POCKET.holdGrace) * this.diff.pocketPressure : 1;
+      const rate = (rushing ? 0.05 * e.t * hold : 0.05 + 0.08 * e.t) * ratio * ratio * ratio * this.diff.passRush / n;
+      if ((rushing && e.t >= e.loseAt && n === 1) || this.rng.chance(rate * dt)) {
         this.shedFrom.set(d.id, { blocker: b.id, until: this.t + 1.2 });
         b.blockCooldown = 0.8;
         this.emit('shed', d.id);
@@ -1004,8 +1118,9 @@ export class PlaySim {
         continue;
       }
       const want = clampLen(desired.get(a.id) ?? v2(), a.maxSpeed);
-      const dv = clampLen(sub(want, a.vel), a.accel * dt);
-      a.vel = add(a.vel, dv);
+      const k = this.contact;
+      if (k && (a.id === k.carrier || a.id === k.tackler)) a.vel = want; // contact: momentum is scripted
+      else a.vel = add(a.vel, clampLen(sub(want, a.vel), a.accel * dt));
       a.pos = add(a.pos, scale(a.vel, dt));
       const sp = len(a.vel);
       if (sp > 0.5 && !(a.slot === 'QB' && a.side === 'off' && this.controlledId === a.id)) {
@@ -1157,31 +1272,54 @@ export class PlaySim {
 
   private checkTackles() {
     const c = this.carrier;
-    if (!c || c.side !== 'off') return;
+    if (!c || c.side !== 'off' || this.contact) return;
     for (const d of this.actors) {
       if (d.side !== 'def' || d.down || d.tackleCooldown > 0) continue;
-      if (dist(d.pos, c.pos) > TACKLE_RANGE) continue;
-      const engaged = this.isEngaged(d);
-      if (engaged && dist(d.pos, c.pos) > 0.85) continue;
-      const armTackle = engaged ? 0.3 : 1;
-      const tr = d.player.ratings.tackling / 100;
-      const elusive = (c.player.ratings.strength + c.player.ratings.speed) / 200;
-      let p = (0.5 + 0.38 * tr - 0.22 * elusive) * this.diff.tackling * armTackle;
-      if (this.t < this.jukeUntil) p *= 0.4;
-      if (c.slot === 'QB' && !this.pastLos(c)) p *= 1.15; // sacks: QB is a sitting duck
-      if (this.rng.chance(clamp(p, 0.08, 0.97))) {
-        c.down = true;
-        d.vel = scale(d.vel, 0.3);
+      if (dist(d.pos, c.pos) > TACKLE.range) continue;
+      const engaged = !!this.isEngaged(d);
+      if (engaged && dist(d.pos, c.pos) > TACKLE.engagedRange) continue;
+      let factor = this.diff.tackling;
+      if (c.slot === 'QB' && !this.pastLos(c)) factor *= TACKLE.pocketSackFactor; // sacks: QB is a sitting duck
+      else if (c.slot === 'QB') factor *= SCRAMBLE.tackleBonus; // a scrambling QB is no running back
+      const out = resolveTackle({
+        tacklerPos: d.pos, tacklerVel: d.vel, carrierPos: c.pos, carrierVel: c.vel,
+        tackling: d.player.ratings.tackling, carrierStrength: c.player.ratings.strength, carrierSpeed: c.player.ratings.speed,
+        engaged, juking: this.t < this.jukeUntil, factor, rng: this.rng,
+      });
+      const heading = Math.atan2(d.pos.x - c.pos.x, d.pos.y - c.pos.y);
+      c.anim = { kind: out.kind, role: 'carrier', t: this.t, duration: out.contactTime, down: out.success, heading };
+      d.anim = { kind: out.kind, role: 'tackler', t: this.t, duration: out.contactTime, down: out.success, heading: heading + Math.PI };
+      if (out.success) {
+        // Momentum: the carrier keeps going (or is driven back) until he hits the turf.
+        const dir = len(c.vel) > 0.5 ? norm(c.vel) : v2(0, 1);
+        c.vel = scale(dir, out.fallForward / out.contactTime);
+        d.vel = c.vel;
         const sack = c.slot === 'QB' && c.pos.y < this.los && !this.passThrown && !this.handedOff;
-        if (c.pos.y <= 0) this.finish('safety', c);
-        else this.finish(sack ? 'sack' : 'tackle', c);
+        this.contact = { carrier: c.id, tackler: d.id, whistleAt: this.t + out.contactTime, sack };
         return;
       }
-      d.tackleCooldown = 0.5;
-      c.vel = scale(c.vel, 0.45);
+      d.tackleCooldown = TACKLE.brokenCooldown;
+      c.vel = scale(c.vel, out.slow);
       this.emit('brokenTackle', d.id);
     }
   }
+
+  /** The ball carrier is down: blow the whistle at the spot. */
+  private whistleContact() {
+    const k = this.contact!;
+    this.contact = null;
+    const c = this.actors[k.carrier];
+    c.down = true;
+    if (k.tackler >= 0) this.actors[k.tackler].vel = scale(this.actors[k.tackler].vel, 0.3);
+    if (c.pos.y <= 0) this.finish('safety', c);
+    else this.finish(k.sack ? 'sack' : 'tackle', c);
+  }
+
+  /** A tackle is in progress (contact animation before the whistle). */
+  get inContact(): boolean {
+    return this.contact !== null;
+  }
+
 
   private checkBoundaries() {
     const c = this.carrier;
@@ -1226,21 +1364,32 @@ export class PlaySim {
     const qb = this.get('QB');
     if (this.ball.holder !== qb.id || this.result) {
       this.pressure = 0;
+      this.pocketCue = null;
       return;
     }
     let p = 0;
+    let cue: PocketCue | null = null;
     const picked = new Set(this.passBlock.values());
     for (const d of this.actors) {
-      if (d.side !== 'def' || d.down || d.assignment?.kind !== 'rush') continue;
+      if (d.side !== 'def' || d.down || !this.isRushing(d)) continue;
       const dd = dist(d.pos, qb.pos);
       const engaged = this.engagements.some((e) => e.defender === d.id);
       const free = clamp(1 - (dd - 1.2) / 5, 0, 1);
       // Blocked rushers only count once they are pushing the pocket into the QB.
       const v = engaged ? clamp(1 - (dd - 1) / 3.5, 0, 1) * 0.55 : picked.has(d.id) && this.t < 1 ? free * 0.3 : free;
       p = Math.max(p, v);
+      if (!engaged) {
+        // Cue: a free rusher closing in (by distance or by time to get home).
+        const closing = Math.max(0, -((d.vel.x * (d.pos.x - qb.pos.x) + d.vel.y * (d.pos.y - qb.pos.y)) / Math.max(dd, 0.1)));
+        const tHome = closing > 0.5 ? (dd - 1) / closing : Infinity;
+        const level = Math.max(clamp(1 - (dd - 1.2) / POCKET.cueRange, 0, 1), clamp(1 - tHome / POCKET.cueTime, 0, 1));
+        if (level > 0 && (!cue || level > cue.level)) cue = { heading: Math.atan2(d.pos.x - qb.pos.x, d.pos.y - qb.pos.y), level };
+      }
     }
     this.pressure = this.pressure + (p - this.pressure) * 0.2;
+    this.pocketCue = cue;
   }
+
 }
 
 function describe(r: PlayResult, c: Actor | null): string {
