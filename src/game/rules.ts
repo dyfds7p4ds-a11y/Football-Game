@@ -34,9 +34,10 @@ export interface RulesResult {
   headline: string;
 }
 
-function startPossession(s: GameState, side: TeamSide, ballY: number): GameState {
+/** New possession at `ballY`; `kicker` (after scores, safeties and at half time) must kick off first. */
+function startPossession(s: GameState, side: TeamSide, ballY: number, kicker: TeamSide | null = null): GameState {
   const y = clamp(ballY, 1, 99);
-  return { ...s, possession: side, ballY: y, ballX: 0, down: 1, toGo: Math.min(10, 100 - y) };
+  return { ...s, possession: side, ballY: y, ballX: 0, down: 1, toGo: Math.min(10, 100 - y), pendingKickoff: kicker };
 }
 
 function addScore(s: GameState, side: TeamSide, pts: number): GameState {
@@ -48,17 +49,17 @@ export function applyPlay(s: GameState, p: RulesPlay): RulesResult {
   const def = other(off);
   switch (p.outcome) {
     case 'touchdown': {
-      const st = startPossession(addScore(s, off, 7), def, TOUCHBACK);
+      const st = startPossession(addScore(s, off, 7), def, TOUCHBACK, off);
       return { state: st, stop: 'score', possessionChanged: true, scored: { side: off, points: 7 }, headline: 'TOUCHDOWN!' };
     }
     case 'safety': {
-      const st = startPossession(addScore(s, def, 2), def, TOUCHBACK);
+      const st = startPossession(addScore(s, def, 2), def, TOUCHBACK, off);
       return { state: st, stop: 'score', possessionChanged: true, scored: { side: def, points: 2 }, headline: 'SAFETY' };
     }
     case 'interception': {
       const theirY = 100 - p.endY;
       if (theirY >= 100) {
-        const st = startPossession(addScore(s, def, 7), off, TOUCHBACK);
+        const st = startPossession(addScore(s, def, 7), off, TOUCHBACK, def);
         return { state: st, stop: 'score', possessionChanged: false, scored: { side: def, points: 7 }, headline: 'PICK SIX!' };
       }
       const st = startPossession(s, def, theirY <= 0 ? TOUCHBACK : theirY);
@@ -116,7 +117,7 @@ export function attemptFieldGoal(s: GameState, rng: Rng): RulesResult & { distan
   const off = s.possession;
   const def = other(off);
   if (good) {
-    const st = startPossession(addScore(s, off, 3), def, TOUCHBACK);
+    const st = startPossession(addScore(s, off, 3), def, TOUCHBACK, off);
     return { state: st, stop: 'score', possessionChanged: true, scored: { side: off, points: 3 }, headline: `${distance}-YD FIELD GOAL IS GOOD`, distance, good };
   }
   const kickSpot = s.ballY - 7;
@@ -143,5 +144,6 @@ export function punt(s: GameState, rng: Rng): RulesResult & { net: number } {
 
 /** Half time: the team that did not receive the opening kick gets the ball. */
 export function startSecondHalf(s: GameState): GameState {
-  return startPossession({ ...s, timeouts: { home: 3, away: 3 } }, other(s.openingReceiver), TOUCHBACK);
+  // The opening receiver kicks off to start the second half.
+  return startPossession({ ...s, timeouts: { home: 3, away: 3 } }, other(s.openingReceiver), TOUCHBACK, s.openingReceiver);
 }

@@ -1,0 +1,41 @@
+{
+  "meter": {
+    "fillTime": 1.1,
+    "anglePeriod": 1.3,
+    "punt": { "zoneCenter": 0.88, "zoneHalfWidth": 0.07, "angleMin": 25, "angleMax": 70, "idealAngle": 50, "angleHalfWidth": 7 },
+    "fieldGoal": { "zoneMargin": 0.06, "zoneHalfWidth": 0.06, "maxDistance": 63, "angle": 38 },
+    "kickoff": { "zoneCenter": 0.9, "zoneHalfWidth": 0.07, "angle": 42 }
+  },
+  "physics": {
+    "gravity": 10.73,
+    "puntMaxSpeed": 24,
+    "kickoffMaxSpeed": 29,
+    "fgMaxSpeed": 27.5,
+    "maxLateralDeg": 10,
+    "shankChance": 0.25
+  },
+  "goalposts": { "halfWidth": 3.08, "crossbar": 3.33 },
+  "rules": {
+    "kickoffSpot": 35,
+    "touchback": 25,
+    "puntTouchback": 20,
+    "kickoffOutOfBounds": 40,
+    "fieldGoalSnapBack": 7,
+    "puntSnapBack": 14
+  },
+  "return": {
+    "dashBoost": 1.22,
+    "dashTime": 0.8,
+    "dashCooldown": 2.4,
+    "catchRadius": 1.8,
+    "muffChance": 0.03,
+    "rollFriction": 4,
+    "kickoffFrontLine": 10,
+    "coverageSpeed": 0.95,
+    "blockHold": [0.6, 2.2],
+    "maxTime": 20
+  },
+  "cpu": {
+    "timingSigma": { "easy": 0.09, "normal": 0.06, "hard": 0.035 }
+  }
+}
