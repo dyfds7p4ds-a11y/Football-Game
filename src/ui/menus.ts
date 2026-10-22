@@ -144,11 +144,13 @@ export function helpContent(): HTMLElement {
       h('li', {}, 'Scrambling: your view follows your path. Defenders close fast on a running QB, so let blockers open a lane, and tap SLIDE to give yourself up safely.'),
       h('li', {}, 'Run plays hand off automatically; then steer the runner. Press JUKE to dodge a tackle. Tap RB when he is next to you to hand off on any play; hold THROW on a run play to keep it yourself.'),
       h('li', {}, 'Kicking: hold KICK to fill the meter and release in the green zone. Punts also lock the angle needle on release. Returns: steer the returner and tap DASH for a burst.'),
-      h('li', {}, 'Flags: an official throws a yellow flag at the spot of a foul; the penalty is applied after the play.'),
+      h('li', {}, 'Defense: when the CPU has the ball, call a coverage (or let the coordinator call it). You control a cornerback; the camera sits behind him. Left thumb moves him, the CB1 / CB2 / NB buttons switch to another corner, the CPU plays everyone else.'),
+      h('li', {}, 'JUMP plays the ball: time it so you are at the top of your jump when the ball arrives. Perfect timing breaks up most passes and sometimes picks one off; jumping early or late lets the receiver catch it over you. Against a runner the same button is a diving tackle.'),
+      h('li', {}, 'Flags: at most one per play (the most severe foul is called); an official throws it at the spot and the penalty is applied after the play.'),
       h('li', {}, 'Clock: 40-second play clock (delay of game = 5 yards). The game clock stops on incompletions, out of bounds, scores and turnovers.'),
     ),
     h('h2', {}, 'KEYBOARD / GAMEPAD'),
-    h('p', {}, 'Keyboard: WASD/arrows move · hold 1 2 3 = WR, 4 or R = RB, 5 or T = TE to charge, release to throw · SPACE snap/throw/juke/kick · X or SHIFT slide/dash · Q/E look · O timeout · P/Esc pause.'),
+    h('p', {}, 'Keyboard: WASD/arrows move · hold 1 2 3 = WR, 4 or R = RB, 5 or T = TE to charge, release to throw · SPACE snap/throw/juke/kick · X or SHIFT slide/dash · Q/E look · O timeout · P/Esc pause. On defense: 1 / 2 / 3 switch to CB1 / CB2 / NB, SPACE jumps (or dives).'),
     h('p', {}, 'Gamepad: left stick move · right stick look · hold X=1 Y=2 B=3 LB=RB RB=TE to charge, release to throw · A or RT snap/throw/juke/kick · LT slide/dash · Start pause · Back timeout.'),
   );
 }
@@ -157,7 +159,7 @@ export function driveSummary(s: GameState, side: TeamSide, entries: DriveEntry[]
   const t = getTeam(s.teams[side]);
   return h('div', {},
     h('h2', {}, `${t.city.toUpperCase()} ${t.name.toUpperCase()} DRIVE`),
-    h('p', { style: { opacity: '0.8' } }, 'Playing defense comes in Phase 3. For now the CPU drive is simulated:'),
+    h('p', { style: { opacity: '0.8' } }, 'CPU drive (simulated: set CPU drives to PLAY DEFENSE to play it):'),
     h('ol', { class: 'drive' }, ...entries.map((e) => h('li', {}, h('span', { class: 'sit' }, `${e.clock} · ${e.situation}  `), e.text))),
     h('h2', { style: { color: '#fff' } }, headline),
   );
