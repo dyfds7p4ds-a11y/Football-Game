@@ -5,12 +5,16 @@ Three.js + TypeScript + Vite, installable as a PWA, touch-first with keyboard
 and gamepad as secondary inputs. Stylized-realistic 3D (stadium bowl, crowd,
 soft shadows) with an optional chunky "retro pixels" mode.
 
-This is **Phase 2**: a playable single game where you run the offense against
-a CPU defense that reads your route concepts, with played special teams
-(kick meters and returns), officials and penalty flags, a crowd meter and
-intro cutscenes. Playing defense (cornerback view), career mode and trading
-come in Phase 3 (see [ARCHITECTURE.md](ARCHITECTURE.md) for the extension
-points).
+This is **Phase 3b**: a playable single game where you run the offense against
+a CPU defense that reads your route concepts, and play defense (any of the
+eleven defenders) against a CPU quarterback. Blocking is matchup-driven,
+blitzes can be picked up, kicks use a two-step meter and you cover your own
+kicks. Touchdowns are followed by a try (kick or two), ties go to college
+overtime, and each team has three timeouts per half. Officials, penalty
+flags, a crowd meter and intro cutscenes are in too. Visual and audio polish
+(Phase 3c), career mode and trading come later (see
+[ARCHITECTURE.md](ARCHITECTURE.md) for the modules, defaults, extension
+points and known gaps).
 
 ## Run it
 
@@ -168,7 +172,7 @@ prints a timeline for a single play (play, defense, throw time, target, seed).
   and penalties, and keeps running after in-bounds tackles. A play that
   starts before 0:00 is always finished.
 - **Kickoffs, punts and field goals are played** (Quick sim brings back the
-  Phase 1 instant results). PATs are still automatic: touchdowns count 7.
+  Phase 1 instant results). Touchdowns count 6, then the try (Phase 3b).
   Kickoffs from the 35, touchbacks at the 25 (punts: 20).
 - **The CPU's possessions are simulated** drive by drive (see Known gaps).
 - **Default quarter length is 5 minutes.**
@@ -180,23 +184,21 @@ prints a timeline for a single play (play, defense, throw time, target, seed).
 - Team/player names and colors are **fictional placeholders**, loosely
   inspired by German football (GFL) markets.
 
-## Known gaps (Phase 2)
+## Known gaps (Phase 2; Phase 3a/3b gaps are in ARCHITECTURE.md)
 
-- **Defense is not playable yet** (Phase 3: cornerback view). The CPU's
-  offensive drives are still simulated from team grades and shown as a
-  play-by-play summary; only their punts and kickoffs are played (you
-  return them).
+- **Defense is playable since Phase 3a/3b** (setting "CPU drives: PLAY
+  DEFENSE"); "QUICK SIM" still simulates CPU drives from team grades.
 - **Special teams are simplified.** No kicker/punter ratings (the meter alone
   decides), no onside kicks, fair catches, fake punts/field goals, blocked
   kicks, muffed-punt recoveries by the kicking team or penalties on kicks.
-  PATs and two-point tries are automatic (TD = 7). The field-goal unit is
+  CPU tries are resolved instantly (Phase 3b). The field-goal unit is
   shown as kicker and holder only.
 - **Penalty enforcement is simplified:** previous spot for everything except
   pass interference; no add-on yardage for personal fouls at the end of a
   run, no 10-second runoff, no declined-penalty choice for the user (the
   offended team automatically takes the better result).
-- **Simplified game rules** (unchanged from Phase 1): no two-minute warning,
-  no overtime (ties stand), no NCAA clock stop after first downs.
+- **Simplified game rules:** no two-minute warning, no NCAA clock stop after
+  first downs. Overtime (college rules) since Phase 3b.
 - **No pre-snap adjustments.** No audibles, hot routes, motion or snap count,
   and offensive personnel never changes (always 11 personnel).
 - **Interceptions end the play at the catch point.** There are no INT or
