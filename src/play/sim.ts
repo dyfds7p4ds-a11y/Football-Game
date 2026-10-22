@@ -24,6 +24,7 @@ import { TACKLE, resolveTackle, type ContactKind } from './tackle';
 import { SCREEN, screenTiming, type ScreenTiming } from './screen';
 import { nearestOfficial, setupOfficials, updateOfficials, type Official } from './officials';
 import { PENALTIES, callFoul, makeFoul, rollFoul, type Flag, type Foul, type FoulType, type PenaltyBias } from './penalties';
+import { DEF_CONTROL, jumpTiming, timingEffect, type JumpGrade } from './interception';
 import pocketJson from '../data/pocket.json';
 
 export const POCKET = pocketJson.pocket;
@@ -59,6 +60,8 @@ export interface Actor {
   history: Vec2[];
   /** Contact animation the renderer should play (tackles, broken tackles, slides). */
   anim: ContactAnim | null;
+  /** Sim time of the user defender's last JUMP press (-Infinity: none). */
+  jumpT: number;
 }
 
 export interface ContactAnim {
@@ -94,6 +97,8 @@ export interface SimInput {
   juke: boolean;
   /** Edge-triggered: QB slides (gives himself up) while scrambling. */
   slide?: boolean;
+  /** User on defense: stick for the selected defender and the edge-triggered JUMP button. */
+  defense?: { move: Vec2; jump: boolean };
 }
 
 export const idleInput = (): SimInput => ({
@@ -139,7 +144,7 @@ export interface Ball {
 export type PlayEventType =
   | 'snap' | 'handoff' | 'pitch' | 'throw' | 'catch' | 'interception' | 'deflection' | 'drop'
   | 'incomplete' | 'tackle' | 'sack' | 'touchdown' | 'outOfBounds' | 'brokenTackle' | 'juke' | 'safety'
-  | 'scramble' | 'shed' | 'slide' | 'flag';
+  | 'scramble' | 'shed' | 'slide' | 'flag' | 'jump' | 'timing';
 
 export interface PlayEvent {
   t: number;
@@ -179,6 +184,8 @@ export interface SimOptions {
   seed: number;
   /** Penalty chance scale per side (crowd noise etc.); 0 turns fouls off. Default 1. */
   penaltyBias?: PenaltyBias;
+  /** The user plays defense: `SimInput.defense` moves the selected defender (CB1 first). */
+  userDefense?: boolean;
 }
 
 interface Engagement {
@@ -212,6 +219,10 @@ export class PlaySim {
   readonly officials: Official[];
   readonly fouls: Foul[] = [];
   readonly flags: Flag[] = [];
+  /** User-controlled defender (-1: the user plays offense). Every other defender stays CPU. */
+  userDefId = -1;
+  /** Timing grade of the user defender's jump on the last pass that arrived near him. */
+  lastTiming: { grade: JumpGrade; offset: number } | null = null;
 
   private rng: Rng;
   private steps = 0;
@@ -255,6 +266,7 @@ export class PlaySim {
     const bias = opts.penaltyBias ?? { off: 1, def: 1 };
     this.penaltyBias = { off: bias.off * this.diff.penaltyRate, def: bias.def * this.diff.penaltyRate };
     this.officials = setupOfficials(this.los, this.ballX);
+    if (opts.userDefense) this.userDefId = this.getDef('CB1').id;
     const qb = this.get('QB');
     this.controlledId = qb.id;
     const center = this.get('C');
@@ -298,6 +310,7 @@ export class PlaySim {
       down: false,
       history: [],
       anim: null,
+      jumpT: -Infinity,
     };
     this.actors.push(a);
     this.bySlot.set(`${side}:${slot}`, a);
@@ -581,7 +594,49 @@ export class PlaySim {
 
   // ---------------------------------------------------------------- user control
 
+  /** User defense: hand control to another defender (CPU takes over the previous one). */
+  selectDefender(slot: DefSlot) {
+    if (this.userDefId < 0) return;
+    const d = this.getDef(slot);
+    if (!d.down) this.userDefId = d.id;
+  }
+
+  get userDefender(): Actor | null {
+    return this.userDefId >= 0 ? this.actors[this.userDefId] : null;
+  }
+
+  /** The selected defender: stick movement plus a timed JUMP toward the ball, the carrier or his man. */
+  private controlDefender(inp: { move: Vec2; jump: boolean } | undefined, desired: Map<number, Vec2>) {
+    const d = this.userDefender;
+    if (!d || d.down || (this.contact && this.contact.tackler === d.id)) return;
+    const J = DEF_CONTROL.jump;
+    if (this.t - d.jumpT < J.duration) {
+      desired.set(d.id, d.vel); // airborne: momentum only
+      return;
+    }
+    const move = clampLen(inp?.move ?? v2(), 1);
+    desired.set(d.id, scale(move, d.maxSpeed * DEF_CONTROL.moveSpeed));
+    if (!inp?.jump || this.t - d.jumpT < J.cooldown) return;
+    const f = this.ball.state === 'air' && this.ball.flight && !this.ball.flight.lateral ? this.ball.flight : null;
+    const c = this.carrier;
+    const asg = d.assignment;
+    const aim = f ? f.landing
+      : c && c.side === 'off' ? c.pos
+        : asg?.kind === 'man' ? this.get(asg.target).pos
+          : this.nearestEligible(d.pos).pos;
+    const dir = norm(sub(aim, d.pos));
+    d.jumpT = this.t;
+    d.vel = scale(dir, Math.min(d.maxSpeed + J.lunge, len(d.vel) + J.lunge));
+    desired.set(d.id, d.vel);
+    this.emit('jump', d.id);
+  }
+
+  private nearestEligible(p: Vec2): Actor {
+    return ELIGIBLE.map((s) => this.get(s)).reduce((m, a) => (dist(a.pos, p) < dist(m.pos, p) ? a : m));
+  }
+
   private controlUser(input: SimInput, desired: Map<number, Vec2>) {
+    if (this.userDefId >= 0) this.controlDefender(input.defense, desired);
     const qb = this.get('QB');
     const c = this.carrier;
     const controlled = c && c.side === 'off' ? c : this.passThrown || this.handedOff ? null : qb;
@@ -1399,7 +1454,7 @@ export class PlaySim {
       }
     }
     const defense = this.actors.filter((a) => a.side === 'def' && !a.down)
-      .map((a) => ({ ...toCand(a), inPhase: !!target && inPhase(target, a, COVERAGE.inPhaseDist) }));
+      .map((a) => ({ ...toCand(a), inPhase: !!target && inPhase(target, a, COVERAGE.inPhaseDist), timing: this.userTiming(a, f) }));
     const out = resolveCatch({
       landing: f.landing, quality: f.quality, speed: f.speed, offense, defense,
       ballSkills: this.diff.ballSkills, inPhaseBreakup: COVERAGE.inPhaseBreakup, inPhaseInt: COVERAGE.inPhaseInt,
@@ -1436,6 +1491,15 @@ export class PlaySim {
     }
   }
 
+  /** Timing bonus for the user defender's jump when the ball arrives near him (none for CPU defenders). */
+  private userTiming(a: Actor, f: Flight) {
+    if (a.id !== this.userDefId || dist(a.pos, f.landing) > 4) return undefined;
+    const t = jumpTiming(Number.isFinite(a.jumpT) ? a.jumpT : null, this.t);
+    this.lastTiming = t;
+    this.emit('timing', a.id);
+    return timingEffect(t.grade);
+  }
+
   private incomplete(at: Vec2) {
     const f = this.ball.flight;
     this.ball.state = 'loose';
@@ -1460,10 +1524,12 @@ export class PlaySim {
     if (!c || c.side !== 'off' || this.contact) return;
     for (const d of this.actors) {
       if (d.side !== 'def' || d.down || d.tackleCooldown > 0) continue;
-      if (dist(d.pos, c.pos) > TACKLE.range) continue;
+      // The user defender's JUMP doubles as a diving tackle: longer range, a little more stopping power.
+      const diving = d.id === this.userDefId && this.t - d.jumpT < DEF_CONTROL.jump.duration;
+      if (dist(d.pos, c.pos) > (diving ? DEF_CONTROL.tackle.diveRange : TACKLE.range)) continue;
       const engaged = !!this.isEngaged(d);
       if (engaged && dist(d.pos, c.pos) > TACKLE.engagedRange) continue;
-      let factor = this.diff.tackling;
+      let factor = this.diff.tackling * (diving ? DEF_CONTROL.tackle.diveFactor : 1);
       if (c.slot === 'QB' && !this.pastLos(c)) factor *= TACKLE.pocketSackFactor; // sacks: QB is a sitting duck
       else if (c.slot === 'QB') factor *= SCRAMBLE.tackleBonus; // a scrambling QB is no running back
       const out = resolveTackle({

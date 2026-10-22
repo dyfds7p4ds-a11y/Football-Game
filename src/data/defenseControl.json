@@ -1,14 +1,43 @@
 {
-  "_doc": "User-controlled defender (play/interception.ts, PlaySim). jump: the JUMP button lunges toward the ball (in the air) or the receiver; the jump peaks peakAt s after the press. window: |peak - ball arrival| in seconds for each timing grade. effects: added to the defender's breakup / interception chance and reach (yd) in resolveCatch. A mistimed jump (early/late) is worse than no jump. A pick needs perfect timing AND position: it is an event, not routine.",
+  "_doc": "User-controlled defender (play/interception.ts, PlaySim). jump: the JUMP button lunges toward the ball (in the air) or the receiver; the jump peaks peakAt s after the press. window: |peak - ball arrival| in seconds for each timing grade. effects: added to the user defender's breakup / interception chance and reach (yd) in resolveCatch ('none' = no jump: he can still knock it away but rarely holds on). CPU defenders are unaffected. A pick needs perfect timing AND position: it is an event, not routine.",
   "moveSpeed": 1.0,
-  "jump": { "duration": 0.55, "peakAt": 0.28, "height": 0.9, "lunge": 2.4, "cooldown": 1.0 },
-  "window": { "perfect": 0.07, "good": 0.16, "mistimed": 0.35 },
-  "effects": {
-    "perfect": { "breakup": 0.3, "int": 0.22, "reach": 0.5 },
-    "good": { "breakup": 0.15, "int": 0.0, "reach": 0.3 },
-    "mistimed": { "breakup": -0.2, "int": -0.25, "reach": 0.0 },
-    "none": { "breakup": 0.0, "int": 0.0, "reach": 0.0 }
+  "jump": {
+    "duration": 0.55,
+    "peakAt": 0.28,
+    "height": 0.9,
+    "lunge": 2.4,
+    "cooldown": 1.0
   },
-  "tackle": { "diveFactor": 1.1, "diveRange": 2.2 },
+  "window": {
+    "perfect": 0.07,
+    "good": 0.16,
+    "mistimed": 0.35
+  },
+  "effects": {
+    "perfect": {
+      "breakup": 0.3,
+      "int": 0.0,
+      "reach": 0.5
+    },
+    "good": {
+      "breakup": 0.15,
+      "int": -0.1,
+      "reach": 0.3
+    },
+    "mistimed": {
+      "breakup": -0.2,
+      "int": -0.3,
+      "reach": 0.0
+    },
+    "none": {
+      "breakup": 0.0,
+      "int": -0.2,
+      "reach": 0.0
+    }
+  },
+  "tackle": {
+    "diveFactor": 1.1,
+    "diveRange": 2.2
+  },
   "presnapAutoSnap": 4.0
 }

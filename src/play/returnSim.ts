@@ -123,6 +123,7 @@ export class ReturnSim {
       pos: { ...pos }, prevPos: { ...pos }, vel: v2(), facing: side === 'off' ? 0 : Math.PI,
       maxSpeed: SPEED(r.speed), accel: 9 + 6 * (r.speed / 100), routeIdx: 0, reaction: 0.25, coverOffset: v2(),
       blockCooldown: 0, tackleCooldown: 0, down: false, history: [], anim: null,
+      jumpT: -Infinity,
     };
     this.actors.push(a);
     return a;
