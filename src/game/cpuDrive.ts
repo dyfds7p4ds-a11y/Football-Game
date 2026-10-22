@@ -12,6 +12,9 @@ import { snapClock, tickClock } from './clock';
 import { afterPlay, checkQuarter, type Break } from './flow';
 import { applyPlay, attemptFieldGoal, fieldGoalDistance, punt, type RulesResult } from './rules';
 import { ballOnText, downText, other, type GameState } from './state';
+import { crowdEdge, updateCrowd } from './crowd';
+import { penaltyState } from './penalties';
+import { PENALTIES, makeFoul } from '../play/penalties';
 
 export interface DriveEntry {
   clock: string;
@@ -24,18 +27,33 @@ export interface DriveSummary {
   entries: DriveEntry[];
   headline: string;
   brk: Break;
+  /** The drive stopped at a punt: the app plays it (kick + user return). */
+  pendingPunt: boolean;
 }
 
-export function simulateCpuDrive(start: GameState, diff: DifficultyConfig, rng: Rng): DriveSummary {
+export interface DriveOptions {
+  /** Stop at punts so the user can return them (Phase 2); false = instant formula. */
+  interactivePunts?: boolean;
+  /** Home-field crowd edge (setting). */
+  crowdEffect?: boolean;
+  /** Penalty chance scale (0 = off). */
+  penalties?: number;
+}
+
+export function simulateCpuDrive(start: GameState, diff: DifficultyConfig, rng: Rng, opts: DriveOptions = {}): DriveSummary {
   let s = start;
   const cpu = s.possession;
+  const cpuHome = cpu === 'home';
   const off = teamGrades(getTeam(s.teams[cpu]));
   const def = teamGrades(getTeam(s.teams[other(cpu)]));
-  const passEdge = clamp((off.passing / def.passDefense) * diff.cpuOffense, 0.6, 1.5);
+  // Crowd: the home defense rushes a little harder and the visitors jump offside more.
+  const edge = crowdEdge(s.crowd, !!opts.crowdEffect && !cpuHome);
+  const passEdge = clamp((off.passing / def.passDefense) * diff.cpuOffense / Math.sqrt(edge.homePressure), 0.6, 1.5);
   const runEdge = clamp((off.rushing / def.runDefense) * diff.cpuOffense, 0.6, 1.5);
   const entries: DriveEntry[] = [];
   let headline = '';
   let brk: Break = 'none';
+  let pendingPunt = false;
 
   const stats = { ...s.stats[cpu] };
   const run = (secs: number) => {
@@ -60,12 +78,26 @@ export function simulateCpuDrive(start: GameState, diff: DifficultyConfig, rng: 
 
     let r: RulesResult;
     let text: string;
-    if (s.down === 4 && !(s.toGo <= 1 && s.ballY > 40 && s.ballY < 65)) {
+    let gain = 0;
+    let sack = false;
+    let penaltyOnHome: boolean | null = null;
+    const penScale = (opts.penalties ?? 0) * (cpuHome ? edge.homePenalty : edge.awayPenalty);
+    if (penScale > 0 && rng.chance(PENALTIES.types.falseStart.chance * 2 * penScale)) {
+      // Pre-snap false start (crowd noise makes it more likely for the visitors).
+      r = { state: penaltyState(s, makeFoul('falseStart', { x: 0, y: s.ballY }, 0)), stop: 'penalty', possessionChanged: false, scored: null, headline: 'FALSE START' };
+      text = 'False start, 5-yard penalty';
+      penaltyOnHome = cpuHome;
+    } else if (s.down === 4 && !(s.toGo <= 1 && s.ballY > 40 && s.ballY < 65)) {
       run(rng.range(5, 7));
       if (fieldGoalDistance(s.ballY) <= 52) {
         const fg = attemptFieldGoal(s, rng);
         r = fg;
         text = fg.headline;
+      } else if (opts.interactivePunts) {
+        entries.push({ clock, situation, text: 'Punt formation' });
+        pendingPunt = true;
+        headline = 'PUNT';
+        break;
       } else {
         r = punt(s, rng);
         text = r.headline;
@@ -73,16 +105,17 @@ export function simulateCpuDrive(start: GameState, diff: DifficultyConfig, rng: 
     } else {
       const passP = clamp(0.5 + (s.toGo > 7 ? 0.25 : 0) - (s.toGo <= 2 ? 0.25 : 0), 0.15, 0.9);
       let outcome: 'tackle' | 'incomplete' | 'interception' | 'touchdown' | 'sack' | 'outOfBounds';
-      let gain = 0;
       if (rng.chance(passP)) {
         const roll = rng.next();
-        if (roll >= 0.06 / passEdge) stats.passAtt++;
-        if (roll < 0.06 / passEdge) {
+        const sackP = 0.06 / passEdge * edge.homePressure;
+        if (roll >= sackP) stats.passAtt++;
+        if (roll < sackP) {
           stats.sacks++;
+          sack = true;
           outcome = 'sack';
           gain = -rng.int(3, 9);
           text = `Sacked, loss of ${-gain}`;
-        } else if (roll < 0.06 / passEdge + 0.03 / passEdge) {
+        } else if (roll < sackP + 0.03 / passEdge) {
           outcome = 'interception';
           stats.turnovers++;
           gain = rng.int(5, 25);
@@ -115,7 +148,15 @@ export function simulateCpuDrive(start: GameState, diff: DifficultyConfig, rng: 
       if (r.headline && outcome !== 'touchdown' && outcome !== 'incomplete') text += ` — ${r.headline.toLowerCase()}`;
     }
     entries.push({ clock, situation, text });
-    const ap = afterPlay(r.state, r.stop);
+    const home = (side: string) => side === 'home';
+    const crowd = updateCrowd(s.crowd, {
+      homeOffense: cpuHome, yards: gain, firstDown: r.headline === 'FIRST DOWN',
+      score: r.scored ? { home: home(r.scored.side), points: r.scored.points } : null,
+      turnover: r.possessionChanged && !r.scored && r.headline === 'INTERCEPTED', sack, penaltyOnHome,
+      failedFourthDown: r.headline === 'TURNOVER ON DOWNS',
+      defensiveStop: r.headline.includes('MISSED'),
+    });
+    const ap = afterPlay({ ...r.state, crowd }, r.stop);
     s = ap.state;
     if (r.possessionChanged || r.scored) {
       headline = r.headline;
@@ -128,5 +169,5 @@ export function simulateCpuDrive(start: GameState, diff: DifficultyConfig, rng: 
       break;
     }
   }
-  return { state: { ...s, stats: { ...s.stats, [cpu]: stats } }, entries, headline, brk };
+  return { state: { ...s, stats: { ...s.stats, [cpu]: stats } }, entries, headline, brk, pendingPunt };
 }

@@ -1,4 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { Rng } from '../src/core/rng';
+import { DIFFICULTY } from '../src/data';
+import { simulateCpuDrive } from '../src/game/cpuDrive';
+import { newGame } from '../src/game/state';
 import { CROWD, crowdEdge, crowdEvents, crowdIntensity, updateCrowd, type PlayForCrowd } from '../src/game/crowd';
 
 const play = (p: Partial<PlayForCrowd>): PlayForCrowd => ({
@@ -45,5 +49,47 @@ describe('crowd meter', () => {
     expect(crowdEdge(100, false)).toEqual({ homePressure: 1, homePenalty: 1, awayPenalty: 1 });
     expect(crowdIntensity(CROWD.edge.threshold)).toBe(0);
     expect(crowdIntensity(100)).toBe(1);
+  });
+});
+
+describe('crowd in simulated CPU drives', () => {
+  const start = (crowd: number) => ({
+    ...newGame({ home: 'rheinstadt', away: 'elbtal', userSide: 'home', difficulty: 'normal', quarterLength: 900, seed: 1 }),
+    possession: 'away' as const, ballY: 25, pendingKickoff: null, crowd,
+  });
+  const count = (crowd: number, crowdEffect: boolean) => {
+    let falseStarts = 0;
+    let sacks = 0;
+    for (let i = 0; i < 150; i++) {
+      const d = simulateCpuDrive(start(crowd), DIFFICULTY.normal, new Rng(i), { crowdEffect, penalties: 1 });
+      falseStarts += d.entries.filter((e) => e.text.startsWith('False start')).length;
+      sacks += d.entries.filter((e) => e.text.startsWith('Sacked')).length;
+    }
+    return { falseStarts, sacks };
+  };
+
+  it('a rocking home crowd makes the visitors jump early more often (only when the setting is on)', () => {
+    const loud = count(100, true);
+    const off = count(100, false);
+    expect(loud.falseStarts).toBeGreaterThan(off.falseStarts);
+    expect(loud.sacks).toBeGreaterThanOrEqual(off.sacks);
+  });
+
+  it('the meter moves during CPU drives', () => {
+    const d = simulateCpuDrive(start(50), DIFFICULTY.normal, new Rng(3), { crowdEffect: true });
+    expect(d.state.crowd).not.toBe(50);
+  });
+
+  it('interactive punts stop the drive at the punt', () => {
+    let stopped = 0;
+    for (let i = 0; i < 40; i++) {
+      const d = simulateCpuDrive({ ...start(50), ballY: 10 }, DIFFICULTY.hard, new Rng(i), { interactivePunts: true });
+      if (d.pendingPunt) {
+        stopped++;
+        expect(d.state.down).toBe(4);
+        expect(d.state.possession).toBe('away');
+      }
+    }
+    expect(stopped).toBeGreaterThan(0);
   });
 });
