@@ -1,0 +1,10 @@
+{
+  "earlyCatchFactor": 0.3,
+  "lateCatchFactor": 0.75,
+  "lateIntBonus": 0.25,
+  "lateGrace": 0.25,
+  "readDelay": 0.7,
+  "reactRadius": 15,
+  "convoySpacing": 1.8,
+  "convoyDepth": 1.5
+}

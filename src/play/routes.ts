@@ -52,7 +52,7 @@ export function buildRoute(a: RouteAssignment, start: Vec2, ballX: number): Rout
     case 'drag': pts = [P(x, losY + d), P(x + i * 36, losY + d + 1)]; break;
     case 'bubble': pts = [P(x + o * 2.5, y - 1.5), P(x + o * 5, y - 0.5)]; break;
     case 'swing': pts = [P(x + o * 3, y + 0.5), P(x + o * 8, losY + 1.5), P(x + o * 11, losY + 3)]; break;
-    case 'screen': pts = [P(x + o * 2.5, y + 0.5), P(x + o * 5, losY - 1)]; break;
+    case 'screen': pts = [P(x + o * 4, y + 0.3), P(x + o * 7.5, losY - 1.5)]; break;
     case 'angle': pts = [P(x + o * 3, losY + 1), P(x + i * 5, losY + 7)]; break;
     case 'block':
     case 'check':

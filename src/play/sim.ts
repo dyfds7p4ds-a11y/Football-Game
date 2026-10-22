@@ -21,6 +21,7 @@ import { FIELD } from './field';
 import { COVERAGE, CoverageReader, carrySpot, inPhaseSpot, overTop, type Helper, type ReadTarget } from './coverage';
 import { inPhase, throwingWindow } from './windows';
 import { TACKLE, resolveTackle, type ContactKind } from './tackle';
+import { SCREEN, screenTiming, type ScreenTiming } from './screen';
 import pocketJson from '../data/pocket.json';
 
 export const POCKET = pocketJson.pocket;
@@ -117,6 +118,8 @@ interface Flight {
   quality: number;
   speed: number;
   tipChecked: Set<number>;
+  /** Screen throws: how well the throw hit the timing window. */
+  screen?: ScreenTiming;
 }
 
 export interface Ball {
@@ -223,6 +226,8 @@ export class PlaySim {
   /** Underneath defender id -> vertical receiver id he is carrying. */
   private carry = new Map<number, number>();
   private contact: Contact | null = null;
+  /** When the defense has read the screen (Infinity until then). */
+  private screenReadAt = Infinity;
 
   constructor(opts: SimOptions) {
     this.play = opts.play;
@@ -627,6 +632,7 @@ export class PlaySim {
       quality: sol.quality,
       speed: sol.speed,
       tipChecked: new Set(),
+      screen: this.play.screen && target?.slot === this.play.screen.target ? screenTiming(this.t, this.play.screen) : undefined,
     };
     this.passThrown = true;
     this.throwAt = this.t;
@@ -664,6 +670,17 @@ export class PlaySim {
         continue;
       }
       const qbRun = this.runRecognizedAt < Infinity && carrier === qb;
+      const scr = this.play.screen;
+      if (scr && !(carrier && carrier !== qb) && !qbRun) {
+        if ((scr.linemen as string[]).includes(a.slot) && this.t >= scr.release) {
+          desired.set(a.id, this.screenConvoy(a, scr.linemen.indexOf(a.slot as never)));
+          continue;
+        }
+        if (scr.stalk?.includes(a.slot as EligibleSlot)) {
+          desired.set(a.id, this.runBlock(a, this.get(scr.target)));
+          continue;
+        }
+      }
       if (a.position === 'OL') {
         desired.set(a.id, this.play.run || this.handedOff || (carrier && carrier !== qb) || qbRun ? this.runBlock(a) : this.passPro(a));
         continue;
@@ -767,9 +784,9 @@ export class PlaySim {
     return this.seek(b, spot, 1);
   }
 
-  private runBlock(b: Actor): Vec2 {
+  private runBlock(b: Actor, ref?: Actor): Vec2 {
     if (this.isEngaged(b)) return v2();
-    const carrier = this.carrier ?? this.get('RB');
+    const carrier = ref ?? this.carrier ?? this.get('RB');
     let best: Actor | null = null;
     let bestScore = Infinity;
     for (const d of this.actors) {
@@ -785,6 +802,39 @@ export class PlaySim {
     if (!best) return this.seek(b, add(b.pos, v2(0, 3)), 0.6);
     this.tryEngage(b, best);
     const spot = add(best.pos, scale(norm(sub(carrier.pos, best.pos)), 0.8));
+    return this.seek(b, spot, 1);
+  }
+
+  /**
+   * Screen linemen: let their man go at the release, then set up a convoy in
+   * front of the catch point and block whoever comes to it.
+   */
+  private screenConvoy(b: Actor, i: number): Vec2 {
+    const scr = this.play.screen!;
+    const eng = this.isEngaged(b);
+    if (eng && this.t < scr.release + 0.15) {
+      this.engagements = this.engagements.filter((e) => e !== eng);
+      this.shedFrom.set(eng.defender, { blocker: b.id, until: this.t + 3 });
+      if (this.screenReadAt === Infinity) {
+        this.screenReadAt = this.t + SCREEN.readDelay * (1 + 1.5 * (1 - this.diff.coverageRead));
+      }
+    }
+    const tgt = this.get(scr.target);
+    // Anchor on where the screen is going to be caught, not on the moving receiver.
+    const pts = tgt.route?.points ?? [];
+    const anchor = pts.length ? pts[pts.length - 1] : tgt.pos;
+    const spot = v2(anchor.x + scr.side * (1.5 + i * SCREEN.convoySpacing), Math.max(anchor.y, this.los - 1) + SCREEN.convoyDepth + i * 0.8);
+    // Block the first defender coming to the screen from downfield or outside.
+    let threat: Actor | null = null;
+    for (const d of this.actors) {
+      if (d.side !== 'def' || d.down || d.pos.y < this.los - 0.5 || this.engagersOf(d) > 0) continue;
+      if (dist(d.pos, b.pos) > 5) continue;
+      if (!threat || dist(d.pos, tgt.pos) < dist(threat.pos, tgt.pos)) threat = d;
+    }
+    if (threat && dist(b.pos, spot) < 4) {
+      this.tryEngage(b, threat);
+      return this.seek(b, add(threat.pos, scale(norm(sub(tgt.pos, threat.pos)), 0.8)), 1);
+    }
     return this.seek(b, spot, 1);
   }
 
@@ -864,6 +914,15 @@ export class PlaySim {
     return v2(qb.pos.x + side * POCKET.edgeArcWidth, qb.pos.y - POCKET.edgeArcDepth);
   }
 
+  /** Has this defender read the screen? Then he attacks the screen target. */
+  private screenRecognized(d: Actor, isDeep: boolean): boolean {
+    const scr = this.play.screen;
+    if (!scr || isDeep) return false;
+    const read = scr.release > 0 ? this.screenReadAt : SCREEN.readDelay * (1 + 1.5 * (1 - this.diff.coverageRead));
+    if (this.t < read + d.reaction) return false;
+    return dist(d.pos, this.get(scr.target).pos) < SCREEN.reactRadius;
+  }
+
   /** Rushers, plus man defenders whose receiver stayed in to block (green dog). */
   private isRushing(d: Actor): boolean {
     const a = d.assignment;
@@ -916,6 +975,8 @@ export class PlaySim {
         const timeLeft = flight.T - flight.t;
         const canReach = dist(d.pos, flight.landing) / d.maxSpeed < timeLeft + 0.6;
         goal = canReach ? flight.landing : add(flight.landing, scale(norm(sub(d.pos, flight.landing)), 2));
+      } else if (this.screenRecognized(d, isDeep)) {
+        goal = this.pursuit(d, this.get(this.play.screen!.target));
       } else if (this.play.playAction && this.t < this.diff.playActionBite && !isDeep && asg.kind !== 'rush' && d.position !== 'CB') {
         goal = v2(d.pos.x * 0.9 + this.ballX * 0.1, this.los + 1.5);
         urgency = 0.55;
@@ -1218,7 +1279,8 @@ export class PlaySim {
       .map((a) => ({ ...toCand(a), inPhase: !!target && inPhase(target, a, COVERAGE.inPhaseDist) }));
     const out = resolveCatch({
       landing: f.landing, quality: f.quality, speed: f.speed, offense, defense,
-      ballSkills: this.diff.ballSkills, inPhaseBreakup: COVERAGE.inPhaseBreakup, inPhaseInt: COVERAGE.inPhaseInt, rng: this.rng,
+      ballSkills: this.diff.ballSkills, inPhaseBreakup: COVERAGE.inPhaseBreakup, inPhaseInt: COVERAGE.inPhaseInt,
+      catchFactor: f.screen?.catchFactor, intBonus: f.screen?.intBonus, rng: this.rng,
     });
     const b = this.ball;
     switch (out.kind) {

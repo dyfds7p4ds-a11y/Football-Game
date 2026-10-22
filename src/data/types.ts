@@ -84,6 +84,21 @@ export interface RunDesign {
   style: 'handoff' | 'toss';
 }
 
+/** Screen design: who catches it, which blockers release, and the timing window. */
+export interface ScreenDesign {
+  target: EligibleSlot;
+  /** Side the screen goes to: +1 = right, -1 = left. */
+  side: 1 | -1;
+  /** Seconds after the snap when the screen linemen release to the outside. */
+  release: number;
+  /** Linemen that release and lead the screen. */
+  linemen: OLSlot[];
+  /** Receivers who stalk-block for it. */
+  stalk?: EligibleSlot[];
+  /** [open, close] seconds after the snap: the throw must be released in this window. */
+  window: [number, number];
+}
+
 export interface PlayData {
   id: string;
   name: string;
@@ -93,6 +108,7 @@ export interface PlayData {
   routes: Record<EligibleSlot, RouteAssignment>;
   run?: RunDesign;
   playAction?: boolean;
+  screen?: ScreenDesign;
   /** Hint shown on the play card. */
   primary?: EligibleSlot;
 }

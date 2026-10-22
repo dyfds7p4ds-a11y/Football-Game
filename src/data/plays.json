@@ -95,13 +95,15 @@
       "id": "bubble", "name": "Bubble Screen", "category": "screen", "formation": "trips", "primary": "WR3",
       "description": "Throw it right away to the slot; the outside WR and TE block.",
       "routes": { "WR1": { "route": "go" }, "WR2": { "route": "block" }, "WR3": { "route": "bubble" },
-                  "TE": { "route": "block" }, "RB": { "route": "check" } }
+                  "TE": { "route": "block" }, "RB": { "route": "check" } },
+      "screen": { "target": "WR3", "side": 1, "release": 0, "linemen": [], "stalk": ["WR2", "TE"], "window": [0.15, 0.85] }
     },
     {
       "id": "rb_screen", "name": "RB Screen", "category": "screen", "formation": "shotgun", "primary": "RB",
       "description": "Let the rush in, then dump it to the RB with blockers in front.",
       "routes": { "WR1": { "route": "go" }, "WR2": { "route": "go" }, "WR3": { "route": "curl", "depth": 8 },
-                  "TE": { "route": "hitch", "depth": 4 }, "RB": { "route": "screen", "delay": 1.0, "dir": -1 } }
+                  "TE": { "route": "hitch", "depth": 4 }, "RB": { "route": "screen", "delay": 1.0, "dir": -1 } },
+      "screen": { "target": "RB", "side": -1, "release": 0.9, "linemen": ["LT", "LG", "C"], "window": [1.4, 1.95] }
     },
     {
       "id": "pa_boot", "name": "PA Bootleg", "category": "playaction", "formation": "under_center", "primary": "TE",
