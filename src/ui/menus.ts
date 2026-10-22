@@ -81,7 +81,7 @@ export function settingsPanel(s: Settings, onChange: (s: Settings) => void, inGa
     row('Crowd effect', onOff('crowdEffect'), 'A loud home crowd adds a little pass rush and rattles the visitors (more false starts).'),
     row('Penalties', onOff('penalties')),
     row('Intro cutscenes', onOff('intro'), 'Tunnel, team intro and coin toss before the opening kickoff. Tap to skip.'),
-    row('Sound', onOff('sound'), 'Crowd noise follows the crowd meter.'),
+    row('Sound', segmented([{ value: 1, label: 'ON' }, { value: 0, label: 'MUTE' }], s.sound ? 1 : 0, (v) => set('sound', v === 1)), 'Stadium atmosphere: volume follows the crowd meter; cheers, boos, roars.'),
     row('Soft shadows', onOff('shadows'), 'Turn off for more speed on older iPads.'),
   );
 }

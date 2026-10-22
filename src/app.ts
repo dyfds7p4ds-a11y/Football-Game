@@ -15,7 +15,7 @@ import { InputManager, type InputFrame } from './input/input';
 import { SceneView } from './render/view';
 import { SLOT_COLORS } from './render/fieldMesh';
 import { Cutscene } from './render/cutscene';
-import { PlaySim, SIM_DT, type PlayEvent, type SimInput } from './play/sim';
+import { PlaySim, SIM_DT, type PlayEvent, type PlayResult, type SimInput } from './play/sim';
 import { ReturnSim } from './play/returnSim';
 import { chooseDefense, recordTendency } from './play/defenseCalls';
 import { PENALTIES, calloutText, type Flag } from './play/penalties';
@@ -23,9 +23,9 @@ import { ST, cpuRelease, judgeFieldGoal, kickFlight, kickZone, meterAngle, meter
 import { PLAY_CLOCK, callTimeoutClock, snapClock, tickClock } from './game/clock';
 import { afterPlay, checkQuarter, type Break } from './game/flow';
 import { attemptFieldGoal, delayOfGame, fieldGoalDistance, punt, type RulesResult } from './game/rules';
-import { enforcePenalties } from './game/penalties';
+import { enforcePenalties, type Enforcement } from './game/penalties';
 import { applyFieldGoal, applyReturn, kickoffOutOfBounds } from './game/specialTeams';
-import { crowdEdge, crowdIntensity, updateCrowd } from './game/crowd';
+import { crowdEdge, crowdIntensity, updateCrowd, type PlayForCrowd } from './game/crowd';
 import { newGame, other, type GameState, type TeamSide } from './game/state';
 import { simulateCpuDrive } from './game/cpuDrive';
 import { loadSettings, saveSettings, type Settings } from './game/settings';
@@ -36,6 +36,7 @@ import { IntroOverlay } from './ui/intro';
 import { Modal, boxScore, button, driveSummary, helpContent, scoreLine, settingsPanel, titleScreen } from './ui/menus';
 import { h } from './ui/dom';
 import { CrowdAudio } from './audio/crowdAudio';
+import { reactionTo, reactionToFlag } from './audio/crowdMix';
 
 type Phase = 'title' | 'intro' | 'playcall' | 'presnap' | 'live' | 'postplay' | 'kick' | 'kickFlight' | 'return' | 'returnPost' | 'break' | 'gameover';
 
@@ -345,16 +346,22 @@ export class App {
       if (res.turnover) s.turnovers++;
     }
     st.stats[side] = s;
-    st.crowd = updateCrowd(g.crowd, {
+    st.crowd = updateCrowd(g.crowd, this.playForCrowd(g, res, enf));
+    const ap = afterPlay(st, r.stop);
+    this.game = ap.state;
+    this.handleBreak(ap.brk);
+  }
+
+  /** A finished scrimmage play from the home crowd's view (crowd meter and crowd sound). */
+  private playForCrowd(g: GameState, res: PlayResult, enf: Enforcement): PlayForCrowd {
+    const r = enf.result;
+    return {
       homeOffense: g.possession === 'home', yards: enf.enforced ? 0 : res.yards, firstDown: r.headline === 'FIRST DOWN',
       score: r.scored ? { home: r.scored.side === 'home', points: r.scored.points } : null,
       turnover: res.turnover && !enf.enforced, sack: res.outcome === 'sack',
       penaltyOnHome: enf.enforced ? (enf.enforced.side === 'off') === (g.possession === 'home') : null,
       failedFourthDown: r.headline === 'TURNOVER ON DOWNS',
-    });
-    const ap = afterPlay(st, r.stop);
-    this.game = ap.state;
-    this.handleBreak(ap.brk);
+    };
   }
 
   private handleBreak(brk: Break) {
@@ -528,12 +535,13 @@ export class App {
       const judged = judgeFieldGoal(fl);
       const g = this.game!;
       const r = applyFieldGoal({ ...g, clock: tickClock(g.clock, 5).clock }, judged.good, k.fgDistance);
-      const crowd = updateCrowd(g.crowd, {
+      const pfc: PlayForCrowd = {
         homeOffense: g.possession === 'home', yards: 0, firstDown: false,
         score: r.scored ? { home: r.scored.side === 'home', points: 3 } : null, turnover: false, sack: false, penaltyOnHome: null,
         failedFourthDown: false,
-      });
-      if (judged.good) this.audio.roar(0.7);
+      };
+      const crowd = updateCrowd(g.crowd, pfc);
+      this.audio.react(judged.good ? reactionTo(pfc) : { kind: g.possession === 'home' ? 'silence' : 'cheer', intensity: 0.7 });
       const ap = afterPlay({ ...r.state, crowd }, r.stop);
       this.game = ap.state;
       this.setPhase('break');
@@ -573,7 +581,7 @@ export class App {
         this.setPhase('returnPost');
         const res = rs.result;
         const head = res.outcome === 'touchdown' ? 'TOUCHDOWN!' : res.outcome === 'touchback' ? 'TOUCHBACK' : res.outcome === 'downed' ? 'DOWNED' : res.outcome === 'outOfBoundsKick' ? 'OUT OF BOUNDS' : 'RETURN';
-        if (res.outcome === 'touchdown') this.audio.roar(1);
+        if (res.outcome === 'touchdown' && this.retInfo) this.audio.react(other(this.retInfo.kicking) === 'home' ? { kind: 'roar', intensity: 1 } : { kind: 'silence', intensity: 1 });
         this.flash(head, res.description, POSTPLAY_TIME + 1);
       }
       return;
@@ -779,9 +787,10 @@ export class App {
       const r = sim.result;
       const g = this.game!;
       const headline = { noPlay: 'NO PLAY', touchdown: 'TOUCHDOWN!', interception: 'INTERCEPTED!', sack: 'SACKED!', safety: 'SAFETY!', incomplete: 'INCOMPLETE', outOfBounds: 'OUT OF BOUNDS', tackle: r.yards >= g.toGo ? 'FIRST DOWN!' : 'DOWN' }[r.outcome];
-      if (r.outcome === 'touchdown') this.audio.roar(1);
-      else if (r.yards >= 20) this.audio.roar(0.6);
-      const sub = r.fouls.length ? `FLAG: ${enforcePenalties(g, r, r.fouls).text}` : `${r.description} · vs ${r.defenseCall}`;
+      const enf = enforcePenalties(g, r, r.fouls);
+      // Flags get their boos at the call-out; interceptions already got their reaction at the catch.
+      if (r.outcome !== 'interception') this.audio.react(reactionTo({ ...this.playForCrowd(g, r, enf), penaltyOnHome: null }));
+      const sub = r.fouls.length ? `FLAG: ${enf.text}` : `${r.description} · vs ${r.defenseCall}`;
       this.flash(headline, sub, POSTPLAY_TIME + 1);
     }
   }
@@ -791,7 +800,7 @@ export class App {
       if (e.type === 'deflection') this.flash('BROKEN UP', '', 1);
       if (e.type === 'drop') this.flash('DROPPED', '', 1);
       if (e.type === 'brokenTackle') this.flash('BROKEN TACKLE', '', 0.7);
-      if (e.type === 'interception') this.audio.roar(0.4);
+      if (e.type === 'interception' && this.game) this.audio.react(this.game.possession === 'home' ? { kind: 'silence', intensity: 1 } : { kind: 'roar', intensity: 0.8 });
       if (e.type === 'flag' && this.sim) {
         const fl = this.sim.flags[this.sim.flags.length - 1];
         this.callouts.push({ at: fl.t0 + fl.T + PENALTIES.flag.calloutDelay, flag: fl });
@@ -808,6 +817,7 @@ export class App {
       const off = getTeam(g.teams[g.possession]).name;
       const def = getTeam(g.teams[other(g.possession)]).name;
       const t = calloutText(c.flag.foul, off, def);
+      this.audio.react(reactionToFlag((c.flag.foul.side === 'off') === (g.possession === 'home')));
       this.hud.showCallout(t.title, t.sub);
     }
     this.callouts = this.callouts.filter((x) => sim.t < x.at);
