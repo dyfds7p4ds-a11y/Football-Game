@@ -28,7 +28,7 @@ export interface Settings {
 export const DEFAULT_SETTINGS: Settings = {
   difficulty: 'normal',
   quarterMinutes: 5,
-  cameraMode: 'firstPerson',
+  cameraMode: 'behindQB',
   retroPixels: false,
   showRoutes: true,
   lookSensitivity: 1,
@@ -43,11 +43,17 @@ export const DEFAULT_SETTINGS: Settings = {
 };
 
 const KEY = 'gridiron-qb.settings.v1';
+const SETTINGS_VERSION = 2;
 
 export function loadSettings(): Settings {
   try {
     const raw = localStorage.getItem(KEY);
-    if (raw) return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
+    if (raw) {
+      const saved = JSON.parse(raw);
+      // Phase 3a: the broadcast camera became the default; older saves get it once.
+      if (!saved.v || saved.v < SETTINGS_VERSION) saved.cameraMode = DEFAULT_SETTINGS.cameraMode;
+      return { ...DEFAULT_SETTINGS, ...saved };
+    }
   } catch {
     /* storage unavailable (private mode) */
   }
@@ -56,7 +62,7 @@ export function loadSettings(): Settings {
 
 export function saveSettings(s: Settings) {
   try {
-    localStorage.setItem(KEY, JSON.stringify(s));
+    localStorage.setItem(KEY, JSON.stringify({ ...s, v: SETTINGS_VERSION }));
   } catch {
     /* ignore */
   }

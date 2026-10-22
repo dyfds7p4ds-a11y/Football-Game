@@ -1,0 +1,22 @@
+{
+  "_doc": "Broadcast-style camera behind the offense (render/view.ts), in yards. The axis always points straight downfield: it never rotates with the QB or his gaze; scrambles only move it along the field. follow* are smoothing rates per second. fov: vertical field of view of the broadcast view (narrower than QB eyes).",
+  "pocket": {
+    "back": 15,
+    "height": 10.5,
+    "lookAhead": 10,
+    "lookHeight": 0,
+    "gazePan": 5
+  },
+  "carrier": {
+    "back": 12,
+    "height": 8.5,
+    "lookAhead": 8,
+    "lookHeight": 0.5
+  },
+  "followDepth": 5,
+  "followLateral": 2.5,
+  "lateralShare": 0.8,
+  "fov": 58,
+  "fovPortrait": 75,
+  "hideOfficialsWithin": 9
+}

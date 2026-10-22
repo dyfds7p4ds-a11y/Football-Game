@@ -17,6 +17,10 @@ import { FieldView, SLOT_COLORS } from './fieldMesh';
 import { PlayerMesh } from './playerMesh';
 import { PALETTE } from './palette';
 import { headingToRotY, setFrameFlip, toWorld } from './coords';
+import cameraJson from '../data/camera.json';
+
+type CamRig = { back: number; height: number; lookAhead: number; lookHeight: number };
+export const CAMERA = cameraJson as { pocket: CamRig & { gazePan: number }; carrier: CamRig; followDepth: number; followLateral: number; lateralShare: number; fov: number; fovPortrait: number; hideOfficialsWithin: number };
 
 export type CameraMode = 'firstPerson' | 'behindQB';
 
@@ -170,7 +174,18 @@ export class SceneView {
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
     // Keep a sensible horizontal FOV in portrait.
-    this.camera.fov = w / h < 1 ? 85 : 70;
+    this.applyFov(this.broadcastFov);
+  }
+
+  private broadcastFov = false;
+
+  /** QB eyes and cutscenes use the wide FOV, the broadcast view a narrower one. */
+  private applyFov(broadcast: boolean) {
+    this.broadcastFov = broadcast;
+    const portrait = this.camera.aspect < 1;
+    const fov = broadcast ? (portrait ? CAMERA.fovPortrait : CAMERA.fov) : portrait ? 85 : 70;
+    if (fov === this.camera.fov) return;
+    this.camera.fov = fov;
     this.camera.updateProjectionMatrix();
   }
 
@@ -240,6 +255,7 @@ export class SceneView {
     this.field.setTargetRing(null, 0);
     this.field.hideReceiverRings();
     this.field.setFlags([]);
+    this.applyFov(false);
     this.camera.position.copy(toWorld(ballX + Math.sin(this.time * 0.1) * 6, ballY - 14, 6));
     this.camera.lookAt(toWorld(ballX, ballY + 10, 0));
     this.followSun(ballX, ballY);
@@ -280,8 +296,11 @@ export class SceneView {
     sim.officials.forEach((o, i) => {
       const pm = this.officials[i];
       const p = lerp2(o.prevPos, o.pos, alpha);
-      pm.root.visible = true;
       pm.root.position.copy(toWorld(p.x, p.y));
+      // An official right under the broadcast camera would block the view of the QB.
+      const dx = pm.root.position.x - this.camera.position.x;
+      const dz = pm.root.position.z - this.camera.position.z;
+      pm.root.visible = !this.broadcastFov || dx * dx + dz * dz > CAMERA.hideOfficialsWithin ** 2;
       pm.root.rotation.y = headingToRotY(o.facing);
       pm.animate(dt, Math.hypot(o.vel.x, o.vel.y), false, false);
     });
@@ -317,7 +336,8 @@ export class SceneView {
     const qb = sim.get('QB');
     const carrier = sim.carrier;
     // First person while the play is "through the QB's eyes"; chase cam once someone else has the ball.
-    const firstPerson = inp.cameraMode === 'firstPerson' && !(carrier && carrier !== qb);
+    // A scramble switches QB eyes to the broadcast view so the field axis stays put.
+    const firstPerson = inp.cameraMode === 'firstPerson' && !(carrier && carrier !== qb) && !sim.scrambling;
     this.drawActors(sim.actors, alpha, dt, sim.t, inp.presnap, firstPerson ? qb.id : -1, inp.target);
     this.drawOfficials(sim, alpha, dt);
     this.drawFlags(sim);
@@ -400,6 +420,7 @@ export class SceneView {
     const k = Math.min(1, dt * 4);
     this.camPos.lerp(desiredPos, k);
     this.camLook.lerp(desiredLook, k);
+    this.applyFov(false);
     this.camera.position.copy(this.camPos);
     this.camera.lookAt(this.camLook);
     this.followSun(rp.x, rp.y + 6);
@@ -456,6 +477,7 @@ export class SceneView {
     }
     this.camPos.lerp(desiredPos, Math.min(1, dt * 4));
     this.camLook.lerp(desiredLook, Math.min(1, dt * 4));
+    this.applyFov(false);
     this.camera.position.copy(this.camPos);
     this.camera.lookAt(this.camLook);
     this.followSun(spot.x, spot.y + 10);
@@ -498,7 +520,8 @@ export class SceneView {
       this.camPos.copy(desiredPos);
       this.camLook.lerp(desiredLook, Math.min(1, dt * 14));
     } else {
-      const focus = carrier ?? (sim.ball.state === 'air' ? null : qb);
+      // Before the snap the center holds the ball; the broadcast view frames the QB.
+      const focus = carrier && carrier.slot !== 'C' ? carrier : inp.presnap || sim.ball.state !== 'air' || !sim.ball.flight ? qb : null;
       let fx: number;
       let fy: number;
       if (focus) {
@@ -509,21 +532,28 @@ export class SceneView {
         fx = sim.ball.pos.x;
         fy = sim.ball.pos.y;
       }
-      const behindQB = !carrier || carrier.id === qb.id;
-      const back = behindQB ? 6 : 8;
-      const height = behindQB ? 3.6 : 4.2;
-      const yawOffset = behindQB ? inp.gazeYaw * 0.5 : 0;
-      desiredPos = toWorld(fx - Math.sin(yawOffset) * back, fy - Math.cos(yawOffset) * back, height);
-      desiredLook = toWorld(fx + Math.sin(yawOffset) * 8, fy + Math.cos(yawOffset) * 8, 1.0);
+      // Broadcast view on a fixed field axis: never rotates with the QB, so a
+      // scramble only moves it along (depth) and a little across (lateral).
+      const c = focus === qb || !focus ? CAMERA.pocket : CAMERA.carrier;
+      const pan = c === CAMERA.pocket && !sim.scrambling && sim.ball.state !== 'air' ? Math.sin(inp.gazeYaw) * CAMERA.pocket.gazePan : 0;
+      const cx = sim.ballX + (fx - sim.ballX) * CAMERA.lateralShare;
+      desiredPos = toWorld(cx, fy - c.back, c.height);
+      desiredLook = toWorld(cx + pan, fy + c.lookAhead, c.lookHeight);
       if (!this.camInit) {
         this.camPos.copy(desiredPos);
         this.camLook.copy(desiredLook);
         this.camInit = true;
       }
-      const k = Math.min(1, dt * 5);
-      this.camPos.lerp(desiredPos, k);
-      this.camLook.lerp(desiredLook, k);
+      // Depth (world z) follows faster than the lateral position (world x).
+      const kd = Math.min(1, dt * CAMERA.followDepth);
+      const kl = Math.min(1, dt * CAMERA.followLateral);
+      for (const v of [[this.camPos, desiredPos], [this.camLook, desiredLook]] as const) {
+        v[0].x += (v[1].x - v[0].x) * kl;
+        v[0].y += (v[1].y - v[0].y) * kd;
+        v[0].z += (v[1].z - v[0].z) * kd;
+      }
     }
+    this.applyFov(!firstPerson);
     cam.position.copy(this.camPos);
     cam.lookAt(this.camLook);
   }
