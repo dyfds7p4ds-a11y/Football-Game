@@ -165,7 +165,10 @@ export class FieldView {
     if (key === this.lastTeams) return;
     this.lastTeams = key;
     this.paintField(own, opp);
-    if (this.stadium) this.group.remove(this.stadium.group);
+    if (this.stadium) {
+      this.group.remove(this.stadium.group);
+      this.stadium.dispose();
+    }
     this.stadium = new Stadium([own.colors.primary, own.colors.secondary], [opp.colors.primary]);
     this.group.add(this.stadium.group);
   }

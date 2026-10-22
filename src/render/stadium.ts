@@ -170,6 +170,15 @@ export class Stadium {
     }
   }
 
+  dispose() {
+    this.group.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh) return;
+      m.geometry.dispose();
+      for (const mat of Array.isArray(m.material) ? m.material : [m.material]) mat.dispose();
+    });
+  }
+
   /** 0..1 crowd energy (from the crowd meter) and time for the bounce. */
   update(time: number, energy: number) {
     this.uniforms.uTime.value = time;

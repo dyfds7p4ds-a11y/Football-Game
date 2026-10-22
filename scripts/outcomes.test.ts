@@ -1,3 +1,4 @@
+// Outcome table per concept and target: BALANCE=outcomes [D=easy|normal|hard] [C="play,throwAt,slot;..."] npx vitest run --silent=false
 import { it } from 'vitest';
 import { runPlay } from '../tests/simHarness';
 import { DEFENSE_CALLS } from '../src/play/defenseCalls';
@@ -6,7 +7,7 @@ it('outcomes', () => {
   for (const [play, at, target] of cases) {
     const tally: Record<string, number> = {}; let yards = 0; let n = 0;
     for (const d of DEFENSE_CALLS) for (let s = 0; s < 12; s++) {
-      const r = runPlay(play, d.id, s * 7 + 1, { throwAt: at, target: target as any, dropFor: 0.6 });
+      const r = runPlay(play, d.id, s * 7 + 1, { throwAt: at, target: target as any, dropFor: 0.6 }, (process.env.D ?? 'normal') as any);
       const o = r.result!.completion ? 'comp' : r.result!.outcome; tally[o] = (tally[o] ?? 0) + 1; yards += r.result!.yards; n++;
     }
     console.log(`${play}/${target}`.padEnd(18), (yards / n).toFixed(1).padStart(5), JSON.stringify(tally));

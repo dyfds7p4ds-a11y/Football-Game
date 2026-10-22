@@ -2,12 +2,15 @@
 
 A 3D American-football game for iPad, played through the quarterback's eyes.
 Three.js + TypeScript + Vite, installable as a PWA, touch-first with keyboard
-and gamepad as secondary inputs. Low-poly 3D with a retro palette and an
-optional chunky "retro pixels" mode.
+and gamepad as secondary inputs. Stylized-realistic 3D (stadium bowl, crowd,
+soft shadows) with an optional chunky "retro pixels" mode.
 
-This is **Phase 1**: a playable single game where you run the offense against
-a CPU defense. Career mode, trading, special teams and playing defense come in
-later phases (see [ARCHITECTURE.md](ARCHITECTURE.md) for the extension points).
+This is **Phase 2**: a playable single game where you run the offense against
+a CPU defense that reads your route concepts, with played special teams
+(kick meters and returns), officials and penalty flags, a crowd meter and
+intro cutscenes. Playing defense (cornerback view), career mode and trading
+come in Phase 3 (see [ARCHITECTURE.md](ARCHITECTURE.md) for the extension
+points).
 
 ## Run it
 
@@ -51,51 +54,93 @@ HTTPS, so the installed PWA also works offline.
 
 | Action | Touch (iPad) | Keyboard | Gamepad |
 | --- | --- | --- | --- |
-| Move QB / ball carrier | Left thumb anywhere on the left half (invisible joystick) | WASD / arrow keys | Left stick |
+| Move QB / ball carrier / returner | Left thumb anywhere on the left half (invisible joystick) | WASD / arrow keys | Left stick |
 | Look around | Drag on the right half | Q / E | Right stick |
-| Target and look at a receiver | Buttons **1 2 3 RB TE** | 1 2 3, 4/R, 5/T | X, Y, B, LB, RB |
-| Snap, then hold to charge and release to throw | Big button | Space / Enter | A or RT |
-| Juke (when carrying the ball) | Big button | Space | A or RT |
-| Hand off on any play | **RB** while the RB is next to you | 4 / R | LB |
+| Pick a receiver (pre-snap) | Tap **1 2 3 RB TE** | 1 2 3, 4/R, 5/T | X, Y, B, LB, RB |
+| Throw to a receiver | **Hold** his button to charge, **release** to throw | Hold / release the key | Hold / release the button |
+| Snap; throw to the last pick | Big button | Space / Enter | A or RT |
+| Juke (ball carrier) / dash (returner) | Big button | Space | A or RT |
+| Slide (scrambling QB) | **SLIDE** button | X / Shift | LT |
+| Kick (punt, field goal, kickoff) | Hold **KICK**, release in the green | Hold / release Space | Hold / release A |
+| Hand off on any play | Tap **RB** while the RB is next to you | 4 / R | LB |
+| Skip the intro | Tap anywhere | Any key | Any button |
 | Timeout / Pause | Top-left buttons | O / P or Esc | Back / Start |
 
-- **Throwing:** hold the throw button to charge and release while the meter
-  is in the green zone. The zone moves with the distance to the selected
+- **Receivers:** every receiver has a colored marker ring and his number
+  above his head; receivers outside your view show as arrows at the screen
+  edge. Selecting a receiver never turns the QB's head (Madden-style).
+- **Throwing:** hold the receiver's button to charge and release while the
+  meter is in the green zone. The zone moves with the distance to the
   receiver. Under-charged balls float short (and give defenders time),
   over-charged balls sail long, and holding past full charge hurts. The ball
   leads a moving receiver. Pressure and throwing on the move cost accuracy.
-  With no receiver selected, the ball goes where you are looking, so you can
-  throw it away.
-- **Pocket:** the meter on the left shows pressure. Rushers shed blocks more
-  often the longer you hold the ball, and blitzers can come in unblocked.
+  With no receiver selected, the ball goes where you are looking.
+- **Deep balls are a risk:** the defense reads vertical stems. Safeties
+  rotate over the top of the most dangerous route, underneath defenders
+  carry seams, corners run in phase, and a defender in phase has a better
+  shot at a breakup or interception.
+- **Pocket:** pressure comes up the middle, around the edges and from behind.
+  A red glow at the screen edge warns you about a free rusher closing in; the
+  meter on the left shows overall pressure. Blockers lose their man more
+  often the longer you hold the ball.
+- **Screens:** the screen linemen release after a short delay; throw in the
+  window after they release. Too early and the back isn't turned around yet,
+  too late and the defense has read it.
 - **Runs:** handoffs happen automatically on run plays. After that you steer
   the runner, and he follows the designed path if you let go. Hold the throw
   button before the handoff to keep the ball yourself.
-- **Scrambles:** once the QB crosses the line of scrimmage he can no longer
-  throw, and the defense switches to pursuit.
+- **Scrambles:** your view follows your running path. A scrambling QB goes
+  down easily, so let blockers open a lane; SLIDE ends the run safely. Once
+  past the line of scrimmage you can no longer throw.
+- **Tackles** depend on angle and speed: head-on hits stop runners cold,
+  arm tackles from behind can be dragged forward or shrugged off.
+- **Penalties:** an official throws a yellow flag at the spot of the foul; a
+  call-out names the penalty and yardage; the penalty is applied (or
+  declined) once the play is dead.
+- **Special teams:** punts, field goals and kickoffs use a hold-and-release
+  meter with a timing zone; punts also lock an angle needle on release.
+  Kicks into the end zone are touchbacks. On returns you steer the returner
+  and tap DASH for a short burst.
+- **Crowd:** the meter under the scoreboard rises after big plays, takeaways
+  and scores and drops after penalties, turnovers and failed fourth downs.
+  The stands and the crowd noise follow it.
 
 ### Settings
 
 CPU difficulty (Easy / Normal / Hard), quarter length, camera (QB eyes or
-behind the QB), route hints before the snap, retro pixels and look
-sensitivity. Settings are stored in `localStorage`. Difficulty changes CPU
-reaction time, coverage accuracy, pass-rush strength, tackling, ball skills,
-how long linebackers bite on play-action, how well the CPU reads your
-play-calling tendencies, and the width of the throw sweet spot.
+behind the QB), route hints before the snap, retro pixels, look sensitivity,
+**Quick sim special teams** (Phase 1 instant punts/field goals/kickoffs),
+**Crowd effect** (a loud home crowd adds a little pass rush and more visitor
+false starts), **Penalties**, **Intro cutscenes**, **Sound** and **Soft
+shadows**. Settings are stored in `localStorage`. Difficulty changes CPU
+reaction time, coverage accuracy and how fast and well the defense reads
+your route concepts, pass-rush and pocket pressure, tackling strength, ball
+skills, how long linebackers bite on play-action, how well the CPU reads
+your play-calling tendencies, the throw sweet spot and the special-teams
+timing zones.
 
 ## Project layout
 
 ```
 src/
   core/      seedable RNG, 2D vector math
-  data/      teams.json, plays.json, formations.json, difficulty.json + types
-  play/      play simulation: routes, throw math, catch resolution, CPU defense
-  game/      game state, rules (downs/scoring), clock, CPU drives, settings
+  data/      teams, plays, formations, difficulty + Phase 2 tunables
+             (coverage, pocket, tackling, screens, penalties, specialTeams,
+             crowd, balance) + types
+  play/      play simulation: routes, throw math, catch resolution, CPU
+             defense, coverage reads, throwing windows, tackles, screens,
+             penalties, officials, kicking, kick returns
+  game/      game state, rules, penalty enforcement, special teams, crowd
+             meter, clock, CPU drives, settings
   input/     input manager (touch/keyboard/gamepad), virtual joystick
-  render/    Three.js scene: field, stadium, players, ball, cameras
-  ui/        DOM overlays: HUD, touch controls, play-calling, menus
+  render/    Three.js scene: field, stadium bowl and crowd, players,
+             officials, flags, cameras, intro cutscenes
+  ui/        DOM overlays: HUD, touch controls, play-calling, menus, intro
+  audio/     synthesized crowd noise, whistle, kick
   app.ts     top-level state machine wiring it all together
-tests/       Vitest unit tests (throw timing, clock, rules, play sim, catches)
+tests/       Vitest unit tests (throw timing, clock, rules, play sim, catches,
+             coverage balance, pocket, tackles, screens, special teams,
+             penalties, crowd meter, difficulty)
 scripts/     data/icon generators and balance-probe tools
 ```
 
@@ -103,6 +148,10 @@ scripts/     data/icon generators and balance-probe tools
 `python3 scripts/gen-icons.py` regenerates the PWA icons (needs Pillow).
 `BALANCE=balance npx vitest run` prints average yards and outcomes per play
 against every coverage, which is useful when tuning the simulation.
+`BALANCE=outcomes npx vitest run --silent=false` prints completion,
+interception and sack rates per concept and target, and
+`BALANCE=openrates npx vitest run --silent=false` the open-receiver rates the
+vertical-concept balance tests check.
 `BALANCE=trace TRACE=slants,cover3,1.0,WR1,1 npx vitest run --silent=false`
 prints a timeline for a single play (play, defense, throw time, target, seed).
 
@@ -118,40 +167,57 @@ prints a timeline for a single play (play, defense, throw time, target, seed).
   clock stops on incompletions, out of bounds, scores, turnovers, timeouts
   and penalties, and keeps running after in-bounds tackles. A play that
   starts before 0:00 is always finished.
-- **No kickoffs or PATs.** Touchdowns count 7, and the receiving team starts
-  at its own 25. Punts and field goals are resolved from a formula on the
-  play-call screen.
+- **Kickoffs, punts and field goals are played** (Quick sim brings back the
+  Phase 1 instant results). PATs are still automatic: touchdowns count 7.
+  Kickoffs from the 35, touchbacks at the 25 (punts: 20).
 - **The CPU's possessions are simulated** drive by drive (see Known gaps).
 - **Default quarter length is 5 minutes.**
-- **The user team is always "home"** and receives the opening kick.
+- **The user team is always "home"** and receives the opening kick; the CPU
+  kicks off to start the game, the user kicks off to start the second half.
+- **Phase 2 balance defaults** (vertical-concept thresholds, penalty rules,
+  crowd edge limits, kick rules) are listed in ARCHITECTURE.md under
+  "Phase 2 defaults".
 - Team/player names and colors are **fictional placeholders**, loosely
   inspired by German football (GFL) markets.
 
-## Known gaps (Phase 1)
+## Known gaps (Phase 2)
 
-- **Defense is not playable yet.** The CPU's offensive drives are simulated
-  from team grades and shown as a play-by-play summary.
-- **No special teams.** There are no kickoffs, returns or onside kicks; PATs
-  are automatic; punts and field goals are instant formula results; there is
-  no fake punt or fake field goal.
-- **Interceptions end the play at the catch point.** There are no returns and
-  no fumbles.
-- **Simplified rules.** No penalties other than delay of game, no two-minute
-  warning, no overtime (ties stand), and no NCAA clock stop after first downs.
-  Spot and clock rules are approximations.
+- **Defense is not playable yet** (Phase 3: cornerback view). The CPU's
+  offensive drives are still simulated from team grades and shown as a
+  play-by-play summary; only their punts and kickoffs are played (you
+  return them).
+- **Special teams are simplified.** No kicker/punter ratings (the meter alone
+  decides), no onside kicks, fair catches, fake punts/field goals, blocked
+  kicks, muffed-punt recoveries by the kicking team or penalties on kicks.
+  PATs and two-point tries are automatic (TD = 7). The field-goal unit is
+  shown as kicker and holder only.
+- **Penalty enforcement is simplified:** previous spot for everything except
+  pass interference; no add-on yardage for personal fouls at the end of a
+  run, no 10-second runoff, no declined-penalty choice for the user (the
+  offended team automatically takes the better result).
+- **Simplified game rules** (unchanged from Phase 1): no two-minute warning,
+  no overtime (ties stand), no NCAA clock stop after first downs.
 - **No pre-snap adjustments.** No audibles, hot routes, motion or snap count,
   and offensive personnel never changes (always 11 personnel).
-- **Blocking and AI are heuristic.** Blocking is an engagement/shed model, not
-  physics. Defenders don't disguise coverages, and pursuit can occasionally
-  look robotic. Balance is tuned by script (`scripts/balance.test.ts`), not by
-  extensive play-testing.
-- **Limited presentation.** No audio, crowd noise or commentary. Animation is
-  procedural (no tackling or catching animations). There is no replay.
-- **Fatigue and injuries don't exist yet,** though the player ratings and
-  depth charts in `teams.json` are ready for them.
+- **Interceptions end the play at the catch point.** There are no INT or
+  fumble returns and no fumbles.
+- **Balance is tuned by script**, not by extensive play-testing. The vertical
+  concepts meet the open-rate thresholds at Normal, but Hard is very tight on
+  deep balls and some medium concepts (smash corner) carry a high
+  interception rate when the ball floats. Screens gain modest yardage.
+- **AI is heuristic.** Blocking is an engagement/shed model, not physics; the
+  defense reads stems rather than disguising coverages; pursuit and return
+  coverage can look robotic.
+- **Animations are procedural** (no motion capture): tackles, falls and the
+  slide are blended poses; there are no catch animations or celebrations.
+  Cutscenes use the in-game figures.
+- **Audio is synthesized** (noise, whistle, thump): no commentary, chants or
+  music.
+- **Fatigue, injuries and per-player stats don't exist yet,** though ratings
+  and depth charts are ready for them.
 - **Tested only on emulated devices.** Verified in headless Chromium with
-  iPad-sized touch emulation, not yet on a physical iPad. Watch performance
-  on older iPads, where the "retro pixels" setting lowers the render
-  resolution.
+  iPad-sized viewports (software rendering), not yet on a physical iPad.
+  The stadium has ~14k instanced spectators and real-time shadows; on older
+  iPads turn off "Soft shadows" or use "Retro pixels".
 - **Offline caching needs HTTPS.** The service worker only registers over
   HTTPS (GitHub Pages), not on a LAN HTTP dev server.
