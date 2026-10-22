@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { Rng } from '../src/core/rng';
 import { v2 } from '../src/core/vec';
 import { resolveCatch, type CatchCandidate } from '../src/play/catch';
-import { DEF_CONTROL, jumpHeight, jumpTiming, timingEffect, type JumpGrade } from '../src/play/interception';
+import { COVERAGE } from '../src/play/coverage';
+import {
+  DEF_CONTROL, combinedEffect, jumpHeight, jumpTiming, readGrade, timingEffect, type JumpGrade, type ReadGrade,
+} from '../src/play/interception';
 
 describe('interception timing window', () => {
   const arrive = 3.0;
@@ -60,5 +63,43 @@ describe('interception timing window', () => {
     expect(rates('none', 1.9, 2000).int + rates('none', 1.9, 2000).breakup).toBe(0);
     expect(rates('perfect', 1.9, 2000).breakup).toBeGreaterThan(0);
     expect(rates('mistimed', 1.9, 2000).int).toBe(0);
+  });
+});
+
+describe('reading the throw (Phase 3b)', () => {
+  it('grades the read by who gets to the catch point first', () => {
+    const r = DEF_CONTROL.read;
+    expect(readGrade(r.undercut + 0.1)).toBe('undercut');
+    expect(readGrade(r.even + 0.01)).toBe('even');
+    expect(readGrade(r.trail + 0.01)).toBe('trail');
+    expect(readGrade(r.trail - 0.5)).toBe('beaten');
+  });
+
+  const pickRate = (jump: JumpGrade, read: ReadGrade, n = 6000) => {
+    const rng = new Rng(7);
+    let ints = 0;
+    for (let i = 0; i < n; i++) {
+      const out = resolveCatch({
+        landing: v2(0, 30), quality: 0.9, speed: 20, ballSkills: 1, intBase: COVERAGE.intBase, rng,
+        offense: [{ id: 1, pos: v2(0.6, 30), catching: 80, coverage: 30 }],
+        defense: [{ id: 2, pos: v2(-0.6, 30), catching: 65, coverage: 80, timing: combinedEffect(jump, read) }],
+      });
+      if (out.kind === 'interception') ints++;
+    }
+    return ints / n;
+  };
+
+  it('the pick is reachable through timing: read + perfect jump beats either alone, and stays an event', () => {
+    const both = pickRate('perfect', 'undercut');
+    const jumpOnly = pickRate('perfect', 'trail');
+    const readOnly = pickRate('none', 'undercut');
+    const nothing = pickRate('none', 'trail');
+    expect(both).toBeGreaterThan(jumpOnly + 0.05);
+    expect(both).toBeGreaterThan(readOnly + 0.04);
+    expect(jumpOnly).toBeGreaterThan(nothing);
+    expect(both).toBeGreaterThan(0.2); // reachable
+    expect(both).toBeLessThan(0.5); // never routine, even on the spot
+    expect(nothing).toBeLessThan(0.1);
+    expect(pickRate('mistimed', 'undercut')).toBeLessThan(jumpOnly + 0.02);
   });
 });

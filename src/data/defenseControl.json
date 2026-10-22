@@ -1,5 +1,5 @@
 {
-  "_doc": "User-controlled defender (play/interception.ts, PlaySim). jump: the JUMP button lunges toward the ball (in the air) or the receiver; the jump peaks peakAt s after the press. window: |peak - ball arrival| in seconds for each timing grade. effects: added to the user defender's breakup / interception chance and reach (yd) in resolveCatch ('none' = no jump: he can still knock it away but rarely holds on). CPU defenders are unaffected. A pick needs perfect timing AND position: it is an event, not routine.",
+  "_doc": "User-controlled defender (play/interception.ts, PlaySim). jump: the JUMP button lunges toward the ball (in the air) or the receiver; the jump peaks peakAt s after the press. window: |peak - ball arrival| in seconds for each timing grade. effects: added to the user defender's breakup / interception chance and reach (yd) in resolveCatch ('none' = no jump: he can still knock it away but rarely holds on). CPU defenders are unaffected. A pick needs perfect timing AND position: it is an event, not routine. read (Phase 3b): did the user's defender read the throw and get to the catch point first? margin = receiver's distance to the catch point minus the defender's at the arrival (yd): >= undercut, >= even, >= trail, else beaten. Its effects add to the jump's: a pick is likely only with an undercut AND a timed jump.",
   "moveSpeed": 1.0,
   "jump": {
     "duration": 0.55,
@@ -16,7 +16,7 @@
   "effects": {
     "perfect": {
       "breakup": 0.3,
-      "int": 0.0,
+      "int": 0.08,
       "reach": 0.5
     },
     "good": {
@@ -31,7 +31,7 @@
     },
     "none": {
       "breakup": 0.0,
-      "int": -0.2,
+      "int": -0.3,
       "reach": 0.0
     }
   },
@@ -39,5 +39,32 @@
     "diveFactor": 1.1,
     "diveRange": 2.2
   },
-  "presnapAutoSnap": 4.0
+  "presnapAutoSnap": 4.0,
+  "read": {
+    "undercut": 0.0,
+    "even": -0.8,
+    "trail": -1.8,
+    "effects": {
+      "undercut": {
+        "breakup": 0.1,
+        "int": 0.12,
+        "reach": 0.2
+      },
+      "even": {
+        "breakup": 0.05,
+        "int": 0.05,
+        "reach": 0.1
+      },
+      "trail": {
+        "breakup": 0,
+        "int": 0,
+        "reach": 0
+      },
+      "beaten": {
+        "breakup": -0.05,
+        "int": -0.08,
+        "reach": 0
+      }
+    }
+  }
 }

@@ -31,6 +31,8 @@ export const CPU_OFFENSE = cpuJson as {
   chargeSigma: number;
   readNoise: number;
   primaryBias: number;
+  slotBias: Record<EligibleSlot, number>;
+  checkdownAfter: number;
   runner: { lookAhead: number; avoid: number };
   calls: Record<'short' | 'normal' | 'long', CallMix>;
   fourthDown: { goForItToGo: number; goForItFrom: number; fieldGoalFrom: number };
@@ -93,12 +95,16 @@ export class CpuQB {
     const qb = sim.get('QB');
     const defenders = sim.actors.filter((a) => a.side === 'def' && !a.down).map(toWA);
     let best: { slot: EligibleSlot; m: number } | null = null;
+    const pressuredNow = sim.pressure > CPU_OFFENSE.pressureBail;
     for (const slot of ELIGIBLE) {
       const r = sim.get(slot);
       if (r.down || r.route?.blocks) continue;
+      // Progression: the back is the check-down, read late (or when the pocket breaks down).
+      if (slot === 'RB' && slot !== this.play.primary && sim.t < CPU_OFFENSE.checkdownAfter && !pressuredNow) continue;
       const w = throwingWindow(qb.pos, toWA(r), defenders);
       // Weaker QBs misjudge windows (read noise shrinks with cpuOffense squared).
-      const m = w.margin + (slot === this.play.primary ? CPU_OFFENSE.primaryBias : 0) + this.rng.normal() * (CPU_OFFENSE.readNoise / (this.skill * this.skill));
+      const m = w.margin + (slot === this.play.primary ? CPU_OFFENSE.primaryBias : 0) + (CPU_OFFENSE.slotBias[slot] ?? 0) +
+        this.rng.normal() * (CPU_OFFENSE.readNoise / (this.skill * this.skill));
       if (!best || m > best.m) best = { slot, m };
     }
     if (!best) return;

@@ -17,9 +17,12 @@
   "rollMax": 6,
   "inPhaseDist": 1.8,
   "inPhaseBreakup": 0.15,
-  "inPhaseInt": 0.15,
+  "inPhaseInt": 0.04,
   "helpSwitchMargin": 0.3,
   "helpLean": 0.7,
   "phaseTrail": 0.5,
-  "manBallReadDelay": 0.35
+  "manBallReadDelay": 0.35,
+  "intBase": 0.1,
+  "noReceiverInt": 0.08,
+  "undercutInt": 0.15
 }

@@ -24,7 +24,7 @@ import { TACKLE, resolveTackle, type ContactKind } from './tackle';
 import { SCREEN, screenTiming, type ScreenTiming } from './screen';
 import { nearestOfficial, setupOfficials, updateOfficials, type Official } from './officials';
 import { PENALTIES, callFoul, makeFoul, rollFoul, type Flag, type Foul, type FoulType, type PenaltyBias } from './penalties';
-import { DEF_CONTROL, jumpTiming, timingEffect, type JumpGrade } from './interception';
+import { DEF_CONTROL, combinedEffect, jumpTiming, readGrade, type JumpGrade, type ReadGrade } from './interception';
 import {
   BLOCKING, assignProtection, blockQuality, holdTime, laneCandidates, pickLane, planRunBlocks, progressRate,
   type BlockAssignment, type BlockMode, type BlockRole, type LaneDefender, type Unit,
@@ -256,7 +256,8 @@ export class PlaySim {
   /** User-controlled defender (-1: the user plays offense). Every other defender stays CPU. */
   userDefId = -1;
   /** Timing grade of the user defender's jump on the last pass that arrived near him. */
-  lastTiming: { grade: JumpGrade; offset: number } | null = null;
+  lastTiming: { grade: JumpGrade; offset: number; read: ReadGrade; margin: number } | null = null;
+
 
   private rng: Rng;
   private steps = 0;
@@ -1620,7 +1621,7 @@ export class PlaySim {
         f.tipChecked.add(d.id);
         const p = clamp(0.3 * (d.player.ratings.coverage / 80) * this.diff.ballSkills * (b.h < 2.4 ? 1 : 0.5), 0.02, 0.6);
         if (this.rng.chance(p)) {
-          if (this.rng.chance(0.3 * this.diff.ballSkills)) {
+          if (this.rng.chance(COVERAGE.undercutInt * this.diff.ballSkills)) {
             this.finishInterception(d);
           } else {
             this.emit('deflection', d.id);
@@ -1653,7 +1654,7 @@ export class PlaySim {
     const out = resolveCatch({
       landing: f.landing, quality: f.quality, speed: f.speed, offense, defense,
       ballSkills: this.diff.ballSkills, inPhaseBreakup: COVERAGE.inPhaseBreakup, inPhaseInt: COVERAGE.inPhaseInt,
-      catchFactor: f.screen?.catchFactor, intBonus: f.screen?.intBonus, rng: this.rng,
+      catchFactor: f.screen?.catchFactor, intBonus: f.screen?.intBonus, intBase: COVERAGE.intBase, noReceiverInt: COVERAGE.noReceiverInt, rng: this.rng,
     });
     const b = this.ball;
     switch (out.kind) {
@@ -1690,9 +1691,12 @@ export class PlaySim {
   private userTiming(a: Actor, f: Flight) {
     if (a.id !== this.userDefId || dist(a.pos, f.landing) > 4) return undefined;
     const t = jumpTiming(Number.isFinite(a.jumpT) ? a.jumpT : null, this.t);
-    this.lastTiming = t;
+    const tgt = f.targetId !== null ? this.actors[f.targetId] : this.nearestEligible(f.landing);
+    const margin = dist(tgt.pos, f.landing) - dist(a.pos, f.landing);
+    const read = readGrade(margin);
+    this.lastTiming = { ...t, read, margin };
     this.emit('timing', a.id);
-    return timingEffect(t.grade);
+    return combinedEffect(t.grade, read);
   }
 
   private incomplete(at: Vec2) {

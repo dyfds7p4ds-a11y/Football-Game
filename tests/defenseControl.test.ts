@@ -12,7 +12,7 @@ const mk = (seed: number, play = 'four_verts', def = 'cover1') => new PlaySim({
 });
 
 /** QB throws to WR1 at 2.2 s with a perfect charge; the user CB1 shadows WR1 and jumps `jumpOffset` s from ideal (null: never). */
-function coverWr1(seed: number, jumpOffset: number | null, play = 'four_verts', throwAt = 2.2): { result: PlayResult; grade: string | null } {
+function coverWr1(seed: number, jumpOffset: number | null, play = 'four_verts', throwAt = 2.2, trail = false): { result: PlayResult; grade: string | null; read: string | null; margin: number } {
   const sim = mk(seed, play);
   const cb = sim.getDef('CB1');
   let chargeUntil = Infinity;
@@ -29,11 +29,12 @@ function coverWr1(seed: number, jumpOffset: number | null, play = 'four_verts', 
     const wr = sim.get('WR1');
     const f = sim.ball.state === 'air' && sim.ball.flight && !sim.ball.flight.lateral ? sim.ball.flight : null;
     if (f && jumpAt === Infinity && jumpOffset !== null) jumpAt = sim.t + (f.T - f.t) - DEF_CONTROL.jump.peakAt + jumpOffset;
-    const goal = f ? f.landing : add(wr.pos, scale(wr.vel, 0.6));
+    // Reading the throw: shadow ahead of the man and break to the catch point. `trail`: stay on his hip instead.
+    const goal = trail ? add(wr.pos, scale(norm(wr.vel), -0.8)) : f ? f.landing : add(wr.pos, scale(wr.vel, 0.6));
     inp.defense = { move: dist(goal, cb.pos) > 0.3 ? norm(sub(goal, cb.pos)) : v2(), jump: sim.t >= jumpAt && sim.t < jumpAt + 1 / 30 };
     sim.step(inp);
   }
-  return { result: sim.result!, grade: sim.lastTiming?.grade ?? null };
+  return { result: sim.result!, grade: sim.lastTiming?.grade ?? null, read: sim.lastTiming?.read ?? null, margin: sim.lastTiming?.margin ?? NaN };
 }
 
 describe('user-controlled cornerback', () => {
@@ -94,5 +95,20 @@ describe('user-controlled cornerback', () => {
     expect(timed.int).toBeGreaterThanOrEqual(none.int);
     expect(late.stop).toBeLessThan(timed.stop);
     expect(timed.int).toBeLessThan(0.45);
+  });
+
+  it('reading the throw plus a timed jump gets more picks than trailing the receiver', () => {
+    let read = 0, trail = 0;
+    let n = 0;
+    for (const [play, at] of [['smash', 2.0], ['levels', 2.0], ['curl_flat', 2.0], ['four_verts', 2.2]] as const) for (let s = 0; s < 20; s++) {
+      const a = coverWr1(s, 0, play, at, false);
+      const b = coverWr1(s, 0, play, at, true);
+      n++;
+      if (a.result.outcome === 'interception') read++;
+      if (b.result.outcome === 'interception') trail++;
+    }
+    if (process.env.JUMP_STATS) console.log('read', { read: read / n, trail: trail / n });
+    expect(read).toBeGreaterThan(trail * 1.5);
+    expect(read / n).toBeLessThan(0.5);
   });
 });

@@ -41,6 +41,10 @@ export interface CatchInput {
   catchFactor?: number;
   /** Extra interception chance (screens thrown late). */
   intBonus?: number;
+  /** Base pick share of a defender's hands-on plays (default 0.3, Phase 2). */
+  intBase?: number;
+  /** Extra pick share when no receiver is within reach (default 0.2, Phase 2). */
+  noReceiverInt?: number;
   rng: Rng;
 }
 
@@ -82,7 +86,7 @@ export function resolveCatch(inp: CatchInput): CatchOutcome {
     const tm = def.c.timing;
     const p = clamp((0.3 + 0.35 * (1 - def.d / CATCH.reach) + leverage + phase * (inp.inPhaseBreakup ?? 0)) * (def.c.coverage / 85) * inp.ballSkills + (tm?.breakup ?? 0), 0.03, 0.92);
     if (inp.rng.chance(p)) {
-      const pInt = clamp(0.3 * (def.c.catching / 70) * inp.ballSkills + (off && offIn ? 0 : 0.2) + phase * (inp.inPhaseInt ?? 0) + (inp.intBonus ?? 0) + (tm?.int ?? 0), tm ? 0.02 : 0.05, 0.75);
+      const pInt = clamp((inp.intBase ?? 0.3) * (def.c.catching / 70) * inp.ballSkills + (off && offIn ? 0 : inp.noReceiverInt ?? 0.2) + phase * (inp.inPhaseInt ?? 0) + (inp.intBonus ?? 0) + (tm?.int ?? 0), tm ? 0.02 : 0.05, 0.75);
       if (inp.rng.chance(pInt)) return { kind: 'interception', id: def.c.id, probability: p * pInt };
       return { kind: 'deflection', id: def.c.id, probability: p };
     }

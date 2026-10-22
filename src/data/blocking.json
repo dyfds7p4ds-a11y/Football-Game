@@ -21,7 +21,7 @@
     "scale": 18
   },
   "hold": {
-    "passBase": 4.4,
+    "passBase": 4.8,
     "runBase": 1.9,
     "chipBase": 0.55,
     "qualityExp": 0.8,
