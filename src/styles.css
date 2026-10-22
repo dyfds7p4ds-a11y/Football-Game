@@ -53,7 +53,11 @@ button:disabled { opacity: 0.45; }
 .slot { width: 68px; height: 68px; }
 .slot.selected { background: var(--accent); outline: 4px solid #fff; }
 .slot.blocking { opacity: 0.5; }
-.slot.defender { font-size: 15px; }
+/* Phase 3b: every defender selectable; grouped DL | LB | DB, top right under the score bug */
+#defstrip { position: fixed; top: calc(84px + var(--safe-t)); right: calc(8px + var(--safe-r)); z-index: 5; display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; max-width: calc(100vw - 16px); }
+#defstrip .defgroup { display: flex; gap: 4px; }
+#defstrip .defbtn { min-width: 46px; min-height: 44px; padding: 4px 6px; font-size: 11px; border-radius: 6px; }
+#defstrip .defbtn.selected { background: var(--accent); outline: 3px solid #fff; }
 #charge { position: absolute; right: 134px; bottom: 0; width: 22px; height: 140px; border: 3px solid var(--ink); background: #2a2f38; border-radius: 4px; overflow: hidden; pointer-events: none; }
 #charge .zone { position: absolute; left: 0; right: 0; background: rgba(82, 183, 136, 0.85); }
 #charge .fill { position: absolute; left: 0; right: 0; bottom: 0; background: var(--paper); opacity: 0.9; }

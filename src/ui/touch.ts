@@ -4,6 +4,7 @@
  * every control tracks its own pointerId.
  */
 import type { DefSlot, EligibleSlot } from '../data/types';
+import { DEF_UNITS } from '../play/defenseSelect';
 import type { InputManager } from '../input/input';
 import { VirtualJoystick } from '../input/joystick';
 import { h } from './dom';
@@ -23,6 +24,7 @@ export class TouchControls {
   readonly secondary: HTMLButtonElement;
   private slotBtns = new Map<EligibleSlot, HTMLButtonElement>();
   private defBtns = new Map<DefSlot, HTMLButtonElement>();
+  private defStrip: HTMLElement;
   private joy = new VirtualJoystick(60);
   private joyId: number | null = null;
   private lookId: number | null = null;
@@ -66,17 +68,23 @@ export class TouchControls {
       this.slotBtns.set(slot, btn);
       actions.append(btn);
     }
-    // Defense: switch the controlled cornerback (same arc as the receiver buttons).
-    for (const [slot, [r, b]] of [['CB1', SLOT_POS.WR1], ['CB2', SLOT_POS.WR2], ['NB', SLOT_POS.WR3]] as [DefSlot, [number, number]][]) {
-      const btn = h('button', { class: 'slot defender hidden', style: { right: `${r}px`, bottom: `${b}px` } }, slot);
-      btn.addEventListener('pointerdown', (e) => {
-        e.preventDefault();
-        input.pressDefender(slot);
-      });
-      this.defBtns.set(slot, btn);
-      actions.append(btn);
+    // Defense (Phase 3b): a strip with every defender, grouped DL | LB | DB; tap one to take him over.
+    const strip = h('div', { id: 'defstrip', class: 'hidden' });
+    for (const unit of Object.values(DEF_UNITS)) {
+      const group = h('div', { class: 'defgroup' });
+      for (const slot of unit) {
+        const btn = h('button', { class: 'defbtn' }, slot);
+        btn.addEventListener('pointerdown', (e) => {
+          e.preventDefault();
+          input.pressDefender(slot);
+        });
+        this.defBtns.set(slot, btn);
+        group.append(btn);
+      }
+      strip.append(group);
     }
-    this.root = h('div', { id: 'touch' }, joyzone, lookzone, this.base, this.knob, actions);
+    this.defStrip = strip;
+    this.root = h('div', { id: 'touch' }, joyzone, lookzone, this.base, this.knob, actions, strip);
 
     // Primary button: hold state.
     this.primary.addEventListener('pointerdown', (e) => {
@@ -165,12 +173,10 @@ export class TouchControls {
     }
   }
 
-  /** Cornerback switch buttons on defense (null hides them); `selected` is the one under control. */
+  /** Defender strip on defense (null hides it); `selected` is the one under control. */
   setDefenders(selected: DefSlot | null) {
-    for (const [slot, btn] of this.defBtns) {
-      btn.classList.toggle('hidden', !selected);
-      btn.classList.toggle('selected', slot === selected);
-    }
+    this.defStrip.classList.toggle('hidden', !selected);
+    for (const [slot, btn] of this.defBtns) btn.classList.toggle('selected', slot === selected);
   }
 
   /** Secondary action button (SLIDE / DASH); null hides it. */

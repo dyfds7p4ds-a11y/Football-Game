@@ -3,6 +3,8 @@ import { add, dist, norm, scale, sub, v2 } from '../src/core/vec';
 import { DIFFICULTY, getPlay, getTeam } from '../src/data';
 import { getDefenseCall } from '../src/play/defenseCalls';
 import { DEF_CONTROL } from '../src/play/interception';
+import { DEF_UNITS, switchTarget, unitOf } from '../src/play/defenseSelect';
+import { DEF_SLOTS } from '../src/data/types';
 import { PlaySim, idleInput, type PlayResult } from '../src/play/sim';
 import { THROW, throwWindow } from '../src/play/throw';
 
@@ -110,5 +112,73 @@ describe('user-controlled cornerback', () => {
     if (process.env.JUMP_STATS) console.log('read', { read: read / n, trail: trail / n });
     expect(read).toBeGreaterThan(trail * 1.5);
     expect(read / n).toBeLessThan(0.5);
+  });
+});
+
+describe('every defender is playable (Phase 3b)', () => {
+  it('SWITCH takes the defender nearest the ball live, the next slot before the snap', () => {
+    const cands = DEF_SLOTS.map((slot, i) => ({ slot, pos: v2(i * 3, 40), down: false }));
+    expect(switchTarget(cands, 'CB1', v2(0, 40), true)).toBe('DE1');
+    // Never the current one, never a player on the ground.
+    expect(switchTarget(cands, 'DE1', v2(0, 40), true)).toBe('DT1');
+    cands[1].down = true;
+    expect(switchTarget(cands, 'DE1', v2(0, 40), true)).toBe('DT2');
+    expect(switchTarget(cands, 'SS', v2(0, 40), false)).toBe('DE1');
+    expect(switchTarget(cands, 'DE1', v2(0, 40), false)).toBe('DT2');
+    expect(unitOf('DT2')).toBe('DL');
+    expect(unitOf('LB1')).toBe('LB');
+    expect(unitOf('FS')).toBe('DB');
+    expect(Object.values(DEF_UNITS).flat().sort()).toEqual([...DEF_SLOTS].sort());
+  });
+
+  it('the user can take over any defender; the CPU keeps all the others', () => {
+    for (const slot of DEF_SLOTS) {
+      const sim = mk(9);
+      sim.selectDefender(slot);
+      const d = sim.getDef(slot);
+      expect(sim.userDefId).toBe(d.id);
+      const others = sim.actors.filter((a) => a.side === 'def' && a.id !== d.id).map((a) => ({ a, p: { ...a.pos } }));
+      const start = { ...d.pos };
+      for (let i = 0; i < 40; i++) {
+        const inp = idleInput();
+        inp.defense = { move: v2(0, 1), jump: false };
+        sim.step(inp);
+      }
+      expect(d.pos.y - start.y).toBeGreaterThan(1); // he went where the stick said (away from the line)
+      expect(others.filter(({ a, p }) => dist(a.pos, p) > 0.5).length).toBeGreaterThan(5);
+    }
+  });
+
+  it('SWITCH in the sim moves control to the defender nearest the ball', () => {
+    const sim = mk(10);
+    for (let i = 0; i < 30; i++) sim.step(idleInput());
+    const slot = sim.switchDefender(true)!;
+    const ball = sim.ball.pos;
+    const near = sim.actors.filter((a) => a.side === 'def' && a.slot !== 'CB1')
+      .reduce((m, a) => (dist(a.pos, ball) < dist(m.pos, ball) ? a : m));
+    expect(slot).toBe(near.slot);
+    expect(sim.userDefender!.slot).toBe(slot);
+  });
+
+  it('a lineman under user control can rip off his block (JUMP while engaged)', () => {
+    const shed = (rip: boolean) => {
+      let total = 0;
+      for (let s = 0; s < 12; s++) {
+        const sim = mk(20 + s, 'four_verts', 'cover3');
+        sim.selectDefender('DT1');
+        let t = 8;
+        for (let i = 0; i < 60 * 6 && !sim.result; i++) {
+          const inp = idleInput();
+          if (sim.t < 0.6) inp.move = v2(0, -1);
+          const engaged = sim.blockStates().some((b) => b.defender === sim.userDefId);
+          inp.defense = { move: v2(0, -1), jump: rip && engaged };
+          sim.step(inp);
+          if (sim.drainEvents().some((e) => e.type === 'shed' && e.actor === sim.userDefId)) { t = sim.t; break; }
+        }
+        total += t;
+      }
+      return total / 12;
+    };
+    expect(shed(true)).toBeLessThan(shed(false) - 0.5);
   });
 });

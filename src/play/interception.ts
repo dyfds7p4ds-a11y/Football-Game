@@ -25,6 +25,7 @@ export const DEF_CONTROL = defenseJson as {
   window: { perfect: number; good: number; mistimed: number };
   effects: Record<JumpGrade, TimingEffect>;
   read: { undercut: number; even: number; trail: number; effects: Record<ReadGrade, TimingEffect> };
+  rip: { progress: number; cooldown: number };
   tackle: { diveFactor: number; diveRange: number };
   presnapAutoSnap: number;
 };

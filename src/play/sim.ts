@@ -30,6 +30,7 @@ import {
   type BlockAssignment, type BlockMode, type BlockRole, type LaneDefender, type Unit,
 } from './blocking';
 import { BLITZ, blitzDesign, blitzPath, classifyBlitz, recognizeChance, type BlitzFacts, type BlitzOutcome, type BlitzPath } from './blitz';
+import { switchTarget } from './defenseSelect';
 import pocketJson from '../data/pocket.json';
 
 export const POCKET = pocketJson.pocket;
@@ -149,7 +150,7 @@ export interface Ball {
 export type PlayEventType =
   | 'snap' | 'handoff' | 'pitch' | 'throw' | 'catch' | 'interception' | 'deflection' | 'drop'
   | 'incomplete' | 'tackle' | 'sack' | 'touchdown' | 'outOfBounds' | 'brokenTackle' | 'juke' | 'safety'
-  | 'scramble' | 'shed' | 'slide' | 'flag' | 'jump' | 'timing' | 'chip' | 'hurry' | 'pickup';
+  | 'scramble' | 'shed' | 'slide' | 'flag' | 'jump' | 'timing' | 'chip' | 'hurry' | 'pickup' | 'rip';
 
 export interface PlayEvent {
   t: number;
@@ -269,6 +270,7 @@ export class PlaySim {
   private chipDone = new Set<number>();
   private laneX: number | null = null;
   private blitzers = new Map<number, BlitzRun>();
+  private lastRip = -Infinity;
   private laneEvalAt = 0;
   private shedFrom = new Map<number, { blocker: number; until: number }>();
   private throwArmed = false;
@@ -695,6 +697,16 @@ export class PlaySim {
     if (!d.down) this.userDefId = d.id;
   }
 
+  /** SWITCH button: nearest the ball during the play, next in order before the snap. */
+  switchDefender(live: boolean): DefSlot | null {
+    const cur = this.userDefender;
+    if (!cur) return null;
+    const cands = this.actors.filter((a) => a.side === 'def').map((a) => ({ slot: a.slot as DefSlot, pos: a.pos, down: a.down }));
+    const slot = switchTarget(cands, cur.slot as DefSlot, this.ball.pos, live);
+    this.selectDefender(slot);
+    return this.userDefender!.slot as DefSlot;
+  }
+
   get userDefender(): Actor | null {
     return this.userDefId >= 0 ? this.actors[this.userDefId] : null;
   }
@@ -710,7 +722,17 @@ export class PlaySim {
     }
     const move = clampLen(inp?.move ?? v2(), 1);
     desired.set(d.id, scale(move, d.maxSpeed * DEF_CONTROL.moveSpeed));
-    if (!inp?.jump || this.t - d.jumpT < J.cooldown) return;
+    if (!inp?.jump) return;
+    const eng = this.engagements.find((e) => e.defender === d.id);
+    if (eng && !(this.ball.state === 'air' && this.ball.flight && !this.ball.flight.lateral)) {
+      // Engaged by a blocker: JUMP is a rip move that eats into the block's hold time.
+      if (this.t - this.lastRip < DEF_CONTROL.rip.cooldown) return;
+      this.lastRip = this.t;
+      eng.progress += DEF_CONTROL.rip.progress * (d.player.ratings.passRush / 75);
+      this.emit('rip', d.id);
+      return;
+    }
+    if (this.t - d.jumpT < J.cooldown) return;
     const f = this.ball.state === 'air' && this.ball.flight && !this.ball.flight.lateral ? this.ball.flight : null;
     const c = this.carrier;
     const asg = d.assignment;

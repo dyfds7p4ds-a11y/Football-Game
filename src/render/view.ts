@@ -6,7 +6,8 @@
  * play, a gradient sky, fog for depth, the stadium bowl from stadium.ts.
  */
 import * as THREE from 'three';
-import type { TeamData, EligibleSlot } from '../data/types';
+import type { DefSlot, TeamData, EligibleSlot } from '../data/types';
+import { unitOf, type DefUnit } from '../play/defenseSelect';
 import { ELIGIBLE } from '../data/types';
 import { lerp as lerp2 } from '../core/vec';
 import { PlaySim, type Actor } from '../play/sim';
@@ -22,7 +23,7 @@ import cameraJson from '../data/camera.json';
 
 type CamRig = { back: number; height: number; lookAhead: number; lookHeight: number };
 type DefRig = CamRig & { lookToBall: number; follow: number };
-export const CAMERA = cameraJson as { pocket: CamRig & { gazePan: number }; carrier: CamRig; followDepth: number; followLateral: number; lateralShare: number; fov: number; fovPortrait: number; hideOfficialsWithin: number; defense: DefRig };
+export const CAMERA = cameraJson as { pocket: CamRig & { gazePan: number }; carrier: CamRig; followDepth: number; followLateral: number; lateralShare: number; fov: number; fovPortrait: number; hideOfficialsWithin: number; defense: DefRig; defenseUnits: Record<DefUnit, Partial<DefRig>> };
 
 export type CameraMode = 'firstPerson' | 'behindQB';
 /** Defense (user controls a cornerback): camera behind the selected defender, looking at the offense. */
@@ -70,6 +71,8 @@ export class SceneView {
   private camPos = new THREE.Vector3();
   private camLook = new THREE.Vector3();
   private camInit = false;
+  /** Actor id of the defender currently carrying the user's label (-1: none). */
+  private labeledDef = -1;
   private routeGroup = new THREE.Group();
   private tmp = new THREE.Vector3();
   private tmp2 = new THREE.Vector3();
@@ -217,6 +220,7 @@ export class SceneView {
     });
     for (let i = sim.actors.length; i < this.players.length; i++) this.players[i].root.visible = false;
     for (const o of this.officials) o.root.visible = true;
+    this.labeledDef = -1;
     this.camInit = false;
   }
 
@@ -375,6 +379,13 @@ export class SceneView {
       const rp = lerp2(r.prevPos, r.pos, alpha);
       this.field.setReceiverRing(slot, showMarkers && slot !== inp.target ? toWorld(rp.x, rp.y) : null, !!r.route?.blocks);
     }
+    if (userDef && userDef.id !== this.labeledDef) {
+      // Phase 3b: any defender can be selected; he carries his slot label while he is the user's.
+      const prev = this.labeledDef >= 0 ? sim.actors[this.labeledDef] : null;
+      if (prev) this.players[prev.id]?.setLabel(USER_DEF_LABELS[prev.slot] ?? null);
+      this.players[userDef.id]?.setLabel(userDef.slot);
+      this.labeledDef = userDef.id;
+    }
     if (userDef && !userDef.down) {
       const dp = lerp2(userDef.prevPos, userDef.pos, alpha);
       this.field.setTargetRing(toWorld(dp.x, dp.y), this.time);
@@ -398,7 +409,7 @@ export class SceneView {
    * leans toward the ball, so switching cornerbacks or chasing never spins it.
    */
   private updateDefenseCamera(sim: PlaySim, d: Actor, alpha: number, dt: number) {
-    const C = CAMERA.defense;
+    const C = { ...CAMERA.defense, ...CAMERA.defenseUnits[unitOf(d.slot as DefSlot)] };
     const dp = lerp2(d.prevPos, d.pos, alpha);
     const b = sim.ball.pos;
     // Look point: ahead of him toward the offense, leaning a little toward the ball;

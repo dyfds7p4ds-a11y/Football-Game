@@ -1,5 +1,5 @@
 {
-  "_doc": "Broadcast-style camera behind the offense (render/view.ts), in yards. The axis always points straight downfield: it never rotates with the QB or his gaze; scrambles only move it along the field. follow* are smoothing rates per second. fov: vertical field of view of the broadcast view (narrower than QB eyes). defense: behind the user's cornerback (back = yards behind him), looking lookAhead yards past him toward the offense, leaning lookToBall of the way toward the ball; he stays centered.",
+  "_doc": "Broadcast-style camera behind the offense (render/view.ts), in yards. The axis always points straight downfield: it never rotates with the QB or his gaze; scrambles only move it along the field. follow* are smoothing rates per second. fov: vertical field of view of the broadcast view (narrower than QB eyes). defense: behind the user's cornerback (back = yards behind him), looking lookAhead yards past him toward the offense, leaning lookToBall of the way toward the ball; he stays centered. defenseUnits (Phase 3b): overrides of `defense` for the selected defender's unit (linemen sit higher to see over the line).",
   "pocket": {
     "back": 15,
     "height": 10.5,
@@ -26,5 +26,20 @@
     "lookHeight": 0.5,
     "lookToBall": 0.25,
     "follow": 4
+  },
+  "defenseUnits": {
+    "DL": {
+      "back": 7,
+      "height": 6.5,
+      "lookAhead": 6,
+      "lookToBall": 0.15
+    },
+    "LB": {
+      "back": 8,
+      "height": 6,
+      "lookAhead": 7,
+      "lookToBall": 0.2
+    },
+    "DB": {}
   }
 }

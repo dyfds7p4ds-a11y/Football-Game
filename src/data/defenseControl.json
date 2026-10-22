@@ -1,5 +1,5 @@
 {
-  "_doc": "User-controlled defender (play/interception.ts, PlaySim). jump: the JUMP button lunges toward the ball (in the air) or the receiver; the jump peaks peakAt s after the press. window: |peak - ball arrival| in seconds for each timing grade. effects: added to the user defender's breakup / interception chance and reach (yd) in resolveCatch ('none' = no jump: he can still knock it away but rarely holds on). CPU defenders are unaffected. A pick needs perfect timing AND position: it is an event, not routine. read (Phase 3b): did the user's defender read the throw and get to the catch point first? margin = receiver's distance to the catch point minus the defender's at the arrival (yd): >= undercut, >= even, >= trail, else beaten. Its effects add to the jump's: a pick is likely only with an undercut AND a timed jump.",
+  "_doc": "User-controlled defender (play/interception.ts, PlaySim). jump: the JUMP button lunges toward the ball (in the air) or the receiver; the jump peaks peakAt s after the press. window: |peak - ball arrival| in seconds for each timing grade. effects: added to the user defender's breakup / interception chance and reach (yd) in resolveCatch ('none' = no jump: he can still knock it away but rarely holds on). CPU defenders are unaffected. A pick needs perfect timing AND position: it is an event, not routine. read (Phase 3b): did the user's defender read the throw and get to the catch point first? margin = receiver's distance to the catch point minus the defender's at the arrival (yd): >= undercut, >= even, >= trail, else beaten. Its effects add to the jump's: a pick is likely only with an undercut AND a timed jump. rip (Phase 3b): JUMP while the user's defender is engaged by a blocker is a rip move: it uses up `progress` s of the block's hold time (scaled by passRush / 75), once per `cooldown` s.",
   "moveSpeed": 1.0,
   "jump": {
     "duration": 0.55,
@@ -66,5 +66,9 @@
         "reach": 0
       }
     }
+  },
+  "rip": {
+    "progress": 0.9,
+    "cooldown": 1.2
   }
 }

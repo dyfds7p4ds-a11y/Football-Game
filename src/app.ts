@@ -344,11 +344,20 @@ export class App {
     this.setPhase('presnap');
   }
 
-  /** CB buttons (touch) or 1 / 2 / 3 (keyboard, gamepad) switch the controlled cornerback. */
-  private switchDefender(f: InputFrame) {
+  /**
+   * Phase 3b: any defender. The defender strip (touch) picks a slot directly; SWITCH (secondary
+   * button, X / Shift, pad 6 / 10) takes the defender nearest the ball (next in order before the
+   * snap); 1 / 2 / 3 still jump to CB1 / CB2 / NB.
+   */
+  private switchDefender(f: InputFrame, live: boolean) {
     const keyMap: Partial<Record<EligibleSlot, DefSlot>> = { WR1: 'CB1', WR2: 'CB2', WR3: 'NB' };
-    const slot = f.defenderPressed ?? (f.slotPressed ? keyMap[f.slotPressed] ?? null : null);
     const sim = this.sim!;
+    if (f.secondaryPressed) {
+      const s = sim.switchDefender(live);
+      if (s) this.defSlot = s;
+      return;
+    }
+    const slot = f.defenderPressed ?? (f.slotPressed ? keyMap[f.slotPressed] ?? null : null);
     if (!slot) return;
     sim.selectDefender(slot);
     if (sim.userDefender?.slot === slot) this.defSlot = slot;
@@ -356,15 +365,15 @@ export class App {
 
   private presnapDefense(f: InputFrame, dt: number) {
     this.presnapTimer += dt;
-    this.switchDefender(f);
+    this.switchDefender(f, false);
     const left = Math.max(0, DEF_CONTROL.presnapAutoSnap - this.presnapTimer);
     this.touch.setPrimary(`READY ${Math.ceil(left)}`, 'snap');
-    this.touch.setSecondary(null);
+    this.touch.setSecondary('SWITCH');
     this.touch.setSlots(null, new Set(), false);
     this.touch.setDefenders(this.defSlot);
     this.touch.setCharge(false, 0, null);
     this.hud.setEdgeMarkers(null);
-    this.hud.setHint(this.playsRun < 6 ? `You are ${this.defSlot}. Left thumb moves him · JUMP plays the ball (time it!) or dives at the runner · CB buttons switch` : null);
+    this.hud.setHint(this.playsRun < 6 ? `You are ${this.defSlot}. Left thumb moves him · JUMP plays the ball (time it!), dives at the runner or rips a block · SWITCH or the top buttons change player` : null);
     if (f.primaryPressed || left <= 0) {
       const g = this.game!;
       this.game = { ...g, clock: snapClock(g.clock) };
@@ -377,7 +386,7 @@ export class App {
 
   private liveDefense(f: InputFrame, dt: number) {
     const sim = this.sim!;
-    this.switchDefender(f);
+    this.switchDefender(f, true);
     // The camera looks back at the offense: stick up = toward the line of scrimmage.
     const def = { move: { x: -f.move.x, y: -f.move.y }, jump: f.primaryPressed };
     this.acc += dt;
@@ -396,8 +405,9 @@ export class App {
     this.checkCallouts();
     const c = sim.carrier;
     const runner = !!c && c.side === 'off' && (c.slot !== 'QB' || sim.pastLos(c));
-    this.touch.setPrimary(runner ? 'DIVE' : 'JUMP', 'throw');
-    this.touch.setSecondary(null);
+    const blocked = sim.blockStates().some((b) => b.defender === sim.userDefId);
+    this.touch.setPrimary(runner ? 'DIVE' : blocked && sim.ball.state !== 'air' ? 'RIP' : 'JUMP', 'throw');
+    this.touch.setSecondary('SWITCH');
     this.touch.setSlots(null, new Set(), false);
     this.touch.setDefenders(this.defSlot);
     this.touch.setCharge(false, 0, null);
