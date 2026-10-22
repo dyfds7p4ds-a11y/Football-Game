@@ -1,0 +1,20 @@
+{
+  "_doc": "CPU quarterback and play-caller for interactive CPU drives (play/qbAI.ts). Times in seconds. Difficulty cpuOffense scales read speed and accuracy: readStart / cpuOffense, chargeSigma / cpuOffense, openMargin - (cpuOffense - 1) * 0.15.",
+  "drop": { "underCenter": 0.8, "shotgun": 0.35 },
+  "readStart": 1.1,
+  "readEvery": 0.25,
+  "openMargin": 0.2,
+  "pressureBail": 0.7,
+  "pressureMinTime": 1.6,
+  "maxHold": 3.0,
+  "throwAwayMargin": -0.3,
+  "chargeSigma": 0.05,
+  "primaryBias": 0.1,
+  "runner": { "lookAhead": 5, "avoid": 0.7 },
+  "calls": {
+    "short": { "run": 0.6, "short": 0.25, "medium": 0.1, "deep": 0.05 },
+    "normal": { "run": 0.45, "short": 0.25, "medium": 0.2, "deep": 0.1 },
+    "long": { "run": 0.25, "short": 0.25, "medium": 0.3, "deep": 0.2 }
+  },
+  "fourthDown": { "goForItToGo": 1, "goForItFrom": 45, "fieldGoalFrom": 62 }
+}

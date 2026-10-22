@@ -757,7 +757,7 @@ export class PlaySim {
       accuracy: qb.player.ratings.throwAccuracy,
       power: qb.player.ratings.throwPower,
       qbSpeed: len(qb.vel),
-      windowScale: this.diff.throwWindow,
+      windowScale: this.userDefId >= 0 ? 1 : this.diff.throwWindow, // the throw-window difficulty is the user QB's; a CPU QB uses data/cpuOffense.json
       rng: this.rng,
     });
     this.ball.state = 'air';
