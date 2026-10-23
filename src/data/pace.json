@@ -17,7 +17,7 @@
     "kick": 12,
     "score": 4,
     "break": 5,
-    "cpuPresnap": 2.5
+    "cpuPresnap": 2.0
   },
   "targetQuarterMinutes": 5,
   "targetRealMinutes": 15,

@@ -66,3 +66,46 @@ describe('CPU quarterback', () => {
     expect(fourthDownCall({ down: 4, toGo: 9, yardline: 40 }, true)).toBe('go');
   });
 });
+
+describe('Phase 3c: CPU calls on 3rd and 4th down', () => {
+  it('on 3rd or 4th and 8+ the CPU never calls a designed run', () => {
+    const rng = new Rng(11);
+    for (const down of [3, 4]) for (const toGo of [8, 9, 12, 15, 25]) for (const yardline of [10, 40, 70, 85]) {
+      for (let i = 0; i < 150; i++) {
+        const p = chooseCpuPlay({ down, toGo, yardline }, rng);
+        expect(p.run, `${down} & ${toGo} at ${yardline}: ${p.id}`).toBeUndefined();
+        expect(p.category).not.toBe('run');
+      }
+    }
+  });
+
+  it('long distance favours passes, short distance keeps a run share', () => {
+    const runShare = (down: number, toGo: number) => {
+      const rng = new Rng(down * 100 + toGo);
+      let n = 0;
+      for (let i = 0; i < 600; i++) if (chooseCpuPlay({ down, toGo, yardline: 45 }, rng).run) n++;
+      return n / 600;
+    };
+    expect(runShare(3, 1)).toBeGreaterThan(0.35);
+    expect(runShare(3, 5)).toBeLessThan(runShare(3, 1));
+    expect(runShare(1, 10)).toBeGreaterThan(runShare(3, 10) + 0.2);
+    expect(runShare(2, 12)).toBeGreaterThan(0); // early downs can still run against long yardage
+  });
+
+  it('simulated CPU drives follow the same rule', async () => {
+    const { simulateCpuDrive } = await import('../src/game/cpuDrive');
+    const { newGame } = await import('../src/game/state');
+    let late = 0;
+    for (let i = 0; i < 60; i++) {
+      const g = newGame({ home: 'rheinstadt', away: 'elbtal', userSide: 'home', difficulty: 'normal', quarterLength: 900, seed: i });
+      const start = { ...g, possession: 'away' as const, ballY: 30, down: 3, toGo: 11 };
+      const r = simulateCpuDrive(start, DIFFICULTY.normal, new Rng(i));
+      const first = r.entries[0];
+      if (first.situation.startsWith('3rd')) {
+        late++;
+        expect(first.text).not.toMatch(/^Run for/);
+      }
+    }
+    expect(late).toBeGreaterThan(40);
+  });
+});

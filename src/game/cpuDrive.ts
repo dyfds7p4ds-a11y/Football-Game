@@ -17,6 +17,7 @@ import { penaltyState } from './penalties';
 import { PENALTIES, makeFoul } from '../play/penalties';
 import { chooseConversion, quickConversion } from './conversion';
 import { callTimeout, cpuWantsTimeout } from './timeouts';
+import { callMix } from '../play/qbAI';
 
 export interface DriveEntry {
   clock: string;
@@ -112,7 +113,8 @@ export function simulateCpuDrive(start: GameState, diff: DifficultyConfig, rng: 
         text = r.headline;
       }
     } else {
-      const passP = clamp(0.5 + (s.toGo > 7 ? 0.25 : 0) - (s.toGo <= 2 ? 0.25 : 0), 0.15, 0.9);
+      // Phase 3c: the same down-and-distance mix as played CPU snaps (no designed runs on 3rd / 4th and long).
+      const passP = 1 - callMix({ down: s.down, toGo: s.toGo, yardline: s.ballY }).run;
       let outcome: 'tackle' | 'incomplete' | 'interception' | 'touchdown' | 'sack' | 'outOfBounds';
       if (rng.chance(passP)) {
         const roll = rng.next();

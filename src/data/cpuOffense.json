@@ -55,5 +55,28 @@
     "_doc": "Phase 3c: once the QB has noticed a surprise rush (sim.qbAlert, blitz.json surprise), he reads at once (no readStart): the hot receiver (sim.hot, the most open one) gets the ball if his window beats margin (s, with read noise); under pressure above bail he throws it away instead of taking the sack.",
     "margin": 0.0,
     "bail": 0.55
+  },
+  "callsLate": {
+    "_doc": "Phase 3c: 3rd and 4th down mixes (calls is 1st / 2nd down). Distance buckets: short = toGo <= shortTo, long = toGo >= longFrom, else normal. On 3rd / 4th and long the CPU never calls a designed run (run share 0); a scramble on a pass play is still possible.",
+    "shortTo": 2,
+    "longFrom": 8,
+    "short": {
+      "run": 0.55,
+      "short": 0.3,
+      "medium": 0.15,
+      "deep": 0.0
+    },
+    "normal": {
+      "run": 0.15,
+      "short": 0.45,
+      "medium": 0.3,
+      "deep": 0.1
+    },
+    "long": {
+      "run": 0.0,
+      "short": 0.3,
+      "medium": 0.45,
+      "deep": 0.25
+    }
   }
 }
