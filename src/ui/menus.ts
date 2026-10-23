@@ -135,7 +135,7 @@ export function helpContent(): HTMLElement {
     h('h2', {}, 'HOW TO PLAY'),
     h('ul', {},
       h('li', {}, 'Pick a play. The defense picks a coverage you will have to read.'),
-      h('li', {}, 'Press SNAP. Put your LEFT thumb anywhere on the left half: an invisible joystick appears. Pull down to drop back, push to scramble.'),
+      h('li', {}, 'Press SNAP. Use the joystick at the bottom left (no need to aim: anywhere on or near it works). Pull down to drop back, push to scramble.'),
       h('li', {}, 'Every receiver has a colored marker ring and a number above him; receivers outside your view show as arrows at the screen edge. You do not have to look at a receiver to throw to him.'),
       h('li', {}, 'HOLD a receiver button (1, 2, 3, RB, TE) to charge the throw to him, RELEASE inside the green zone of the meter. Under-charged balls float short, over-charged balls sail. THROW throws to the last receiver you picked.'),
       h('li', {}, 'Deep balls are a risk: safeties rotate over the top and corners run in phase with your receivers. Read the coverage before you let it fly.'),

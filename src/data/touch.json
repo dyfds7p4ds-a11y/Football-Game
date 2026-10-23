@@ -1,0 +1,16 @@
+{
+  "joystick": {
+    "radius": 92,
+    "knobRadius": 38,
+    "left": 36,
+    "bottom": 36,
+    "hitPadding": 44,
+    "deadzone": 0.12
+  },
+  "actions": {
+    "right": 18,
+    "bottom": 18,
+    "size": 300
+  },
+  "minClearance": 24
+}
