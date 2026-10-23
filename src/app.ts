@@ -22,7 +22,7 @@ import { AudibleMenu } from './ui/audible';
 import { chooseDefense, emptyTendencies, recordTendency, type DefenseCall } from './play/defenseCalls';
 import { PENALTIES, calloutText, type Flag } from './play/penalties';
 import { ST, aimNeedle, aimToAngle, aimZone, cpuRelease, judgeFieldGoal, kickFlight, kickZone, meterPower, releaseKickAimed, type KickFlight, type KickKind } from './play/kicking';
-import { PLAY_CLOCK, snapClock, tickClock } from './game/clock';
+import { PACE, PLAY_CLOCK, pacedSnap, snapClock, tickClock } from './game/clock';
 import { afterPlay, checkQuarter, type Break } from './game/flow';
 import { attemptFieldGoal, delayOfGame, fieldGoalDistance, finishTry, punt, type RulesResult } from './game/rules';
 import { chooseConversion, conversionOptions, patDistance, quickConversion, startTwoPointTry, type TryKind } from './game/conversion';
@@ -48,7 +48,8 @@ import { reactionTo, reactionToFlag } from './audio/crowdMix';
 type Phase = 'title' | 'intro' | 'playcall' | 'presnap' | 'live' | 'postplay' | 'kick' | 'kickFlight' | 'return' | 'returnPost' | 'break' | 'gameover';
 
 /** Seconds the result stays up after the whistle (tap NEXT to skip). */
-const POSTPLAY_TIME = 1.7;
+/** Pause after the whistle (Phase 3c: data/pace.json real.post, part of the game-length budget). */
+const POSTPLAY_TIME = PACE.real.post;
 const LABELS: Record<EligibleSlot, string> = { WR1: '1', WR2: '2', WR3: '3', RB: 'RB', TE: 'TE' };
 const hex = (n: number) => `#${n.toString(16).padStart(6, '0')}`;
 
@@ -459,7 +460,8 @@ export class App {
     this.hud.setHint(this.playsRun < 6 ? `You are ${this.defSlot}. Left thumb moves him · JUMP plays the ball (time it!), dives at the runner or rips a block · SWITCH or the top buttons change player` : null);
     if (f.primaryPressed || left <= 0) {
       const g = this.game!;
-      this.game = { ...g, clock: g.conversionTry ? { ...snapClock(g.clock), running: false } : snapClock(g.clock) };
+      // Phase 3c: the CPU offense snaps on the pace (data/pace.json), not on the 4 s auto-snap.
+      this.game = { ...g, clock: g.conversionTry ? { ...snapClock(g.clock), running: false } : pacedSnap(g.clock) };
       this.waiveDelayOfGame = false;
       this.acc = 0;
       this.playsRun++;
@@ -551,7 +553,8 @@ export class App {
   private snap() {
     const g = this.game!;
     // Tries are untimed: the game clock does not run on them.
-    const clock = g.conversionTry ? { ...snapClock(g.clock), running: false } : snapClock(g.clock);
+    // Phase 3c snap timing: a running clock runs off down to the pace's snap point.
+    const clock = g.conversionTry ? { ...snapClock(g.clock), running: false } : pacedSnap(g.clock);
     this.game = { ...g, clock, tendencies: recordTendency(g.tendencies, this.play!.category) };
     this.view.showRoutes(null);
     this.audMenu.hide();
@@ -971,6 +974,7 @@ export class App {
     const g = this.game!;
     const t = tickClock(g.clock, dt);
     this.game = { ...g, clock: t.clock };
+    if (t.clock.warned && !g.clock.warned) this.flash('TWO-MINUTE WARNING', '', 1.6);
     if (t.quarterExpired) {
       const q = checkQuarter(this.game);
       this.game = q.state;

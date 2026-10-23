@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  PLAY_CLOCK, callTimeoutClock, createClock, endPlayClock, formatClock, nextQuarter, snapClock, tickClock,
+  PACE, PLAY_CLOCK, callTimeoutClock, pacedSnap, paceRunoff, stopsClock, warningAt, createClock, endPlayClock, formatClock, nextQuarter, snapClock, tickClock,
 } from '../src/game/clock';
 import { afterPlay, checkQuarter } from '../src/game/flow';
 import { newGame } from '../src/game/state';
@@ -22,10 +22,10 @@ describe('clock', () => {
     expect(t.clock.playClock).toBe(PLAY_CLOCK);
   });
 
-  it('stops after incompletions and out of bounds, keeps running after in-bounds tackles', () => {
+  it('stops after incompletions, keeps running after in-bounds tackles (out of bounds early in a half: NFL restart)', () => {
     const live = snapClock(createClock(300));
     expect(endPlayClock(live, 'incomplete').running).toBe(false);
-    expect(endPlayClock(live, 'outOfBounds').running).toBe(false);
+    expect(endPlayClock(live, 'outOfBounds').running).toBe(true);
     expect(endPlayClock(live, 'score').running).toBe(false);
     expect(endPlayClock(live, 'turnover').running).toBe(false);
     const after = endPlayClock(live, 'inbounds');
@@ -89,5 +89,63 @@ describe('clock', () => {
     expect(formatClock(0.2)).toBe('0:01');
     expect(formatClock(-3)).toBe('0:00');
     expect(nextQuarter(createClock(300)).quarter).toBe(2);
+  });
+});
+
+describe('Phase 3c: NFL clock rules and snap timing', () => {
+  const at = (quarter: number, remaining: number, quarterLength = 900) => ({ ...snapClock(createClock(quarterLength)), quarter, remaining });
+
+  it('first downs and in-bounds plays keep it running; incompletions, scores, turnovers, possession changes, timeouts stop it', () => {
+    const c = at(1, 600);
+    expect(stopsClock('inbounds', c)).toBe(false);
+    for (const r of ['incomplete', 'score', 'turnover', 'possession', 'timeout'] as const) expect(stopsClock(r, c)).toBe(true);
+  });
+
+  it('out of bounds and penalties stop the clock only late in a half', () => {
+    expect(stopsClock('outOfBounds', at(1, 100))).toBe(false);
+    expect(stopsClock('outOfBounds', at(2, 300))).toBe(false);
+    expect(stopsClock('outOfBounds', at(2, PACE.lateStop.q2 - 1))).toBe(true);
+    expect(stopsClock('outOfBounds', at(4, PACE.lateStop.q4 + 1))).toBe(false);
+    expect(stopsClock('penalty', at(4, PACE.lateStop.q4 - 1))).toBe(true);
+    expect(stopsClock('outOfBounds', at(3, 30))).toBe(false);
+    // Short quarters scale the late windows.
+    expect(stopsClock('outOfBounds', at(4, 150, 300))).toBe(false);
+    expect(stopsClock('outOfBounds', at(4, 90, 300))).toBe(true);
+  });
+
+  it('two-minute warning: stops between plays at the warning, or after the play that crosses it', () => {
+    const between = endPlayClock(at(2, 125), 'inbounds');
+    const t = tickClock(between, 10).clock;
+    expect(t.remaining).toBe(PACE.warningAt);
+    expect(t.running).toBe(false);
+    expect(t.warned).toBe(true);
+    // During a live play it runs on; the play's end stops it.
+    const live = tickClock(at(4, 123), 6).clock;
+    expect(live.remaining).toBe(117);
+    expect(endPlayClock(live, 'inbounds').running).toBe(false);
+    // Only once per quarter, and not in Q1 / Q3.
+    expect(endPlayClock({ ...live, warned: true }, 'inbounds').running).toBe(true);
+    expect(endPlayClock(tickClock(at(3, 123), 6).clock, 'inbounds').running).toBe(true);
+    expect(nextQuarter({ ...live, warned: true }).warned).toBe(false);
+    expect(warningAt(createClock(300))).toBeCloseTo(PACE.warningAt / 3, 9);
+  });
+
+  it('snap timing: a running clock runs off down to snapAt, never in the hurry-up, never past the warning', () => {
+    const running = { ...endPlayClock(at(1, 600), 'inbounds'), playClock: 33 };
+    expect(paceRunoff(running)).toBe(33 - PACE.snapAt);
+    expect(pacedSnap(running).remaining).toBe(600 - (33 - PACE.snapAt));
+    expect(pacedSnap(running).running).toBe(true);
+    // Stopped clock (after an incompletion): no runoff.
+    expect(paceRunoff({ ...endPlayClock(at(1, 600), 'incomplete'), playClock: 33 })).toBe(0);
+    // Already below snapAt: no runoff.
+    expect(paceRunoff({ ...running, playClock: PACE.snapAt - 2 })).toBe(0);
+    // Hurry-up inside the warning is real time.
+    expect(paceRunoff({ ...endPlayClock(at(4, 100), 'inbounds'), warned: true, playClock: 35 })).toBe(0);
+    // Never past the warning: it stops right at it.
+    const near = { ...endPlayClock(at(2, 130), 'inbounds'), playClock: 38 };
+    expect(pacedSnap(near).remaining).toBe(PACE.warningAt);
+    expect(pacedSnap(near).warned).toBe(true);
+    // The quarter never ends before the snap.
+    expect(pacedSnap({ ...endPlayClock(at(1, 8), 'inbounds'), playClock: 38 }).remaining).toBe(1);
   });
 });
