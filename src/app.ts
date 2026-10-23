@@ -856,9 +856,12 @@ export class App {
     if (this.phase === 'return') {
       this.acc += dt;
       let first = true;
+      // Phase 3d: caught in the end zone, the secondary button is TOUCHBACK (take a knee) instead of DASH.
+      const decide = rs.canTouchback;
       while (this.acc >= SIM_DT) {
         rs.step({
-          move: rs.userReturns ? f.move : { x: 0, y: 0 }, dash: first && rs.userReturns && (f.secondaryPressed || f.primaryPressed),
+          move: rs.userReturns ? f.move : { x: 0, y: 0 }, dash: first && rs.userReturns && (f.primaryPressed || (!decide && f.secondaryPressed)),
+          touchback: first && decide && f.secondaryPressed,
           // Covering the user's own kick: the camera looks back at the returner, so the stick is mirrored (as on defense).
           cover: rs.coverMan ? { move: { x: -f.move.x, y: -f.move.y }, dive: first && f.primaryPressed, switch: first && f.secondaryPressed } : undefined,
         });
@@ -875,11 +878,12 @@ export class App {
         this.touch.setSecondary('SWITCH');
       } else {
         this.touch.setPrimary(carrying ? 'DASH' : '', carrying ? 'juke' : 'none');
-        this.touch.setSecondary(null);
+        this.touch.setSecondary(rs.canTouchback ? 'TOUCH BACK' : null);
       }
       this.touch.setSlots(null);
       this.touch.setCharge(false, 0, null);
       this.hud.setHint(rs.coverMan && this.playsRun < 10 ? 'Cover the kick: left thumb runs your man down · DIVE to tackle (RIP when blocked) · SWITCH = man nearest the ball'
+        : rs.canTouchback ? 'In the end zone: TOUCH BACK to take a knee, or run it out'
         : rs.userReturns && this.playsRun < 8 ? (carrying ? 'Steer with your left thumb · DASH for a burst' : 'Get under the ball...') : null);
       if (rs.result) {
         this.audio.whistle();
