@@ -4,11 +4,11 @@ import { v2 } from '../src/core/vec';
 import { getTeam } from '../src/data';
 import {
   ST, aimNeedle, aimToAngle, aimZone, cpuRelease, fgPowerNeeded, judgeFieldGoal, kickFlight, kickZone, meterAngle, meterPower,
-  releaseKick, releaseKickAimed, zoneQuality,
+  releaseKick, releaseKickAimed, timingPenalty, zoneQuality,
 } from '../src/play/kicking';
 import { ReturnSim } from '../src/play/returnSim';
 import { SIM_DT } from '../src/play/sim';
-import { applyFieldGoal, applyReturn } from '../src/game/specialTeams';
+import { applyFieldGoal, applyReturn, kickoffOutOfBounds } from '../src/game/specialTeams';
 import { newGame } from '../src/game/state';
 import { finishTry } from '../src/game/rules';
 
@@ -69,15 +69,15 @@ describe('kick results', () => {
     expect(fg(75, 1).good).toBe(false);
   });
 
-  it('mistimed kicks go wide more often', () => {
-    let wideGood = 0;
-    let wideBad = 0;
+  it('mistimed kicks miss more often', () => {
+    let missGood = 0;
+    let missBad = 0;
     const z = kickZone('fieldGoal', 1, 45);
     for (let s = 0; s < 60; s++) {
-      if (fg(45, z.center, s).reason === 'wide') wideGood++;
-      if (fg(45, z.center + 2.5 * z.halfWidth, s).reason === 'wide') wideBad++;
+      if (!fg(45, z.center, s).good) missGood++;
+      if (!fg(45, z.center + 2.5 * z.halfWidth, s).good) missBad++;
     }
-    expect(wideBad).toBeGreaterThan(wideGood);
+    expect(missBad).toBeGreaterThan(missGood);
   });
 
   it('a perfect kickoff from the 35 carries into the end zone (touchback)', () => {
@@ -247,14 +247,14 @@ describe('two-layer kick meter (Phase 3b)', () => {
   it('field goals keep the power timing; the aim decides wide or through', () => {
     const c = kickZone('fieldGoal', 1, 40).center;
     const kick = (aim: number) => ({ ...releaseKickAimed('fieldGoal', heldFor(c), aim, 1, 40), power: c });
-    let good = 0, wideEdge = 0;
+    let good = 0, missEdge = 0;
     for (let s = 0; s < 40; s++) {
       // Posts at y = 110: kick from the 70 for a 40-yarder.
       if (judgeFieldGoal(kickFlight(kick(0.02), v2(0, 70), 0, new Rng(s))).good) good++;
-      if (judgeFieldGoal(kickFlight(kick(0.95), v2(0, 70), 0, new Rng(s))).reason === 'wide') wideEdge++;
+      if (!judgeFieldGoal(kickFlight(kick(0.95), v2(0, 70), 0, new Rng(s))).good) missEdge++;
     }
     expect(good).toBeGreaterThan(36);
-    expect(wideEdge).toBeGreaterThan(36);
+    expect(missEdge).toBeGreaterThan(36);
     // Power out of the zone still falls short, whatever the aim.
     const weak = releaseKickAimed('fieldGoal', heldFor(0.4), 0, 1, 50);
     expect(judgeFieldGoal(kickFlight(weak, v2(0, 60), 0, new Rng(1))).good).toBe(false);
@@ -264,7 +264,8 @@ describe('two-layer kick meter (Phase 3b)', () => {
 describe('kick coverage (Phase 3b)', () => {
   const cover = (seed: number, user: 'idle' | 'chase', kind: 'kickoff' | 'punt' = 'kickoff') => {
     const from = kind === 'kickoff' ? v2(0, ST.rules.kickoffSpot) : v2(0, 30 - ST.rules.puntSnapBack);
-    const rel = kind === 'kickoff' ? { ...releaseKick('kickoff', heldFor(0.6), 1), power: 0.6 } : releaseKick('punt', heldFor(0.85), 1);
+    // A returnable kick (Phase 3b scenario): short on purpose, without the Phase 3c timing penalty.
+    const rel = kind === 'kickoff' ? { ...releaseKick('kickoff', heldFor(0.6), 1), power: 0.6, powerPenalty: 0 } : releaseKick('punt', heldFor(0.85), 1);
     const flight = kickFlight(rel, from, 0, new Rng(seed));
     const sim = new ReturnSim({
       kind, flight, kickingTeam: getTeam('rheinstadt'), receivingTeam: getTeam('elbtal'), userReturns: false, tackling: 1, seed, userCovers: true,
@@ -317,5 +318,76 @@ describe('kick coverage (Phase 3b)', () => {
       if (a.side !== 'def' || a.down || a.id === before) continue;
       expect(Math.hypot(a.pos.x - at.x, a.pos.y - at.y)).toBeGreaterThanOrEqual(Math.hypot(me.pos.x - at.x, me.pos.y - at.y) - 1e-9);
     }
+  });
+});
+
+describe('Phase 3c: missed kicks are punished', () => {
+  const game = () => newGame({ home: 'rheinstadt', away: 'elbtal', userSide: 'home', difficulty: 'normal', quarterLength: 300, seed: 1 });
+  const zoneHeld = (z: { center: number }) => heldFor(z.center);
+  const carry = (rel: ReturnType<typeof releaseKickAimed>, seed = 3) => {
+    const f = kickFlight(rel, v2(0, ST.rules.kickoffSpot), 0, new Rng(seed));
+    return { depth: f.landing.y - ST.rules.kickoffSpot, x: f.landing.x, hang: f.hang };
+  };
+
+  it('kickoff out of bounds: the receiving team takes over at the kicking team\'s 40', () => {
+    const r = kickoffOutOfBounds({ ...game(), possession: 'home' }, 'home');
+    expect(r.state.possession).toBe('away');
+    expect(r.state.ballY).toBe(60); // receiving frame: 60 yd from its own goal line = the kicker's 40
+    expect(r.state.down).toBe(1);
+    expect(r.state.toGo).toBe(10);
+    expect(r.state.pendingKickoff).toBeNull();
+  });
+
+  it('a kickoff that lands out of bounds ends the play as out of bounds (no return)', () => {
+    const rel = releaseKickAimed('kickoff', zoneHeld(kickZone('kickoff', 1)), 1, 1);
+    const flight = kickFlight(rel, v2(0, ST.rules.kickoffSpot), 0, new Rng(4));
+    expect(Math.abs(flight.landing.x)).toBeGreaterThan(26.67);
+    const sim = new ReturnSim({ kind: 'kickoff', flight, kickingTeam: getTeam('elbtal'), receivingTeam: getTeam('rheinstadt'), userReturns: false, tackling: 1, seed: 4 });
+    for (let i = 0; i < 60 * 25 && !sim.result; i++) sim.step({ move: { x: 0, y: 0 }, dash: false }, SIM_DT);
+    expect(sim.result!.outcome).toBe('outOfBoundsKick');
+  });
+
+  it('one penalty curve: zero in the zone, rising to 1 far out, same for both layers', () => {
+    const z = kickZone('kickoff', 1);
+    expect(timingPenalty(z.center, z)).toBe(0);
+    expect(timingPenalty(z.center + z.halfWidth, z)).toBe(0);
+    expect(timingPenalty(z.center - 2 * z.halfWidth, z)).toBeGreaterThan(0);
+    expect(timingPenalty(z.center - 10 * z.halfWidth, z)).toBe(1);
+    const a = aimZone('kickoff', 1);
+    expect(timingPenalty(2 * a.halfWidth, a)).toBeCloseTo(timingPenalty(z.center + 2 * z.halfWidth, z), 9);
+  });
+
+  it('very poor timing on the second layer gives a short, flat kick', () => {
+    const held = zoneHeld(kickZone('kickoff', 1));
+    const good = releaseKickAimed('kickoff', held, 0, 1);
+    const bad = releaseKickAimed('kickoff', held, 0.95, 1);
+    expect(bad.aimPenalty).toBeGreaterThan(0.8);
+    expect(bad.angle).toBeLessThan(good.angle - 10);
+    const g = carry(good);
+    const b = carry(bad);
+    expect(b.depth).toBeLessThan(g.depth - 10);
+    expect(b.hang).toBeLessThan(g.hang - 1);
+    // Punts: a needle far off the green costs yards too.
+    const ph = heldFor(kickZone('punt', 1).center);
+    const pz = aimZone('punt', 1);
+    const pGood = kickFlight(releaseKickAimed('punt', ph, pz.center, 1), v2(0, 20), 0, new Rng(3));
+    const pBad = kickFlight(releaseKickAimed('punt', ph, -1, 1), v2(0, 20), 0, new Rng(3));
+    expect(pBad.hang).toBeLessThan(pGood.hang - 1);
+  });
+
+  it('very poor timing on the power layer costs visible yards beyond the lower power alone', () => {
+    const z = kickZone('kickoff', 1);
+    const weak = releaseKickAimed('kickoff', heldFor(z.center - 4 * z.halfWidth), 0, 1);
+    expect(weak.powerPenalty).toBeGreaterThan(0.5);
+    const noPenalty = carry({ ...weak, powerPenalty: 0 });
+    expect(carry(weak).depth).toBeLessThan(noPenalty.depth - 5);
+    expect(carry(weak).depth).toBeLessThan(carry(releaseKickAimed('kickoff', heldFor(z.center), 0, 1)).depth - 15);
+  });
+
+  it('good timing is not penalised', () => {
+    const z = kickZone('kickoff', 1);
+    const r = releaseKickAimed('kickoff', heldFor(z.center), 0.05, 1);
+    expect(r.powerPenalty).toBe(0);
+    expect(r.aimPenalty).toBe(0);
   });
 });
