@@ -18,7 +18,7 @@ import { ZONES, type DefAssignment, type DefenseCall } from './defenseCalls';
 import { computeThrow, ballHeightAt, THROW, throwWindow, type ThrowWindow } from './throw';
 import { resolveCatch, type CatchCandidate } from './catch';
 import { FIELD } from './field';
-import { COVERAGE, CoverageReader, carrySpot, inPhaseSpot, overTop, type Helper, type ReadTarget } from './coverage';
+import { COVERAGE, CoverageReader, ZoneMatcher, carrySpot, inPhaseSpot, overTop, type Helper, type ReadTarget, type ZoneArea } from './coverage';
 import { inPhase, throwingWindow } from './windows';
 import { TACKLE, resolveTackle, type ContactKind } from './tackle';
 import { SCREEN, screenTiming, type ScreenTiming } from './screen';
@@ -288,6 +288,10 @@ export class PlaySim {
   readonly coverage: CoverageReader;
   /** Underneath defender id -> vertical receiver id he is carrying. */
   private carry = new Map<number, number>();
+  /** Phase 3c: underneath zone ownership with handoffs. */
+  readonly zones = new ZoneMatcher();
+  /** Phase 3c: receiver handoffs between zone defenders so far (from, to, receiver). */
+  readonly handoffs: { t: number; from: number; to: number; receiver: number }[] = [];
   private contact: Contact | null = null;
   /** When the defense has read the screen (Infinity until then). */
   private screenReadAt = Infinity;
@@ -1211,6 +1215,7 @@ export class PlaySim {
     const others = this.actors.filter((a) => a.side === 'def' && !a.down && !helperIds.has(a.id));
     const danger = (id: number) => throwingWindow(qb.pos, this.actors[id], others).margin;
     this.coverage.update(this.t, this.los, this.ballX, receivers, helpers, danger);
+    this.updateZoneMatches(receivers);
 
     // Underneath zone defenders carry vertical stems through their zone.
     this.carry.clear();
@@ -1316,7 +1321,7 @@ export class PlaySim {
         // Trailing man defender can't see the ball: play through the receiver's hands.
         const r = this.get(asg.target);
         goal = add(r.pos, scale(r.vel, 0.25));
-      } else if (flight && this.t > this.throwAt + d.reaction + (asg.kind === 'man' ? COVERAGE.manBallReadDelay : 0)) {
+      } else if (flight && this.t > this.throwAt + d.reaction * (asg.kind === 'zone' ? COVERAGE.zone.ballReadFactor : 1) + (asg.kind === 'man' ? COVERAGE.manBallReadDelay : 0)) {
         const timeLeft = flight.T - flight.t;
         const canReach = dist(d.pos, flight.landing) / d.maxSpeed < timeLeft + 0.6;
         goal = canReach ? flight.landing : add(flight.landing, scale(norm(sub(d.pos, flight.landing)), 2));
@@ -1367,6 +1372,23 @@ export class PlaySim {
     const mid = v2(tops.reduce((a, t) => a + t.x, 0) / tops.length, Math.max(land.y, ...tops.map((t) => t.y)));
     const goal = helpTop ? v2(mid.x + (helpTop.x - mid.x) * COVERAGE.helpLean, Math.max(mid.y, helpTop.y)) : mid;
     return add(goal, scale(d.coverOffset, 0.4));
+  }
+
+  /** Phase 3c: the area an underneath zone defender owns (absolute yards). */
+  private zoneArea(d: Actor, zone: keyof typeof ZONES): ZoneArea {
+    const z = ZONES[zone];
+    return { id: d.id, land: this.zoneLandmark(zone), w: z.w, minY: this.los + COVERAGE.zone.minDepth, maxY: this.los + z.y + COVERAGE.zone.maxExtra };
+  }
+
+  private updateZoneMatches(receivers: ReadTarget[]) {
+    const areas: ZoneArea[] = [];
+    for (const d of this.actors) {
+      const a = d.assignment;
+      if (d.side !== 'def' || d.down || a?.kind !== 'zone' || ZONES[a.zone].deep || this.t < d.reaction) continue;
+      if (d.id === this.userDefId) continue; // the user plays his own zone
+      areas.push(this.zoneArea(d, a.zone));
+    }
+    for (const h of this.zones.update(areas, receivers)) this.handoffs.push({ t: this.t, ...h });
   }
 
   private zoneLandmark(zone: keyof typeof ZONES): Vec2 {
@@ -1452,6 +1474,15 @@ export class PlaySim {
           const lag = d.reaction * 0.7;
           return add(carrySpot({ pos: this.perceived(r, lag), vel: this.perceivedVel(r, lag) }, this.ballX), scale(d.coverOffset, 0.3));
         }
+        if (!z.deep) {
+          // Phase 3c: pattern-match zone: work toward the receiver he owns, never out of his area.
+          const rid = this.zones.matches.get(d.id);
+          if (rid === undefined) return add(land, d.coverOffset);
+          const ZC = COVERAGE.zone;
+          const seen = this.perceived(this.actors[rid], d.reaction);
+          const g = add(lerp(land, add(seen, v2(0, 0.8)), ZC.sink), d.coverOffset);
+          return v2(clamp(g.x, land.x - z.w * ZC.leash, land.x + z.w * ZC.leash), clamp(g.y, this.los + 1, this.los + z.y + ZC.maxExtra));
+        }
         let threat: Actor | null = null;
         let best = Infinity;
         for (const s of ELIGIBLE) {
@@ -1460,7 +1491,7 @@ export class PlaySim {
           const seen = this.perceived(r, d.reaction);
           const dx = Math.abs(seen.x - land.x);
           if (dx > z.w) continue;
-          if (z.deep ? seen.y < this.los + 7 : seen.y > this.los + 16 || seen.y < this.los - 1) continue;
+          if (seen.y < this.los + 7) continue;
           // Deep defenders prioritise vertical stems over anything else in their zone.
           const score = dist(seen, land) - (z.deep && this.coverage.verticals.has(r.id) ? 8 : 0);
           if (score < best) {
@@ -1470,12 +1501,9 @@ export class PlaySim {
         }
         if (!threat) return add(land, d.coverOffset);
         const seen = this.perceived(threat, d.reaction);
-        if (z.deep) {
-          const vel = this.perceivedVel(threat, d.reaction * 0.6);
-          const top = overTop({ pos: seen, vel }, this.ballX, COVERAGE.deepCushion, COVERAGE.deepLead);
-          return v2(land.x * 0.3 + top.x * 0.7 + d.coverOffset.x, Math.max(land.y, top.y));
-        }
-        return add(lerp(land, add(seen, v2(0, 0.8)), 0.7), d.coverOffset);
+        const vel = this.perceivedVel(threat, d.reaction * 0.6);
+        const top = overTop({ pos: seen, vel }, this.ballX, COVERAGE.deepCushion, COVERAGE.deepLead);
+        return v2(land.x * 0.3 + top.x * 0.7 + d.coverOffset.x, Math.max(land.y, top.y));
       }
     }
   }

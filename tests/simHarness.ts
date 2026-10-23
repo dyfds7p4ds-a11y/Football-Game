@@ -1,7 +1,7 @@
-import { DIFFICULTY, getPlay, getTeam } from '../src/data';
+import { DIFFICULTY, PLAYS, getPlay, getTeam } from '../src/data';
 import type { Difficulty, EligibleSlot } from '../src/data/types';
 import { dist } from '../src/core/vec';
-import { DEFENSE_CALLS, getDefenseCall } from '../src/play/defenseCalls';
+import { DEFENSE_CALLS, ZONES, getDefenseCall } from '../src/play/defenseCalls';
 import { inPhase, throwingWindow } from '../src/play/windows';
 import { PlaySim, SIM_DT, idleInput, type PlayEvent, type SimInput } from '../src/play/sim';
 import { THROW, throwWindow } from '../src/play/throw';
@@ -100,4 +100,64 @@ export function openRates(playId: string, slots: EligibleSlot[], o: OpenRateOpti
   }
   const n = Math.max(1, samples);
   return { rates: Object.fromEntries(slots.map((s) => [s, open[s] / n])), any: any / n, samples };
+}
+
+export interface ZoneRateOptions {
+  sampleTimes: number[];
+  seeds: number;
+  dropFor: number;
+  openMargin: number;
+  inPhaseDist: number;
+  /** Zone depth band (yards past the LOS) that counts as "in the zone". */
+  depth: [number, number];
+  difficulty?: Difficulty;
+  plays?: string[];
+}
+
+/**
+ * Phase 3c: how often a receiver inside one zone defender's area is open.
+ * Every pass play (no runs, no screens) x seeds, sampled at `sampleTimes`:
+ * each receiver inside the zone (landmark +- w, `depth` band) is one sample;
+ * open = a perfect throw now beats every defender by `openMargin` and nobody
+ * is in phase. Also reports how far the zone defender strays from his
+ * landmark (a man-like zone defender strays far).
+ */
+export function zoneOpenRate(defId: string, slot: string, o: ZoneRateOptions) {
+  const call = getDefenseCall(defId);
+  const asg = call.assignments[slot as keyof typeof call.assignments];
+  if (!asg || asg.kind !== 'zone') throw new Error(`${slot} has no zone in ${defId}`);
+  const z = ZONES[asg.zone];
+  const plays = o.plays ?? PLAYS.filter((p) => !p.run && !p.screen).map((p) => p.id);
+  let inZone = 0;
+  let open = 0;
+  let stray = 0;
+  let strayN = 0;
+  for (const play of plays) {
+    for (let s = 0; s < o.seeds; s++) {
+      const times = [...o.sampleTimes];
+      runPlay(play, defId, s * 17 + 3, {
+        throwAt: null, target: null, dropFor: o.dropFor,
+        onStep: (sim) => {
+          if (sim.result || times.length === 0 || sim.t < times[0]) return;
+          times.shift();
+          const landX = sim.ballX * 0.5 + z.x;
+          const qb = sim.get('QB');
+          const defs = sim.actors.filter((a) => a.side === 'def' && !a.down);
+          const d = sim.actors.find((a) => a.side === 'def' && a.slot === slot)!;
+          stray += Math.abs(d.pos.x - landX);
+          strayN++;
+          for (const e of ['WR1', 'WR2', 'WR3', 'TE', 'RB'] as EligibleSlot[]) {
+            const r = sim.get(e);
+            if (r.route?.blocks) continue;
+            const depth = r.pos.y - sim.los;
+            if (Math.abs(r.pos.x - landX) > z.w || depth < o.depth[0] || depth > o.depth[1]) continue;
+            inZone++;
+            const w = throwingWindow(qb.pos, r, defs);
+            if (w.margin > o.openMargin && !defs.some((x) => inPhase(r, x, o.inPhaseDist))) open++;
+          }
+        },
+      }, o.difficulty ?? 'normal');
+    }
+  }
+  return { rate: open / Math.max(1, inZone), samples: inZone, stray: stray / Math.max(1, strayN) };
 }

@@ -24,5 +24,14 @@
   "manBallReadDelay": 0.35,
   "intBase": 0.1,
   "noReceiverInt": 0.08,
-  "undercutInt": 0.15
+  "undercutInt": 0.15,
+  "zone": {
+    "_doc": "Phase 3c: underneath zone matching (play/coverage.ts ZoneMatcher). A receiver entering a zone defender's area (landmark +- w, depth minDepth..zone depth + maxExtra past the LOS) is his; he is released releaseMargin yd past the edge and the next zone defender whose area he enters picks him up (handoff). sink: how far the defender works from his landmark toward the matched receiver; leash: max lateral share of w he leaves the landmark. ballReadFactor: zone defenders face the QB and break on a throw after this share of their reaction (man defenders add manBallReadDelay).",
+    "minDepth": -1,
+    "maxExtra": 7,
+    "releaseMargin": 1.5,
+    "sink": 0.65,
+    "leash": 0.9,
+    "ballReadFactor": 0.7
+  }
 }

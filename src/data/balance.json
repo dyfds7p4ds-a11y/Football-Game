@@ -41,5 +41,23 @@
       0.4,
       1.8
     ]
+  },
+  "zoneCoverage": {
+    "_doc": "Phase 3c (tests/coverage.test.ts): Cover 3 at Normal, every pass play (no runs, screens) x seeds, sampled at sampleTimes. A receiver inside the zone defender's area (landmark +- w, depth band yards past the LOS) is one sample; open = a perfect throw now beats every defender by openMargin s and nobody is in phase. maxOpenRate: the cap for that defender. maxStray: how far (yd, average) he may drift from his landmark before the throw.",
+    "defense": "cover3",
+    "slot": "LB1",
+    "difficulty": "normal",
+    "seeds": 6,
+    "sampleTimes": [
+      1.4,
+      1.9,
+      2.4
+    ],
+    "depth": [
+      1,
+      14
+    ],
+    "maxOpenRate": 0.15,
+    "maxStray": 4
   }
 }
