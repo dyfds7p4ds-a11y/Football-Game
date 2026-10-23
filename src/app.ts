@@ -37,6 +37,7 @@ import { simulateCpuDrive } from './game/cpuDrive';
 import { loadSettings, saveSettings, type Settings } from './game/settings';
 import { Hud, type EdgeMarker } from './ui/hud';
 import { TouchControls } from './ui/touch';
+import { TAP_SELECT, pickAtTap } from './ui/tapSelect';
 import { HotLatch, SLOT_STATE, slotDisplay, type SlotDisplay } from './ui/slotState';
 import { PlaycallScreen } from './ui/playcall';
 import { IntroOverlay } from './ui/intro';
@@ -169,6 +170,7 @@ export class App {
     this.phase = p;
     if (p !== 'presnap') this.audMenu.hide();
     if (p !== 'live') this.touch.setSprint(false);
+    if (p !== 'return') this.touch.setSwitch(false);
     const onField = p === 'presnap' || p === 'live' || p === 'postplay' || p === 'kick' || p === 'kickFlight' || p === 'return' || p === 'returnPost';
     this.touch.setVisible(onField);
     if (!this.defense) this.touch.setDefenders(null);
@@ -447,10 +449,22 @@ export class App {
       if (s) this.defSlot = s;
       return;
     }
-    const slot = f.defenderPressed ?? (f.slotPressed ? keyMap[f.slotPressed] ?? null : null);
+    const keySlot = f.slotPressed ? keyMap[f.slotPressed] ?? null : null;
+    const slot = f.defenderPressed ?? keySlot ?? (f.tap ? this.defenderAtTap(f.tap) : null);
     if (!slot) return;
     sim.selectDefender(slot);
     if (sim.userDefender?.slot === slot) this.defSlot = slot;
+  }
+
+  /** Phase 3d: the defender drawn nearest a tap in the camera image (not the returner after a takeaway). */
+  private defenderAtTap(tap: { x: number; y: number }): DefSlot | null {
+    const sim = this.sim!;
+    if (sim.returning) return null;
+    const cands = sim.actors.filter((a) => a.side === 'def' && !a.down).map((a) => {
+      const p = this.view.project(a.pos.x, a.pos.y, TAP_SELECT.aimHeight);
+      return { slot: a.slot as DefSlot, x: p.x, y: p.y, onScreen: p.onScreen };
+    });
+    return pickAtTap(tap, cands);
   }
 
   private presnapDefense(f: InputFrame, dt: number) {
@@ -458,12 +472,12 @@ export class App {
     this.switchDefender(f, false);
     const left = Math.max(0, DEF_CONTROL.presnapAutoSnap - this.presnapTimer);
     this.touch.setPrimary(`READY ${Math.ceil(left)}`, 'snap');
-    this.touch.setSecondary('SWITCH');
+    this.touch.setSecondary(null);
     this.touch.setSlots(null);
     this.touch.setDefenders(this.defSlot);
     this.touch.setCharge(false, 0, null);
     this.hud.setEdgeMarkers(null);
-    this.hud.setHint(this.playsRun < 6 ? `You are ${this.defSlot}. Left thumb moves him · JUMP plays the ball (time it!), dives at the runner or rips a block · SWITCH or the top buttons change player` : null);
+    this.hud.setHint(this.playsRun < 6 ? `You are ${this.defSlot}. Left thumb moves him · JUMP plays the ball (time it!), dives at the runner or rips a block · tap a defender, SWITCH (left edge) or the PLAYERS menu changes player` : null);
     if (f.primaryPressed || left <= 0) {
       const g = this.game!;
       // Phase 3c: the CPU offense snaps on the pace (data/pace.json): the game clock does not depend on the auto-snap.
@@ -499,10 +513,10 @@ export class App {
     const blocked = sim.blockStates().some((b) => b.defender === sim.userDefId);
     const returner = sim.returning && c?.id === sim.userDefId;
     this.touch.setPrimary(returner ? 'JUKE' : runner ? 'DIVE' : blocked && sim.ball.state !== 'air' ? 'RIP' : 'JUMP', returner ? 'juke' : 'throw');
-    this.touch.setSecondary(returner ? null : 'SWITCH');
+    this.touch.setSecondary(null);
     this.touch.setSlots(null);
-    // The strip shows whoever the user controls now (the returner after a takeaway).
-    this.touch.setDefenders((sim.userDefender?.slot as DefSlot | undefined) ?? this.defSlot);
+    // The strip shows whoever the user controls now (the returner after a takeaway); no SWITCH while he runs.
+    this.touch.setDefenders((sim.userDefender?.slot as DefSlot | undefined) ?? this.defSlot, !returner);
     this.touch.setCharge(false, 0, null);
     this.hud.setEdgeMarkers(null);
     this.hud.setHint(null);
@@ -876,14 +890,15 @@ export class App {
       const carrying = rs.userReturns && rs.carrier === rs.returner;
       if (rs.coverMan) {
         this.touch.setPrimary(rs.coverBlocked ? 'RIP' : 'DIVE', 'throw');
-        this.touch.setSecondary('SWITCH');
+        this.touch.setSecondary(null);
+        this.touch.setSwitch(true);
       } else {
         this.touch.setPrimary(carrying ? 'DASH' : '', carrying ? 'juke' : 'none');
         this.touch.setSecondary(rs.canTouchback ? 'TOUCH BACK' : null);
       }
       this.touch.setSlots(null);
       this.touch.setCharge(false, 0, null);
-      this.hud.setHint(rs.coverMan && this.playsRun < 10 ? 'Cover the kick: left thumb runs your man down · DIVE to tackle (RIP when blocked) · SWITCH = man nearest the ball'
+      this.hud.setHint(rs.coverMan && this.playsRun < 10 ? 'Cover the kick: left thumb runs your man down · DIVE to tackle (RIP when blocked) · SWITCH (left edge) = man nearest the ball'
         : rs.canTouchback ? 'In the end zone: TOUCH BACK to take a knee, or run it out'
         : rs.userReturns && this.playsRun < 8 ? (carrying ? 'Steer with your left thumb · DASH for a burst' : 'Get under the ball...') : null);
       if (rs.result) {

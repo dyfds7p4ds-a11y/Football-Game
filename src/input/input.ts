@@ -24,6 +24,8 @@ export interface InputFrame {
   sprintHeld: boolean;
   /** On defense: on-screen cornerback button pressed this frame (switch control to him). */
   defenderPressed: DefSlot | null;
+  /** Phase 3d: a short tap on the field this frame (screen px), for picking a defender. */
+  tap: { x: number; y: number } | null;
   /** Any button, key or tap this frame (skips cutscenes). */
   anyPressed: boolean;
   pausePressed: boolean;
@@ -54,6 +56,7 @@ export class InputManager {
   private padSlot: EligibleSlot | null = null;
   private pendingSecondary = false;
   private pendingDefender: DefSlot | null = null;
+  private pendingTap: { x: number; y: number } | null = null;
   private pendingAny = false;
   /** Latched so a tap shorter than one frame is never lost. */
   private pendingPrimary = false;
@@ -132,6 +135,10 @@ export class InputManager {
     this.lastDevice = 'touch';
     this.pendingDefender = slot;
   }
+  tapAt(x: number, y: number) {
+    this.lastDevice = 'touch';
+    this.pendingTap = { x, y };
+  }
   pressPause() {
     this.pendingPause = true;
   }
@@ -206,6 +213,7 @@ export class InputManager {
       secondaryPressed: this.pendingSecondary,
       sprintHeld: this.touchSprint || k.has('KeyC') || this.padSprint,
       defenderPressed: this.pendingDefender,
+      tap: this.pendingTap,
       anyPressed: this.pendingAny,
       pausePressed: this.pendingPause,
       timeoutPressed: this.pendingTimeout,
@@ -216,6 +224,7 @@ export class InputManager {
     this.pendingSlot = null;
     this.pendingSecondary = false;
     this.pendingDefender = null;
+    this.pendingTap = null;
     this.pendingAny = false;
     this.pendingPrimary = false;
     this.pendingPause = false;

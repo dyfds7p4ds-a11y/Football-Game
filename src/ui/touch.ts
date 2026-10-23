@@ -10,6 +10,7 @@ import { VirtualJoystick } from '../input/joystick';
 import TOUCH from '../data/touch.json';
 import { h } from './dom';
 import type { SlotDisplay } from './slotState';
+import { isTap } from './tapSelect';
 
 const SLOT_LABEL: Record<EligibleSlot, string> = { WR1: '1', WR2: '2', WR3: '3', RB: 'RB', TE: 'TE' };
 // Arc of receiver buttons around the primary button (right, bottom offsets in px).
@@ -29,6 +30,11 @@ export class TouchControls {
   private slotBtns = new Map<EligibleSlot, HTMLButtonElement>();
   private defBtns = new Map<DefSlot, HTMLButtonElement>();
   private defStrip: HTMLElement;
+  /** Phase 3d: SWITCH at the screen edge and the PLAYERS menu that holds the defender strip. */
+  readonly switchBtn: HTMLButtonElement;
+  private playersBtn: HTMLButtonElement;
+  private stripOpen = false;
+  private lookStart = { x: 0, y: 0, t: 0, moved: 0 };
   private joy = new VirtualJoystick();
   private joyId: number | null = null;
   private lookId: number | null = null;
@@ -108,6 +114,7 @@ export class TouchControls {
         btn.addEventListener('pointerdown', (e) => {
           e.preventDefault();
           input.pressDefender(slot);
+          this.setStripOpen(false);
         });
         this.defBtns.set(slot, btn);
         group.append(btn);
@@ -115,7 +122,20 @@ export class TouchControls {
       strip.append(group);
     }
     this.defStrip = strip;
-    this.root = h('div', { id: 'touch' }, joyzone, lookzone, actions, strip);
+    const SB = TOUCH.switchButton;
+    this.switchBtn = h('button', { id: 'btn-switch', class: 'hidden', style: {
+      left: `calc(${SB.left}px + var(--safe-l))`, top: `${SB.topPct}%`, width: `${SB.size}px`, height: `${SB.size}px`,
+    } }, 'SWITCH');
+    this.switchBtn.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      input.pressSecondary();
+    });
+    this.playersBtn = h('button', { id: 'btn-players', class: 'hidden' }, 'PLAYERS ▾');
+    this.playersBtn.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      this.setStripOpen(!this.stripOpen);
+    });
+    this.root = h('div', { id: 'touch' }, joyzone, lookzone, actions, strip, this.switchBtn, this.playersBtn);
 
     // Primary button: hold state.
     this.primary.addEventListener('pointerdown', (e) => {
@@ -166,17 +186,23 @@ export class TouchControls {
       lookzone.setPointerCapture(e.pointerId);
       this.lookId = e.pointerId;
       this.lookLast = { x: e.clientX, y: e.clientY };
+      this.lookStart = { x: e.clientX, y: e.clientY, t: performance.now(), moved: 0 };
     });
     lookzone.addEventListener('pointermove', (e) => {
       if (e.pointerId !== this.lookId) return;
       const dx = e.clientX - this.lookLast.x;
       const dy = e.clientY - this.lookLast.y;
       this.lookLast = { x: e.clientX, y: e.clientY };
+      this.lookStart.moved = Math.max(this.lookStart.moved, Math.hypot(e.clientX - this.lookStart.x, e.clientY - this.lookStart.y));
       input.addLook(dx * 0.006, -dy * 0.004);
     });
     const lookEnd = (e: PointerEvent) => {
       if (e.pointerId === this.lookId) this.lookId = null;
     };
+    // Phase 3d: a quick tap (no drag) picks the defender under the finger.
+    lookzone.addEventListener('pointerup', (e) => {
+      if (e.pointerId === this.lookId && isTap(performance.now() - this.lookStart.t, this.lookStart.moved)) input.tapAt(e.clientX, e.clientY);
+    });
     lookzone.addEventListener('pointerup', lookEnd);
     lookzone.addEventListener('pointercancel', lookEnd);
   }
@@ -207,10 +233,27 @@ export class TouchControls {
     }
   }
 
-  /** Defender strip on defense (null hides it); `selected` is the one under control. */
-  setDefenders(selected: DefSlot | null) {
-    this.defStrip.classList.toggle('hidden', !selected);
+  /**
+   * Defender selection on defense (null hides it); `selected` is the one under control.
+   * Phase 3d: the strip lives in the PLAYERS menu (closed by default); SWITCH sits at the screen edge.
+   */
+  setDefenders(selected: DefSlot | null, canSwitch = !!selected) {
+    this.playersBtn.classList.toggle('hidden', !selected);
+    if (selected && this.playersBtn.textContent !== `${selected} ▾`) this.playersBtn.textContent = `${selected} ▾`;
+    this.defStrip.classList.toggle('hidden', !selected || !this.stripOpen);
+    this.switchBtn.classList.toggle('hidden', !canSwitch);
+    if (!selected) this.stripOpen = false;
     for (const [slot, btn] of this.defBtns) btn.classList.toggle('selected', slot === selected);
+  }
+
+  /** Phase 3d: the SWITCH edge button on its own (kick coverage). */
+  setSwitch(visible: boolean) {
+    this.switchBtn.classList.toggle('hidden', !visible);
+  }
+
+  private setStripOpen(open: boolean) {
+    this.stripOpen = open;
+    this.defStrip.classList.toggle('hidden', !open);
   }
 
   /** Secondary action button (SLIDE / DASH); null hides it. */

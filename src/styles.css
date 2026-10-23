@@ -38,7 +38,7 @@ button:disabled { opacity: 0.45; }
 /* ---------- touch zones */
 /* Phase 3c: fixed stick bottom left; the zone is the hit circle (sizes from data/touch.json) */
 #joyzone { position: fixed; z-index: 3; border-radius: 50%; touch-action: none; }
-#lookzone { position: fixed; right: 0; top: 70px; bottom: 0; width: 50vw; z-index: 1; }
+#lookzone { position: fixed; right: 0; top: 70px; bottom: 0; width: 100vw; z-index: 1; }
 .joy-base, .joy-knob {
   position: absolute; left: 50%; top: 50%; border-radius: 50%; pointer-events: none; transform: translate(-50%, -50%);
 }
@@ -61,7 +61,10 @@ button:disabled { opacity: 0.45; }
 /* Phase 3c hot read, 3d: calm outline instead of a red pulse */
 .slot.hot { outline: 4px solid #8ecae6; box-shadow: 0 0 0 8px rgba(142, 202, 230, 0.35); }
 /* Phase 3b: every defender selectable; grouped DL | LB | DB, top right under the score bug */
-#defstrip { position: fixed; top: calc(84px + var(--safe-t)); right: calc(8px + var(--safe-r)); z-index: 5; display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; max-width: calc(100vw - 16px); }
+/* Phase 3d: SWITCH at the left screen edge (out of the defender's view), PLAYERS menu top right */
+#btn-switch { position: fixed; z-index: 4; border-radius: 12px; padding: 0; font-size: 11px; background: rgba(233, 196, 106, 0.85); }
+#btn-players { position: fixed; z-index: 5; top: calc(84px + var(--safe-t)); right: calc(8px + var(--safe-r)); min-height: 40px; padding: 4px 10px; font-size: 12px; border-radius: 8px; }
+#defstrip { position: fixed; top: calc(132px + var(--safe-t)); right: calc(8px + var(--safe-r)); z-index: 5; display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; max-width: calc(100vw - 16px); }
 #defstrip .defgroup { display: flex; gap: 4px; }
 #defstrip .defbtn { min-width: 46px; min-height: 44px; padding: 4px 6px; font-size: 11px; border-radius: 6px; }
 #defstrip .defbtn.selected { background: var(--accent); outline: 3px solid #fff; }
