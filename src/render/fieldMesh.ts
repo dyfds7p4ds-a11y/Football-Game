@@ -10,6 +10,7 @@ import { FIELD } from '../play/field';
 import type { EligibleSlot, TeamData } from '../data/types';
 import { PALETTE } from './palette';
 import { Stadium } from './stadium';
+import MARKERS from '../data/markers.json';
 
 const PX = 24; // texture pixels per yard
 
@@ -17,6 +18,29 @@ const PX = 24; // texture pixels per yard
 const fw = (x: number, y: number, h = 0) => new THREE.Vector3(x, h, -y);
 
 export const SLOT_COLORS: Record<EligibleSlot, number> = { WR1: 0xffd23f, WR2: 0x4ea8ff, WR3: 0xff8c42, RB: 0xf1faee, TE: 0xc77dff };
+
+const downTextures = new Map<number, THREE.CanvasTexture>();
+/** Phase 3d: the down box face: a black number on orange ('' before a series). */
+function downTexture(down: number): THREE.CanvasTexture {
+  const hit = downTextures.get(down);
+  if (hit) return hit;
+  const c = document.createElement('canvas');
+  c.width = 64;
+  c.height = 64;
+  const g = c.getContext('2d')!;
+  g.fillStyle = MARKERS.color;
+  g.fillRect(0, 0, 64, 64);
+  if (down > 0) {
+    g.fillStyle = '#111';
+    g.font = 'bold 48px sans-serif';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillText(String(down), 32, 35);
+  }
+  const tex = new THREE.CanvasTexture(c);
+  downTextures.set(down, tex);
+  return tex;
+}
 
 export class FieldView {
   readonly group = new THREE.Group();
@@ -92,15 +116,84 @@ export class FieldView {
     }
   }
 
-  setMarkers(los: number, firstDown: number | null) {
+  setMarkers(los: number, firstDown: number | null, down: number | null = null) {
     this.losLine.position.copy(fw(0, los, 0.015));
     this.fdLine.visible = firstDown !== null && firstDown < FIELD.length;
     if (firstDown !== null) this.fdLine.position.copy(fw(0, firstDown, 0.016));
+    this.setChains(los, firstDown, down);
   }
 
   showMarkers(v: boolean) {
     this.losLine.visible = v;
     this.fdLine.visible = v && this.fdLine.visible;
+    this.chains.visible = v;
+  }
+
+  // ------------------------------------------------------------ Phase 3d: sideline down markers
+
+  private chains = new THREE.Group();
+  private downBox: THREE.Group | null = null;
+  private rearPole: THREE.Group | null = null;
+  private frontPole: THREE.Group | null = null;
+  private chain: THREE.Mesh | null = null;
+  private downFaces: THREE.MeshBasicMaterial[] = [];
+  private shownDown = -1;
+
+  private buildChains() {
+    const M = MARKERS;
+    const orange = new THREE.MeshLambertMaterial({ color: new THREE.Color(M.color) });
+    const stick = new THREE.CylinderGeometry(0.035, 0.035, M.poleHeight, 8).translate(0, M.poleHeight / 2, 0);
+    const pole = (top: THREE.Object3D) => {
+      const g = new THREE.Group();
+      const p = new THREE.Mesh(stick, orange);
+      p.castShadow = true;
+      top.position.y = M.poleHeight;
+      g.add(p, top);
+      this.chains.add(g);
+      return g;
+    };
+    // Chain poles: an orange plate on top; down box: a four-sided box with the down on every face.
+    const plate = () => new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.3, 0.06), orange);
+    this.rearPole = pole(plate());
+    this.frontPole = pole(plate());
+    const box = new THREE.Group();
+    const faceGeo = new THREE.PlaneGeometry(0.42, 0.42);
+    for (let i = 0; i < 4; i++) {
+      const mat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+      this.downFaces.push(mat);
+      const f = new THREE.Mesh(faceGeo, mat);
+      f.rotation.y = (i * Math.PI) / 2;
+      f.position.set(Math.sin((i * Math.PI) / 2) * 0.215, 0, Math.cos((i * Math.PI) / 2) * 0.215);
+      box.add(f);
+    }
+    this.downBox = pole(box);
+    this.chain = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 1), new THREE.MeshLambertMaterial({ color: 0xc0c0c0 }));
+    this.chains.add(this.chain);
+    this.group.add(this.chains);
+  }
+
+  private setChains(los: number, firstDown: number | null, down: number | null) {
+    if (!this.downBox) this.buildChains();
+    const x = -(FIELD.halfWidth + MARKERS.sidelineOffset);
+    this.downBox!.position.copy(fw(x, los, 0));
+    const series = firstDown !== null && firstDown < FIELD.length;
+    for (const o of [this.rearPole!, this.frontPole!, this.chain!]) o.visible = series;
+    if (series) {
+      const rear = firstDown! - 10;
+      this.rearPole!.position.copy(fw(x, rear, 0));
+      this.frontPole!.position.copy(fw(x, firstDown!, 0));
+      this.chain!.position.copy(fw(x, (rear + firstDown!) / 2, 0.45));
+      this.chain!.scale.z = 10;
+    }
+    const d = down ?? 0;
+    if (d !== this.shownDown) {
+      this.shownDown = d;
+      const tex = downTexture(d);
+      for (const m of this.downFaces) {
+        m.map = tex;
+        m.needsUpdate = true;
+      }
+    }
   }
 
   setTargetRing(pos: THREE.Vector3 | null, t: number) {

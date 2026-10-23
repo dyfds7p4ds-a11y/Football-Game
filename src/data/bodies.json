@@ -1,0 +1,10 @@
+{
+  "_doc": "Phase 3d body proportions by position (render/playerMesh.ts setBuild). width / depth scale torso, waist and shoulder pads; belly 0..1 adds a gut in front of the waist; thigh scales thigh thickness; arm scales arm thickness and pushes the shoulders out with the width; legs scales leg length (the hips sit lower); height scales the whole figure. Linemen are broad, deep-chested and heavy-legged with shorter legs relative to their frame; receivers and corners are lean. Unlisted positions use 1 everywhere.",
+  "OL": { "width": 1.3, "depth": 1.25, "belly": 1.0, "thigh": 1.32, "arm": 1.2, "legs": 0.92, "height": 1.04 },
+  "DL": { "width": 1.24, "depth": 1.18, "belly": 0.55, "thigh": 1.26, "arm": 1.18, "legs": 0.95, "height": 1.03 },
+  "TE": { "width": 1.12, "depth": 1.08, "belly": 0.0, "thigh": 1.12, "arm": 1.08, "legs": 0.99, "height": 1.03 },
+  "LB": { "width": 1.1, "depth": 1.06, "belly": 0.0, "thigh": 1.12, "arm": 1.08, "legs": 0.99, "height": 1.0 },
+  "RB": { "width": 1.0, "depth": 1.02, "belly": 0.0, "thigh": 1.12, "arm": 1.0, "legs": 0.96, "height": 0.96 },
+  "WR": { "width": 0.94, "depth": 0.94, "belly": 0.0, "thigh": 0.95, "arm": 0.95, "legs": 1.03, "height": 1.0 },
+  "CB": { "width": 0.93, "depth": 0.93, "belly": 0.0, "thigh": 0.95, "arm": 0.95, "legs": 1.02, "height": 0.97 }
+}

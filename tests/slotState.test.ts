@@ -17,19 +17,21 @@ describe('receiver button red state (Phase 3d)', () => {
   });
 
   it('is red exactly for the defined conditions', () => {
-    expect(invalidReason({ ...base, blocks: true })).toBe('ineligible');
+    expect(invalidReason({ ...base, blocks: true, pressedRecently: true })).toBe('ineligible');
+    expect(invalidReason({ ...base, blocks: true })).toBeNull();
+    expect(slotDisplay({ ...base, blocks: true }).look).toBe('blocking'); // dimmed, not red
     expect(invalidReason({ ...base, distance: SLOT_STATE.maxThrowRange + 0.1 })).toBe('outOfRange');
     expect(invalidReason({ ...base, thrown: true, pressedRecently: true })).toBe('thrown');
     expect(invalidReason({ ...base, thrown: true })).toBeNull();
-    expect(slotDisplay({ ...base, blocks: true, selected: true }).look).toBe('invalid');
+    expect(slotDisplay({ ...base, blocks: true, selected: true, pressedRecently: true }).look).toBe('invalid');
   });
 
-  it('exhaustive: invalid <=> (thrown & pressed) | (!thrown & (blocks | out of range))', () => {
+  it('exhaustive: invalid <=> pressed after the throw | pressed a blocker | (eligible and out of range)', () => {
     const bools = [false, true];
     for (const blocks of bools) for (const thrown of bools) for (const pressedRecently of bools)
       for (const selected of bools) for (const hot of bools) for (const distance of [10, 80]) {
         const f = { blocks, thrown, pressedRecently, selected, hot, distance };
-        const expected = thrown ? pressedRecently : blocks || distance > SLOT_STATE.maxThrowRange;
+        const expected = thrown ? pressedRecently : blocks ? pressedRecently : distance > SLOT_STATE.maxThrowRange;
         expect(slotDisplay(f).look === 'invalid').toBe(expected);
       }
   });

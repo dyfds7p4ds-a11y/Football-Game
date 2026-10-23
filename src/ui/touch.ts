@@ -228,7 +228,7 @@ export class TouchControls {
     for (const [slot, btn] of this.slotBtns) {
       const d = looks?.[slot];
       btn.classList.toggle('hidden', !looks);
-      for (const look of ['selected', 'hot', 'invalid'] as const) btn.classList.toggle(look, d?.look === look);
+      for (const look of ['selected', 'hot', 'blocking', 'invalid'] as const) btn.classList.toggle(look, d?.look === look);
       btn.dataset.reason = d?.reason ?? '';
     }
   }

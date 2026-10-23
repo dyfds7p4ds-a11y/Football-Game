@@ -16,7 +16,7 @@ import { flagPosition } from '../play/penalties';
 import { jumpHeight } from '../play/interception';
 import { flightPos, type KickFlight } from '../play/kicking';
 import { FieldView, SLOT_COLORS } from './fieldMesh';
-import { PlayerMesh } from './playerMesh';
+import { PlayerMesh, buildFor } from './playerMesh';
 import { PALETTE } from './palette';
 import { headingToRotY, setFrameFlip, toWorld } from './coords';
 import cameraJson from '../data/camera.json';
@@ -211,6 +211,7 @@ export class SceneView {
       const pm = this.players[i];
       const team = a.side === 'off' ? offense : defense;
       pm.setLook(team.colors, a.player.number, PALETTE.skin[(a.player.number * 7 + a.id) % PALETTE.skin.length]);
+      pm.setBuild(buildFor(a.position));
       const userDefense = scrimmage && sim.userDefId >= 0;
       const isElig = scrimmage && !userDefense && a.side === 'off' && (ELIGIBLE as readonly string[]).includes(a.slot);
       // On defense the user's cornerbacks are labelled instead of the CPU's receivers.

@@ -19,7 +19,7 @@
     "hotMinHold": 0.8,
     "thrownFlash": 0.6
   },
-  "_docSlotState": "Phase 3d receiver buttons (ui/slotState.ts): red (invalid) only when the receiver is not eligible (blocking), is farther than maxThrowRange yd from the QB, or the user presses a receiver after the ball is thrown (red for thrownFlash s). The HOT read is a calm outline, held at least hotMinHold s so it never flickers between receivers.",
+  "_docSlotState": "Phase 3d receiver buttons (ui/slotState.ts): red (invalid) only when the user presses a receiver who blocks on this play or presses one after the ball is thrown (red for thrownFlash s), or the receiver is farther than maxThrowRange yd from the QB. A blocker nobody pressed is dimmed, not red. The HOT read is a calm outline, held at least hotMinHold s so it never flickers between receivers.",
   "tapSelect": {
     "radius": 72,
     "maxMs": 320,

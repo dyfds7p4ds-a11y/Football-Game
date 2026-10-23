@@ -5,6 +5,7 @@
  * poses for tackles (shoulder hit, arm wrap, stumble, hip turn, slide).
  */
 import * as THREE from 'three';
+import BODIES from '../data/bodies.json';
 import type { TeamColors } from '../data/types';
 import type { ContactAnim } from '../play/sim';
 
@@ -98,7 +99,15 @@ const GEO = {
   brim: new THREE.CylinderGeometry(0.13, 0.13, 0.015, 14, 1, false, -Math.PI / 2, Math.PI).translate(0, 0, -0.05),
   number: new THREE.PlaneGeometry(0.3, 0.3),
   shadow: new THREE.CircleGeometry(0.42, 16),
+  belly: new THREE.SphereGeometry(0.2, 12, 10).scale(1.1, 0.9, 0.8),
 };
+export interface Build { width: number; depth: number; belly: number; thigh: number; arm: number; legs: number; height: number }
+const NEUTRAL: Build = { width: 1, depth: 1, belly: 0, thigh: 1, arm: 1, legs: 1, height: 1 };
+/** Phase 3d: proportions for a roster position (`data/bodies.json`); unknown positions are neutral. */
+export function buildFor(position: string): Build {
+  const b = (BODIES as unknown as Record<string, Partial<Build>>)[position];
+  return b && typeof b === 'object' ? { ...NEUTRAL, ...b } : NEUTRAL;
+}
 const shadowMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.22, depthWrite: false });
 const maskMat = new THREE.MeshLambertMaterial({ color: 0x8c9196 });
 const sockMat = new THREE.MeshLambertMaterial({ color: 0xf2f2f2 });
@@ -131,6 +140,14 @@ export class PlayerMesh {
   private roll = 0;
   private spin = 0;
   private drop = 0;
+  /** Phase 3d: body build (position proportions). */
+  private hips = 0.98;
+  private torso!: THREE.Mesh;
+  private waist!: THREE.Mesh;
+  private pads: THREE.Mesh | null = null;
+  private belly: THREE.Mesh | null = null;
+  private thighs: THREE.Mesh[] = [];
+  private upperArms: THREE.Mesh[] = [];
 
   constructor(readonly kind: FigureKind = 'player') {
     const official = kind === 'official';
@@ -141,7 +158,9 @@ export class PlayerMesh {
     const leg = (x: number): Limb => {
       const upper = new THREE.Group();
       upper.position.set(x, 0, 0);
-      upper.add(new THREE.Mesh(GEO.thigh, this.pants));
+      const thigh = new THREE.Mesh(GEO.thigh, this.pants);
+      this.thighs.push(thigh);
+      upper.add(thigh);
       const lower = new THREE.Group();
       lower.position.y = -0.5;
       const shin = new THREE.Mesh(GEO.shin, official ? this.pants : sockMat);
@@ -157,7 +176,9 @@ export class PlayerMesh {
 
     const waist = new THREE.Mesh(GEO.waist, this.pants);
     waist.position.y = 0.08;
+    this.waist = waist;
     const torso = new THREE.Mesh(GEO.torso, this.jersey);
+    this.torso = torso;
     torso.position.y = 0.45;
     if (official) torso.scale.set(0.85, 1, 0.85);
     this.body.add(waist, torso);
@@ -165,6 +186,13 @@ export class PlayerMesh {
       const pads = new THREE.Mesh(GEO.pads, this.jersey);
       pads.position.y = 0.72;
       this.body.add(pads);
+      this.pads = pads;
+      // Phase 3d: linemen's gut (hidden unless the build has a belly).
+      const belly = new THREE.Mesh(GEO.belly, this.jersey);
+      belly.position.set(0, 0.24, -0.1);
+      belly.visible = false;
+      this.body.add(belly);
+      this.belly = belly;
     }
     const neck = new THREE.Mesh(GEO.neck, this.skin);
     neck.position.y = 0.82;
@@ -204,7 +232,9 @@ export class PlayerMesh {
     const arm = (x: number): Limb => {
       const upper = new THREE.Group();
       upper.position.set(x, 0.74, 0);
-      upper.add(new THREE.Mesh(GEO.upperArm, official ? this.jersey : this.skin));
+      const ua = new THREE.Mesh(GEO.upperArm, official ? this.jersey : this.skin);
+      this.upperArms.push(ua);
+      upper.add(ua);
       const lower = new THREE.Group();
       lower.position.y = -0.33;
       const fore = new THREE.Mesh(GEO.forearm, this.skin);
@@ -244,6 +274,28 @@ export class PlayerMesh {
     this.body.traverse((o) => {
       if ((o as THREE.Mesh).isMesh) o.castShadow = on;
     });
+  }
+
+  /** Phase 3d: apply a position's proportions (players only; officials keep theirs). */
+  setBuild(b: Build) {
+    if (this.kind === 'official') return;
+    this.torso.scale.set(b.width, 1, b.depth);
+    this.waist.scale.set(b.width * (1 + 0.08 * b.belly), 1, b.depth * (1 + 0.1 * b.belly));
+    this.pads?.scale.set(b.width, 1, b.depth);
+    if (this.belly) {
+      this.belly.visible = b.belly > 0;
+      this.belly.scale.set(b.width * (0.7 + 0.3 * b.belly), 0.7 + 0.3 * b.belly, 0.6 + 0.6 * b.belly);
+      this.belly.position.z = -0.08 * b.depth - 0.06 * b.belly;
+    }
+    for (const t of this.thighs) t.scale.set(b.thigh, 1, b.thigh);
+    for (const a of this.upperArms) a.scale.set(b.arm, 1, b.arm);
+    this.armL.upper.position.x = -0.36 * b.width;
+    this.armR.upper.position.x = 0.36 * b.width;
+    this.legL.upper.position.x = -0.12 * (0.5 + 0.5 * b.width);
+    this.legR.upper.position.x = 0.12 * (0.5 + 0.5 * b.width);
+    for (const l of [this.legL, this.legR]) l.upper.scale.set(1, b.legs, 1);
+    this.hips = 0.98 * b.legs;
+    this.root.scale.setScalar(b.height);
   }
 
   setLook(colors: TeamColors, number: number, skinTone: number) {
@@ -364,7 +416,7 @@ export class PlayerMesh {
     this.spin += (spin - this.spin) * rate;
     this.drop += (drop - this.drop) * rate;
     this.body.rotation.set(-this.pitch, this.spin, this.roll, 'YXZ');
-    this.body.position.y = 0.98 - this.drop + (anim || down ? 0 : Math.abs(Math.sin(this.phase)) * 0.05 * amp);
+    this.body.position.y = this.hips - this.drop + (anim || down ? 0 : Math.abs(Math.sin(this.phase)) * 0.05 * amp);
 
     // Signs: models face -z, so +x rotation swings a limb forward.
     this.legL.upper.rotation.x = legSwing;

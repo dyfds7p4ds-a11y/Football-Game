@@ -55,9 +55,9 @@ button:disabled { opacity: 0.45; }
 #btn-primary.juke { background: var(--accent2); }
 .slot { width: 68px; height: 68px; }
 .slot.selected { background: var(--accent); outline: 4px solid #fff; }
-/* Phase 3d: red only for a real problem (not eligible, out of range, pressed after the throw) */
+/* Phase 3d: red only for a real problem (pressed a blocker, out of range, pressed after the throw); blockers are dimmed */
 .slot.invalid { background: #e63946; color: #fff; }
-.slot.invalid[data-reason='ineligible'] { opacity: 0.55; }
+.slot.blocking { opacity: 0.45; }
 /* Phase 3c hot read, 3d: calm outline instead of a red pulse */
 .slot.hot { outline: 4px solid #8ecae6; box-shadow: 0 0 0 8px rgba(142, 202, 230, 0.35); }
 /* Phase 3b: every defender selectable; grouped DL | LB | DB, top right under the score bug */

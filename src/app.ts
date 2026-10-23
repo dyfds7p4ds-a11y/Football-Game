@@ -100,7 +100,7 @@ export class App {
   private target: EligibleSlot | null = null;
   /** Phase 3d: hot read shown without flicker, and when the user last pressed a receiver after the throw. */
   private hotLatch = new HotLatch();
-  private latePress: { slot: EligibleSlot; t: number } | null = null;
+  private lastPress: { slot: EligibleSlot; t: number } | null = null;
   private acc = 0;
   private postTimer = 0;
   private bannerTimer = 0;
@@ -350,7 +350,7 @@ export class App {
     this.hud.setPlayName(null);
     this.hud.setHint(null);
     this.view.showRoutes(null);
-    this.view.field.setMarkers(g.ballY, g.ballY + g.toGo);
+    this.view.field.setMarkers(g.ballY, g.ballY + g.toGo, g.down);
     this.view.field.showMarkers(true);
     this.playcall.show(g);
   }
@@ -372,7 +372,7 @@ export class App {
     const flip = g.possession !== g.userSide;
     const los = flip ? 100 - g.ballY : g.ballY;
     const fd = flip ? 100 - (g.ballY + g.toGo) : g.ballY + g.toGo;
-    this.view.field.setMarkers(los, fd);
+    this.view.field.setMarkers(los, fd, g.down);
     this.view.field.showMarkers(true);
   }
 
@@ -580,7 +580,7 @@ export class App {
     this.game = { ...g, clock, tendencies: recordTendency(g.tendencies, this.play!.category) };
     this.view.showRoutes(null);
     this.hotLatch.reset();
-    this.latePress = null;
+    this.lastPress = null;
     this.audMenu.hide();
     // Phase 3c: a run audible the defense did not answer in time catches its blitz.
     if (this.aud && this.sim && !this.defense) this.sim.audibleEdge = this.aud.edge;
@@ -1068,6 +1068,7 @@ export class App {
     }
     this.touch.setPrimary('SNAP', 'snap');
     this.touch.setSecondary(aud?.canAudible && !this.game!.conversionTry ? 'AUDIBLE' : null);
+    if (f.slotPressed) this.lastPress = { slot: f.slotPressed, t: performance.now() / 1000 };
     this.touch.setSlots(this.slotLooks(false));
     this.touch.setCharge(false, 0, null);
     this.hud.setHint(this.playsRun < 3 ? 'All receivers are marked. Tap SNAP, then HOLD a receiver button to charge and RELEASE to throw.' : null);
@@ -1085,7 +1086,7 @@ export class App {
       const r = sim.get(s);
       out[s] = slotDisplay({
         blocks: !!r.route?.blocks, distance: dist(qb.pos, r.pos), thrown: live && sim.thrown,
-        pressedRecently: !!this.latePress && this.latePress.slot === s && sim.t - this.latePress.t < SLOT_STATE.thrownFlash,
+        pressedRecently: !!this.lastPress && this.lastPress.slot === s && performance.now() / 1000 - this.lastPress.t < SLOT_STATE.thrownFlash,
         selected: s === this.target, hot: s === hot,
       });
     }
@@ -1207,7 +1208,7 @@ export class App {
   private updateLiveControls(f: InputFrame) {
     const sim = this.sim!;
     const qb = sim.get('QB');
-    if (sim.thrown && f.slotPressed) this.latePress = { slot: f.slotPressed, t: sim.t };
+    if (f.slotPressed) this.lastPress = { slot: f.slotPressed, t: performance.now() / 1000 };
     // Buttons stay up while the pass is in the air, so a late press shows why nothing happens.
     const inAir = sim.thrown && sim.ball.state === 'air' && !sim.result;
     this.touch.setSlots(sim.canThrow() || inAir ? this.slotLooks(true) : null);

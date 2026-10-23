@@ -1,0 +1,6 @@
+{
+  "_doc": "Phase 3d sideline down markers (render/fieldMesh.ts). The chain crew stands `sidelineOffset` yd outside the left sideline of the user's world (-x), where the broadcast camera keeps it clear of the action buttons: the down box at the line of scrimmage shows the down, the two chain poles stand at the start of the series (line to gain - 10) and at the line to gain, joined by the chain. Poles are poleHeight yd tall in `color`; with goal to go only the down box is shown.",
+  "sidelineOffset": 1.4,
+  "poleHeight": 2.3,
+  "color": "#ff6a13"
+}
