@@ -1,0 +1,10 @@
+{
+  "_doc": "Phase 3d sprint (play/sprint.ts) for the ball carrier, held SPRINT button. speed / qbSpeed: fraction of the carrier's top speed while sprinting (a runner jogs at 0.9 without it, a scrambling QB at 1.0). stamina 0..1 per play: drain per second while sprinting, recover per second otherwise, restart: the stamina needed to start sprinting again after running dry. Fumbles: a tackle on a sprinting carrier (or within afterglow s of letting go) multiplies the fumble chance by fumbleMin (fresh) up to fumbleMax (out of stamina); tests/sprint.test.ts keeps both inside fumbleRange, and the measured fumble rate ratio in the sim (multiplier plus harder hits at sprint speed, about 1.55) inside it too.",
+  "speed": 1.0,
+  "qbSpeed": 1.06,
+  "stamina": { "drain": 0.42, "recover": 0.22, "restart": 0.25 },
+  "fumbleMin": 1.2,
+  "fumbleMax": 1.45,
+  "afterglow": 0.25,
+  "fumbleRange": [1.2, 1.6]
+}

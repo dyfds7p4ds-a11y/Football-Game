@@ -168,6 +168,7 @@ export class App {
   private setPhase(p: Phase) {
     this.phase = p;
     if (p !== 'presnap') this.audMenu.hide();
+    if (p !== 'live') this.touch.setSprint(false);
     const onField = p === 'presnap' || p === 'live' || p === 'postplay' || p === 'kick' || p === 'kickFlight' || p === 'return' || p === 'returnPost';
     this.touch.setVisible(onField);
     if (!this.defense) this.touch.setDefenders(null);
@@ -1100,6 +1101,7 @@ export class App {
       handoff,
       juke: f.primaryPressed && !sim.canThrow(),
       slide: f.secondaryPressed,
+      sprint: f.sprintHeld,
     };
   }
 
@@ -1195,6 +1197,7 @@ export class App {
     const inAir = sim.thrown && sim.ball.state === 'air' && !sim.result;
     this.touch.setSlots(sim.canThrow() || inAir ? this.slotLooks(true) : null);
     if (sim.canThrow()) {
+      this.touch.setSprint(false);
       this.touch.setPrimary(sim.charging ? 'RELEASE' : 'THROW', 'throw');
       const info = sim.throwInfo(this.target);
       this.touch.setCharge(true, info.charge, info.window);
@@ -1205,9 +1208,10 @@ export class App {
       const userRuns = !!carrier && carrier.side === 'off' && sim.controlledId === carrier.id && !sim.result;
       const qbRuns = userRuns && carrier === qb && sim.pastLos(qb);
       this.touch.setPrimary(userRuns ? 'JUKE' : '', userRuns ? 'juke' : 'none');
+      this.touch.setSprint(userRuns, sim.sprint.stamina, sim.sprint.sprinting);
       this.touch.setSecondary(qbRuns ? 'SLIDE' : null);
       this.touch.setCharge(false, 0, null);
-      this.hud.setHint(qbRuns && this.playsRun <= 6 ? 'Scrambling: find a lane · SLIDE to give yourself up' : userRuns && this.playsRun <= 3 ? 'Steer with your left thumb · JUKE to dodge' : null);
+      this.hud.setHint(qbRuns && this.playsRun <= 6 ? 'Scrambling: find a lane · SLIDE to give yourself up' : userRuns && this.playsRun <= 3 ? 'Steer with your left thumb · JUKE to dodge · hold SPRINT (costs stamina, loosens the ball)' : null);
     }
     const holds = sim.ball.holder === qb.id && !sim.result;
     this.hud.setPressure(holds, sim.pressure);

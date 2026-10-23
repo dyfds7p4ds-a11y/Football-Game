@@ -20,6 +20,7 @@ import { resolveCatch, type CatchCandidate } from './catch';
 import { FIELD } from './field';
 import { COVERAGE, CoverageReader, ZoneMatcher, carrySpot, inPhaseSpot, overTop, type Helper, type ReadTarget, type ZoneArea } from './coverage';
 import { inPhase, throwingWindow } from './windows';
+import { freshSprint, sprintFumbleFactor, sprintSpeed, stepSprint, type SprintState } from './sprint';
 import { TACKLE, resolveTackle, type ContactKind } from './tackle';
 import { SCREEN, screenTiming, type ScreenTiming } from './screen';
 import { nearestOfficial, setupOfficials, updateOfficials, type Official } from './officials';
@@ -111,6 +112,8 @@ export interface SimInput {
   juke: boolean;
   /** Edge-triggered: QB slides (gives himself up) while scrambling. */
   slide?: boolean;
+  /** Phase 3d: SPRINT held (user ball carrier). */
+  sprint?: boolean;
   /** User on defense: stick for the selected defender and the edge-triggered JUMP button. */
   defense?: { move: Vec2; jump: boolean };
 }
@@ -330,6 +333,8 @@ export class PlaySim {
   private pitched = false;
   private jukeUntil = 0;
   private jukeCooldown = 0;
+  /** Phase 3d: the user carrier's sprint and stamina (per play). */
+  readonly sprint: SprintState = freshSprint();
   private carrierPath: Vec2[] = [];
   private carrierIdx = 0;
   private bySlot = new Map<string, Actor>();
@@ -961,7 +966,10 @@ export class PlaySim {
       // Ball carriers auto-run their designed path, then straight upfield.
       move = this.autoRunDirection(controlled);
     }
-    let v = scale(move, controlled.maxSpeed * (controlled === qb ? 1 : 0.9));
+    // Phase 3d: SPRINT for a runner, or a QB once he is out of the pocket.
+    const mayRun = controlled !== qb || this.scrambling || this.pastLos(qb);
+    stepSprint(this.sprint, !!input.sprint && mayRun && len(move) > 0.15, this.t, SIM_DT);
+    let v = scale(move, controlled.maxSpeed * sprintSpeed(this.sprint, controlled === qb));
     if (controlled === qb && v.y < 0) v = scale(v, 0.9); // backpedal / drop
     if (input.juke && this.jukeCooldown <= 0 && (controlled !== qb || this.pastLos(qb))) {
       const side = Math.abs(move.x) > 0.2 ? Math.sign(move.x) : this.rng.chance(0.5) ? 1 : -1;
@@ -1797,7 +1805,8 @@ export class PlaySim {
         a.vel = v2();
         continue;
       }
-      const want = clampLen(desired.get(a.id) ?? v2(), a.maxSpeed);
+      const boost = a.id === this.controlledId && this.sprint.sprinting ? Math.max(1, sprintSpeed(this.sprint, a.slot === 'QB')) : 1;
+      const want = clampLen(desired.get(a.id) ?? v2(), a.maxSpeed * boost);
       const k = this.contact;
       if (k && (a.id === k.carrier || a.id === k.tackler)) a.vel = want; // contact: momentum is scripted
       else a.vel = add(a.vel, clampLen(sub(want, a.vel), a.accel * dt));
@@ -2005,7 +2014,9 @@ export class PlaySim {
     const F = TURNOVERS.fumble;
     const p = F.base * (kind === 'shoulder' ? F.shoulder : 1) * (sack ? F.sack : 1) *
       (1 + F.strengthWeight * (d.player.ratings.strength - c.player.ratings.strength) / 100);
-    return this.fumbleRng.chance(clamp(p, 0, F.max));
+    // Phase 3d: a sprinting user carrier puts the ball on the ground more often (after the cap).
+    const sprint = c.id === this.controlledId ? sprintFumbleFactor(this.sprint, this.t) : 1;
+    return this.fumbleRng.chance(clamp(p, 0, F.max) * sprint);
   }
 
   private startFumble(c: Actor) {

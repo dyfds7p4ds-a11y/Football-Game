@@ -24,6 +24,8 @@ export class TouchControls {
   readonly chargeFill: HTMLElement;
   readonly chargeBox: HTMLElement;
   readonly secondary: HTMLButtonElement;
+  /** Phase 3d: SPRINT (hold) next to JUKE for the ball carrier. */
+  readonly sprint: HTMLButtonElement;
   private slotBtns = new Map<EligibleSlot, HTMLButtonElement>();
   private defBtns = new Map<DefSlot, HTMLButtonElement>();
   private defStrip: HTMLElement;
@@ -60,11 +62,24 @@ export class TouchControls {
     const secUp = () => this.secondary.classList.remove('down');
     this.secondary.addEventListener('pointerup', secUp);
     this.secondary.addEventListener('pointercancel', secUp);
+    this.sprint = h('button', { id: 'btn-sprint', class: 'hidden' }, 'SPRINT');
+    this.sprint.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      this.sprint.setPointerCapture(e.pointerId);
+      this.sprint.classList.add('down');
+      input.setTouchSprint(true);
+    });
+    const sprintUp = () => {
+      this.sprint.classList.remove('down');
+      input.setTouchSprint(false);
+    };
+    this.sprint.addEventListener('pointerup', sprintUp);
+    this.sprint.addEventListener('pointercancel', sprintUp);
     const A = TOUCH.actions;
     const actions = h('div', { id: 'actions', style: {
       right: `calc(${A.right}px + var(--safe-r))`, bottom: `calc(${A.bottom}px + var(--safe-b))`,
       width: `${A.size}px`, height: `${A.size}px`,
-    } }, this.chargeBox, this.primary, this.secondary);
+    } }, this.chargeBox, this.primary, this.secondary, this.sprint);
     for (const slot of Object.keys(SLOT_POS) as EligibleSlot[]) {
       const [r, b] = SLOT_POS[slot];
       const btn = h('button', { class: 'slot', style: { right: `${r}px`, bottom: `${b}px` } }, SLOT_LABEL[slot]);
@@ -205,6 +220,14 @@ export class TouchControls {
     this.secondary.disabled = !ready;
   }
 
+  /** Phase 3d: SPRINT button (hidden unless the user carries the ball); `stamina` 0..1 fills it. */
+  setSprint(visible: boolean, stamina = 1, active = false) {
+    this.sprint.classList.toggle('hidden', !visible);
+    this.sprint.classList.toggle('active', active);
+    this.sprint.style.setProperty('--stamina', `${Math.round(stamina * 100)}%`);
+    if (!visible) this.input.setTouchSprint(false);
+  }
+
   /** Charge meter: fill 0..1 and the sweet-spot window (null hides it). */
   setCharge(visible: boolean, charge: number, win: { center: number; halfWidth: number } | null) {
     this.chargeBox.classList.toggle('hidden', !visible);
@@ -229,6 +252,7 @@ export class TouchControls {
       this.joy.end();
       this.input.setTouchMove(0, 0);
       this.input.setTouchPrimary(false);
+      this.input.setTouchSprint(false);
       for (const slot of this.slotBtns.keys()) this.input.setTouchSlot(slot, false);
       this.drawJoy();
     }
