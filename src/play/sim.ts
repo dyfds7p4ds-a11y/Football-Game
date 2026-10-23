@@ -30,6 +30,7 @@ import {
   type BlockAssignment, type BlockMode, type BlockRole, type LaneDefender, type Unit,
 } from './blocking';
 import { AUDIBLES } from './audible';
+import turnoverJson from '../data/turnovers.json';
 import { BLITZ, blitzDesign, blitzPath, classifyBlitz, recognizeChance, surpriseReaction, type BlitzFacts, type BlitzOutcome, type BlitzPath } from './blitz';
 import { switchTarget } from './defenseSelect';
 import pocketJson from '../data/pocket.json';
@@ -40,6 +41,12 @@ export const SCRAMBLE = pocketJson.scramble;
 export const SIM_DT = 1 / 60;
 const HISTORY = 90;
 const MAX_PLAY_TIME = 25;
+/** Phase 3c: returnable turnovers (data/turnovers.json). */
+export const TURNOVERS = turnoverJson as {
+  fumble: { base: number; shoulder: number; sack: number; strengthWeight: number; max: number };
+  loose: { popSpeed: number; friction: number; recoverRadius: number; recoverChance: number; maxLoose: number };
+  return: { lookAhead: number; avoid: number; blockRange: number; blockedSpeed: number; jukeSpeed: number; jukeTime: number; jukeCooldown: number; maxReturnTime: number };
+};
 
 export type Side = 'off' | 'def';
 
@@ -151,7 +158,8 @@ export interface Ball {
 export type PlayEventType =
   | 'snap' | 'handoff' | 'pitch' | 'throw' | 'catch' | 'interception' | 'deflection' | 'drop'
   | 'incomplete' | 'tackle' | 'sack' | 'touchdown' | 'outOfBounds' | 'brokenTackle' | 'juke' | 'safety'
-  | 'scramble' | 'shed' | 'slide' | 'flag' | 'jump' | 'timing' | 'chip' | 'hurry' | 'pickup' | 'rip';
+  | 'scramble' | 'shed' | 'slide' | 'flag' | 'jump' | 'timing' | 'chip' | 'hurry' | 'pickup' | 'rip'
+  | 'fumble' | 'recovery';
 
 export interface PlayEvent {
   t: number;
@@ -177,6 +185,10 @@ export interface PlayResult {
   description: string;
   /** Fouls flagged during the play; enforced after the whistle (game/penalties.ts). */
   fouls: Foul[];
+  /** Phase 3c: the defense got the ball on a fumble (outcome 'interception' = the defense's ball at endY). */
+  fumble?: boolean;
+  /** Phase 3c: yards the defense returned the turnover (toward the offense's goal line). */
+  returnYards?: number;
 }
 
 export interface SimOptions {
@@ -296,6 +308,14 @@ export class PlaySim {
    * Set before the first step.
    */
   audibleEdge = false;
+  /** Phase 3c: a turnover being returned (interception, or a fumble the defense recovered). */
+  turnover: { kind: 'interception' | 'fumble'; at: Vec2; t: number; by: number } | null = null;
+  /** Phase 3c: a live fumble on the ground (who lost it, when, where). */
+  loose: { t: number; by: number; at: Vec2 } | null = null;
+  /** Phase 3c: offensive player the user steers while the defense returns a turnover. */
+  private pursuerId = -1;
+  private caughtPass = false;
+  private fumbleRng: Rng;
   /** Phase 3c: the open receiver once the QB has noticed a surprise rush (null: no alert). */
   hot: EligibleSlot | null = null;
   private lastRip = -Infinity;
@@ -341,6 +361,8 @@ export class PlaySim {
     this.coverage = new CoverageReader(this.diff.coverageRead, this.rng.fork());
     this.penRng = this.rng.fork();
     this.blockRng = this.penRng.fork();
+    // Own seed (not a fork): fumbles must not shift the block or penalty streams.
+    this.fumbleRng = new Rng((opts.seed ^ 0x2c1b3c6d) >>> 0);
     const bias = opts.penaltyBias ?? { off: 1, def: 1 };
     this.penaltyBias = { off: bias.off * this.diff.penaltyRate, def: bias.def * this.diff.penaltyRate };
     this.officials = setupOfficials(this.los, this.ballX);
@@ -652,6 +674,11 @@ export class PlaySim {
     return this.ball.state === 'held' && this.ball.holder !== null ? this.actors[this.ball.holder] : null;
   }
 
+  /** Phase 3c: the defense has the ball and is returning it. */
+  get returning(): boolean {
+    return this.turnover !== null && this.carrier?.side === 'def';
+  }
+
   /** Position `delay` seconds ago, as perceived by a reacting defender. */
   perceived(a: Actor, delay: number): Vec2 {
     const back = Math.min(a.history.length - 1, Math.round(delay / SIM_DT));
@@ -721,7 +748,7 @@ export class PlaySim {
     if (!this.result) this.checkTackles();
     if (!this.result) this.checkBoundaries();
     if (!this.result && this.contact && this.t >= this.contact.whistleAt) this.whistleContact();
-    if (!this.result && this.t > MAX_PLAY_TIME) {
+    if (!this.result && this.t > MAX_PLAY_TIME + (this.turnover || this.loose ? TURNOVERS.return.maxReturnTime : 0)) {
       const c = this.carrier;
       this.finish(c ? 'tackle' : 'incomplete', c ?? this.get('QB'));
     }
@@ -814,7 +841,8 @@ export class PlaySim {
 
   /** User defense: hand control to another defender (CPU takes over the previous one). */
   selectDefender(slot: DefSlot) {
-    if (this.userDefId < 0) return;
+    // Phase 3c: the user keeps the man with the ball until the return is over.
+    if (this.userDefId < 0 || (this.returning && this.carrier?.id === this.userDefId)) return;
     const d = this.getDef(slot);
     if (!d.down) this.userDefId = d.id;
   }
@@ -843,6 +871,19 @@ export class PlaySim {
       return;
     }
     const move = clampLen(inp?.move ?? v2(), 1);
+    if (this.carrier === d) {
+      // Phase 3c: returning a turnover: full speed (idle stick = the CPU return line), JUMP = juke.
+      desired.set(d.id, len(move) > 0.15 ? scale(move, d.maxSpeed) : this.returnRun(d));
+      const R = TURNOVERS.return;
+      if (inp?.jump && this.jukeCooldown <= 0) {
+        const side = Math.abs(move.x) > 0.2 ? Math.sign(move.x) : this.rng.chance(0.5) ? 1 : -1;
+        d.vel = add(d.vel, v2(side * R.jukeSpeed, 0));
+        this.jukeUntil = this.t + R.jukeTime;
+        this.jukeCooldown = R.jukeCooldown;
+        this.emit('juke', d.id);
+      }
+      return;
+    }
     desired.set(d.id, scale(move, d.maxSpeed * DEF_CONTROL.moveSpeed));
     if (!inp?.jump) return;
     const eng = this.engagements.find((e) => e.defender === d.id);
@@ -869,12 +910,36 @@ export class PlaySim {
     this.emit('jump', d.id);
   }
 
+  /**
+   * Phase 3c: the user's offense lost the ball: he steers the offensive player
+   * nearest the ball (live fumble) or the returner (with a little hysteresis);
+   * an idle stick takes the pursuit angle. Tackles come from the tackle model.
+   */
+  private controlPursuer(input: SimInput, desired: Map<number, Vec2>) {
+    const target = this.loose ? this.ball.pos : this.carrier!.pos;
+    const cands = this.actors.filter((a) => a.side === 'off' && !a.down);
+    if (cands.length === 0) {
+      this.controlledId = -1;
+      return;
+    }
+    const best = cands.reduce((m, a) => (dist(a.pos, target) < dist(m.pos, target) ? a : m));
+    const cur = this.actors[this.pursuerId];
+    const keep = cur && cur.side === 'off' && !cur.down && dist(cur.pos, target) < dist(best.pos, target) + 2;
+    const p = keep ? cur : best;
+    this.pursuerId = p.id;
+    this.controlledId = p.id;
+    const move = clampLen(input.move, 1);
+    if (len(move) > 0.15) desired.set(p.id, scale(move, p.maxSpeed));
+    else desired.set(p.id, this.loose ? this.looseGoal(p) : this.chase(p, this.carrier!));
+  }
+
   private nearestEligible(p: Vec2): Actor {
     return ELIGIBLE.map((s) => this.get(s)).reduce((m, a) => (dist(a.pos, p) < dist(m.pos, p) ? a : m));
   }
 
   private controlUser(input: SimInput, desired: Map<number, Vec2>) {
     if (this.userDefId >= 0) this.controlDefender(input.defense, desired);
+    if (this.userDefId < 0 && (this.loose || this.returning)) return this.controlPursuer(input, desired);
     const qb = this.get('QB');
     const c = this.carrier;
     const controlled = c && c.side === 'off' ? c : this.passThrown || this.handedOff ? null : qb;
@@ -1078,6 +1143,15 @@ export class PlaySim {
     const flight = this.ball.state === 'air' ? this.ball.flight : null;
     for (const a of this.actors) {
       if (a.side !== 'off' || desired.has(a.id) || a.down) continue;
+      // Phase 3c: live fumble: go get it; defense returning a turnover: chase the returner.
+      if (this.loose) {
+        desired.set(a.id, this.looseGoal(a));
+        continue;
+      }
+      if (this.returning) {
+        desired.set(a.id, this.chase(a, carrier!));
+        continue;
+      }
       if (a === qb) {
         desired.set(a.id, v2());
         continue;
@@ -1443,8 +1517,14 @@ export class PlaySim {
       let goal: Vec2;
       let urgency = 1;
 
+      if (this.loose) {
+        desired.set(d.id, this.looseGoal(d));
+        continue;
+      }
       if (carrier && carrier.side === 'def') {
-        goal = d.pos;
+        // Phase 3c: the returner runs, the rest of the defense blocks for him.
+        desired.set(d.id, d === carrier ? this.returnRun(d) : this.escort(d, carrier));
+        continue;
       } else if (runMode && this.t > this.runRecognizedAt + d.reaction * (carrier === qb ? SCRAMBLE.reactFactor : 1) + (isDeep ? 0.35 : 0) +
         (this.audibleEdge && this.blitzers.has(d.id) ? AUDIBLES.edge.blitzRunRead : 0)) {
         goal = this.pursuit(d, carrier!);
@@ -1769,6 +1849,7 @@ export class PlaySim {
       this.syncHeldBall();
       return;
     }
+    if (b.state === 'loose' && this.loose) return this.updateLoose(dt);
     if (b.state === 'loose' || !b.flight) return;
     const f = b.flight;
     f.t += dt;
@@ -1851,6 +1932,7 @@ export class PlaySim {
         r.pos = lerp(r.pos, f.landing, 0.5);
         this.runRecognizedAt = this.t;
         this.controlledId = r.id;
+        this.caughtPass = true;
         this.emit('catch', r.id);
         this.syncHeldBall();
         return;
@@ -1894,26 +1976,164 @@ export class PlaySim {
     this.ball.holder = d.id;
     this.ball.flight = null;
     this.emit('interception', d.id);
-    this.result = this.makeResult('interception', d.pos, d);
+    this.startReturn('interception', d);
+  }
+
+  // ---------------------------------------------------------------- turnovers (Phase 3c)
+
+  /** The defense has the ball: the play goes on as a return until a tackle, the sideline or the end zone. */
+  private startReturn(kind: 'interception' | 'fumble', d: Actor) {
+    // Placed on the field if needed (a pick or recovery right at the sideline / end line).
+    d.pos = v2(clamp(d.pos.x, -FIELD.halfWidth + 0.6, FIELD.halfWidth - 0.6), clamp(d.pos.y, -FIELD.endzone + 0.6, FIELD.length + FIELD.endzone - 0.6));
+    this.turnover = { kind, at: { ...d.pos }, t: this.t, by: d.id };
+    this.runRecognizedAt = this.t;
+    this.engagements = [];
+    this.contact = null;
+    for (const a of this.actors) a.tackleCooldown = 0;
+    // The user's defense: the man with the ball is the user's now.
+    if (this.userDefId >= 0) this.userDefId = d.id;
+    this.syncHeldBall();
+  }
+
+  /** Fumble roll on a successful tackle (own RNG stream, so the football before it never changes). */
+  private fumbles(c: Actor, d: Actor, kind: ContactKind, sack: boolean): boolean {
+    const F = TURNOVERS.fumble;
+    const p = F.base * (kind === 'shoulder' ? F.shoulder : 1) * (sack ? F.sack : 1) *
+      (1 + F.strengthWeight * (d.player.ratings.strength - c.player.ratings.strength) / 100);
+    return this.fumbleRng.chance(clamp(p, 0, F.max));
+  }
+
+  private startFumble(c: Actor) {
+    const b = this.ball;
+    b.state = 'loose';
+    b.holder = null;
+    b.flight = null;
+    const a = this.fumbleRng.range(0, Math.PI * 2);
+    const sp = TURNOVERS.loose.popSpeed * this.fumbleRng.range(0.5, 1);
+    b.looseVel = { x: Math.sin(a) * sp, y: Math.cos(a) * sp - 1.5, h: 2 };
+    b.pos = { ...c.pos };
+    c.down = true;
+    this.loose = { t: this.t, by: c.id, at: { ...c.pos } };
+    this.emit('fumble', c.id);
+  }
+
+  /** A live fumble: it rolls, everybody goes for it, the nearest man falls on it. */
+  private updateLoose(dt: number) {
+    const b = this.ball;
+    const L = TURNOVERS.loose;
+    const v = v2(b.looseVel.x, b.looseVel.y);
+    const sp = len(v);
+    const nv = sp > 0 ? scale(v, Math.max(0, sp - L.friction * dt) / sp) : v;
+    b.looseVel = { x: nv.x, y: nv.y, h: b.looseVel.h - 10.7 * dt };
+    b.h = Math.max(0.12, b.h + b.looseVel.h * dt);
+    if (b.h <= 0.12) b.looseVel.h = Math.abs(b.looseVel.h) * 0.4;
+    b.pos = add(b.pos, scale(nv, dt));
+    const lost = this.actors[this.loose!.by];
+    if (Math.abs(b.pos.x) > FIELD.halfWidth || b.pos.y < -FIELD.endzone || b.pos.y > FIELD.length + FIELD.endzone) {
+      // Out of bounds: the offense keeps it (never ahead of the fumble); out of its own end zone it is a safety,
+      // out of the other end zone a touchback for the defense.
+      this.loose = null;
+      if (b.pos.y >= FIELD.length) {
+        const r = this.makeResult('interception', v2(b.pos.x, FIELD.length), null);
+        r.fumble = true;
+        r.description = describe(r, null);
+        this.result = r;
+        return;
+      }
+      const spot = v2(b.pos.x, Math.min(b.pos.y, lost.pos.y));
+      this.emit('outOfBounds', lost.id);
+      this.result = this.makeResult(spot.y <= 0 ? 'safety' : 'outOfBounds', spot, lost);
+      return;
+    }
+    let best: Actor | null = null;
+    for (const a of this.actors) {
+      if (a.down || dist(a.pos, b.pos) > L.recoverRadius) continue;
+      if (!best || dist(a.pos, b.pos) < dist(best.pos, b.pos)) best = a;
+    }
+    if (!best && this.t - this.loose!.t > L.maxLoose) {
+      best = this.actors.filter((a) => !a.down).reduce((m, a) => (dist(a.pos, b.pos) < dist(m.pos, b.pos) ? a : m));
+    } else if (best && !this.fumbleRng.chance(L.recoverChance)) return;
+    if (!best) return;
+    this.loose = null;
+    b.state = 'held';
+    b.holder = best.id;
+    this.emit('recovery', best.id);
+    if (best.side === 'def') this.startReturn('fumble', best);
+    else {
+      this.runRecognizedAt = this.t;
+      this.controlledId = best.id;
+      this.syncHeldBall();
+    }
+  }
+
+  /** Where everybody goes during a live fumble (both sides): the ball. */
+  private looseGoal(a: Actor): Vec2 {
+    return this.seek(a, this.ball.pos, 1);
+  }
+
+  /** CPU returner: for the offense's goal line (y = 0), bending away from the nearest pursuer ahead. */
+  private returnRun(c: Actor): Vec2 {
+    const R = TURNOVERS.return;
+    let dir = v2(0, -1);
+    let worst: Actor | null = null;
+    for (const o of this.actors) {
+      if (o.side !== 'off' || o.down) continue;
+      const rel = sub(o.pos, c.pos);
+      if (rel.y > 1 || len(rel) > R.lookAhead) continue;
+      if (!worst || dist(o.pos, c.pos) < dist(worst.pos, c.pos)) worst = o;
+    }
+    if (worst) dir = norm(add(dir, scale(v2(norm(sub(c.pos, worst.pos)).x, 0), R.avoid * 2)));
+    if (Math.abs(c.pos.x) > FIELD.halfWidth - 3) dir = norm(add(dir, v2(-Math.sign(c.pos.x) * 0.6, 0)));
+    return scale(dir, c.maxSpeed);
+  }
+
+  /** Return team without the ball: get in front of the nearest pursuer (the contact slows him). */
+  private escort(d: Actor, c: Actor): Vec2 {
+    let target: Actor | null = null;
+    for (const o of this.actors) {
+      if (o.side !== 'off' || o.down) continue;
+      if (!target || dist(o.pos, c.pos) < dist(target.pos, c.pos)) target = o;
+    }
+    if (!target) return this.seek(d, add(c.pos, v2(0, -4)), 1);
+    return this.seek(d, lerp(target.pos, c.pos, 0.3), 1);
+  }
+
+  /** Offense chasing the returner: pursuit angle, slowed while a return blocker is on him. */
+  private chase(a: Actor, c: Actor): Vec2 {
+    const v = this.seek(a, this.pursuit(a, c), 1);
+    return this.blockedOnReturn(a) ? scale(v, TURNOVERS.return.blockedSpeed) : v;
+  }
+
+  private blockedOnReturn(a: Actor): boolean {
+    return this.actors.some((o) => o.side === 'def' && !o.down && o.id !== this.ball.holder && dist(o.pos, a.pos) < TURNOVERS.return.blockRange);
+  }
+
+  /** Return over: tackle, sideline or end zone. Outcome 'interception' = the defense's ball at the spot. */
+  private finishReturn(how: 'tackle' | 'outOfBounds' | 'touchdown', c: Actor) {
+    this.emit(how, c.id);
+    const at = how === 'touchdown' ? v2(c.pos.x, 0) : c.pos;
+    this.result = this.makeResult('interception', at, c);
   }
 
   // ---------------------------------------------------------------- whistle
 
   private checkTackles() {
     const c = this.carrier;
-    if (!c || c.side !== 'off' || this.contact) return;
+    if (!c || this.contact || (c.side === 'def' && !this.turnover)) return;
+    // Phase 3c: on a return the offense tackles, with the same tackle model.
+    const tacklers = c.side === 'off' ? 'def' : 'off';
     for (const d of this.actors) {
-      if (d.side !== 'def' || d.down || d.tackleCooldown > 0) continue;
+      if (d.side !== tacklers || d.down || d.tackleCooldown > 0) continue;
       // The user defender's JUMP doubles as a diving tackle: longer range, a little more stopping power.
-      const diving = d.id === this.userDefId && this.t - d.jumpT < DEF_CONTROL.jump.duration;
+      const diving = tacklers === 'def' && d.id === this.userDefId && this.t - d.jumpT < DEF_CONTROL.jump.duration;
       if (dist(d.pos, c.pos) > (diving ? DEF_CONTROL.tackle.diveRange : TACKLE.range)) continue;
       const engaged = !!this.isEngaged(d);
       if (engaged && dist(d.pos, c.pos) > TACKLE.engagedRange) continue;
-      let factor = this.diff.tackling * (diving ? DEF_CONTROL.tackle.diveFactor : 1);
+      let factor = (tacklers === 'def' ? this.diff.tackling : 1) * (diving ? DEF_CONTROL.tackle.diveFactor : 1);
       // Phase 3c audible edge: a blitzer still rushing the QB only gets an arm on the runner going past.
       if (this.audibleEdge && this.blitzers.has(d.id) && this.t < this.runRecognizedAt + d.reaction + AUDIBLES.edge.blitzRunRead) factor *= AUDIBLES.edge.blitzTackle;
-      if (c.slot === 'QB' && !this.pastLos(c)) factor *= TACKLE.pocketSackFactor; // sacks: QB is a sitting duck
-      else if (c.slot === 'QB') factor *= SCRAMBLE.tackleBonus; // a scrambling QB is no running back
+      if (c.side === 'off' && c.slot === 'QB' && !this.pastLos(c)) factor *= TACKLE.pocketSackFactor; // sacks: QB is a sitting duck
+      else if (c.side === 'off' && c.slot === 'QB') factor *= SCRAMBLE.tackleBonus; // a scrambling QB is no running back
       const out = resolveTackle({
         tacklerPos: d.pos, tacklerVel: d.vel, carrierPos: c.pos, carrierVel: c.vel,
         tackling: d.player.ratings.tackling, carrierStrength: c.player.ratings.strength, carrierSpeed: c.player.ratings.speed,
@@ -1927,7 +2147,12 @@ export class PlaySim {
         const dir = len(c.vel) > 0.5 ? norm(c.vel) : v2(0, 1);
         c.vel = scale(dir, out.fallForward / out.contactTime);
         d.vel = c.vel;
-        const sack = c.slot === 'QB' && c.pos.y < this.los && !this.passThrown && !this.handedOff;
+        const sack = c.side === 'off' && c.slot === 'QB' && c.pos.y < this.los && !this.passThrown && !this.handedOff;
+        if (c.side === 'off' && this.fumbles(c, d, out.kind, sack)) {
+          // Phase 3c: the ball comes out on the hit.
+          this.startFumble(c);
+          return;
+        }
         this.contact = { carrier: c.id, tackler: d.id, whistleAt: this.t + out.contactTime, sack };
         if (sack) {
           const bz = this.blitzers.get(d.id);
@@ -1951,7 +2176,8 @@ export class PlaySim {
     const c = this.actors[k.carrier];
     c.down = true;
     if (k.tackler >= 0) this.actors[k.tackler].vel = scale(this.actors[k.tackler].vel, 0.3);
-    if (c.pos.y <= 0) this.finish('safety', c);
+    if (c.side === 'def') this.finishReturn('tackle', c);
+    else if (c.pos.y <= 0) this.finish('safety', c);
     else this.finish(k.sack ? 'sack' : 'tackle', c);
   }
 
@@ -1963,6 +2189,12 @@ export class PlaySim {
 
   private checkBoundaries() {
     const c = this.carrier;
+    if (c && c.side === 'def' && this.turnover) {
+      if (c.pos.y <= 0) this.finishReturn('touchdown', c);
+      else if (Math.abs(c.pos.x) > FIELD.halfWidth) this.finishReturn('outOfBounds', c);
+      else if (this.t - this.turnover.t > TURNOVERS.return.maxReturnTime) this.finishReturn('tackle', c);
+      return;
+    }
     if (!c || c.side !== 'off') return;
     if (c.pos.y >= FIELD.length) {
       this.finish('touchdown', c);
@@ -1997,6 +2229,12 @@ export class PlaySim {
       description: '',
       fouls: this.fouls,
     };
+    if (outcome === 'interception' && this.turnover) {
+      res.fumble = this.turnover.kind === 'fumble';
+      res.returnYards = Math.round(this.turnover.at.y - endY);
+      // A catch that was then fumbled away is still a completion.
+      res.completion = this.passThrown && this.turnover.kind === 'fumble' && this.caughtPass;
+    }
     res.description = describe(res, c);
     return res;
   }
@@ -2039,7 +2277,12 @@ function describe(r: PlayResult, c: Actor | null): string {
   switch (r.outcome) {
     case 'incomplete': return 'Incomplete pass';
     case 'noPlay': return 'No play';
-    case 'interception': return `Intercepted by ${who}!`;
+    case 'interception': {
+      // Phase 3c: returns.
+      const ret = r.returnYards === undefined ? '' : r.endY <= 0 ? ', returned for a touchdown!' : r.returnYards > 0 ? `, returned ${yds(r.returnYards)}` : '';
+      if (r.fumble) return who ? `Fumble! Recovered by ${who}${ret}` : 'Fumble through the end zone: touchback';
+      return `Intercepted by ${who}${ret || '!'}`;
+    }
     case 'sack': return `Sacked for a loss of ${yds(r.yards)}`;
     case 'safety': return 'Safety!';
     case 'touchdown': return `Touchdown! ${who}`;

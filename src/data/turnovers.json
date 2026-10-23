@@ -1,0 +1,6 @@
+{
+  "_doc": "Phase 3c: returnable turnovers (play/sim.ts). fumble: chance per successful tackle on a ball carrier = base x hit factor (shoulder = a big hit, sack = strip sack) x (1 + strengthWeight x (tackler strength - carrier strength) / 100), clamped to max. loose: the ball pops out at speed popSpeed (yd/s, random direction, a little backwards), slows by friction yd/s^2; a player within recoverRadius yd recovers it with chance recoverChance per step (nearest first); after maxLoose s the nearest player falls on it. Out of bounds: the offense keeps it at the spot (never ahead of the fumble). return: the CPU returner runs for the end zone and bends away from pursuers within lookAhead yd (avoid); a pursuer touched by a return-team player within blockRange yd is slowed to blockedSpeed; juke = the returner's JUMP / juke: sideways burst jukeSpeed yd/s for jukeTime s, once per jukeCooldown s; maxReturnTime s after the turnover the play is whistled dead.",
+  "fumble": { "base": 0.018, "shoulder": 1.6, "sack": 1.5, "strengthWeight": 1.0, "max": 0.06 },
+  "loose": { "popSpeed": 4.5, "friction": 5, "recoverRadius": 0.9, "recoverChance": 0.3, "maxLoose": 3.5 },
+  "return": { "lookAhead": 6, "avoid": 0.8, "blockRange": 0.9, "blockedSpeed": 0.45, "jukeSpeed": 4.5, "jukeTime": 0.35, "jukeCooldown": 1.0, "maxReturnTime": 14 }
+}

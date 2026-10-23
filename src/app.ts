@@ -491,10 +491,12 @@ export class App {
     const c = sim.carrier;
     const runner = !!c && c.side === 'off' && (c.slot !== 'QB' || sim.pastLos(c));
     const blocked = sim.blockStates().some((b) => b.defender === sim.userDefId);
-    this.touch.setPrimary(runner ? 'DIVE' : blocked && sim.ball.state !== 'air' ? 'RIP' : 'JUMP', 'throw');
-    this.touch.setSecondary('SWITCH');
+    const returner = sim.returning && c?.id === sim.userDefId;
+    this.touch.setPrimary(returner ? 'JUKE' : runner ? 'DIVE' : blocked && sim.ball.state !== 'air' ? 'RIP' : 'JUMP', returner ? 'juke' : 'throw');
+    this.touch.setSecondary(returner ? null : 'SWITCH');
     this.touch.setSlots(null, new Set(), false);
-    this.touch.setDefenders(this.defSlot);
+    // The strip shows whoever the user controls now (the returner after a takeaway).
+    this.touch.setDefenders((sim.userDefender?.slot as DefSlot | undefined) ?? this.defSlot);
     this.touch.setCharge(false, 0, null);
     this.hud.setEdgeMarkers(null);
     this.hud.setHint(null);
@@ -1117,6 +1119,12 @@ export class App {
     }
   }
 
+  /** Phase 3c: who returns the turnover (the user's team runs it back, or chases). */
+  private turnoverSub(): string {
+    const userHasBall = this.defense;
+    return userHasBall ? 'Return it! Stick runs, JUMP jukes' : 'Chase him down!';
+  }
+
   private onEvents(events: PlayEvent[]) {
     for (const e of events) {
       if (e.type === 'deflection') this.flash('BROKEN UP', '', 1);
@@ -1126,6 +1134,13 @@ export class App {
         const gr = this.sim.lastTiming.grade;
         const early = this.sim.lastTiming.offset < 0;
         if (gr !== 'none') this.flash(gr === 'perfect' ? 'PERFECT JUMP' : gr === 'good' ? 'GOOD JUMP' : early ? 'JUMPED TOO EARLY' : 'JUMPED TOO LATE', '', 0.9);
+      }
+      // Phase 3c: turnovers are live: say who has the ball now.
+      if (e.type === 'interception') this.flash('INTERCEPTED!', this.turnoverSub(), 1.4);
+      if (e.type === 'fumble') this.flash('FUMBLE!', 'Ball is loose', 1.2);
+      if (e.type === 'recovery' && this.sim && e.actor !== undefined) {
+        const def = this.sim.actors[e.actor].side === 'def';
+        this.flash(def ? 'TURNOVER!' : 'RECOVERED', def ? this.turnoverSub() : 'Offense keeps it', 1.4);
       }
       if (e.type === 'interception' && this.game) this.audio.react(this.game.possession === 'home' ? { kind: 'silence', intensity: 1 } : { kind: 'roar', intensity: 0.8 });
       if (e.type === 'flag' && this.sim) {
