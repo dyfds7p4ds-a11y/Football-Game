@@ -17,6 +17,8 @@ import { SLOT_COLORS } from './render/fieldMesh';
 import { Cutscene } from './render/cutscene';
 import { PlaySim, SIM_DT, type PlayEvent, type PlayResult, type SimInput } from './play/sim';
 import { ReturnSim } from './play/returnSim';
+import { AUDIBLES, AudibleSession, audibleCost } from './play/audible';
+import { AudibleMenu } from './ui/audible';
 import { chooseDefense, emptyTendencies, recordTendency, type DefenseCall } from './play/defenseCalls';
 import { PENALTIES, calloutText, type Flag } from './play/penalties';
 import { ST, aimNeedle, aimToAngle, aimZone, cpuRelease, judgeFieldGoal, kickFlight, kickZone, meterPower, releaseKickAimed, type KickFlight, type KickKind } from './play/kicking';
@@ -106,6 +108,10 @@ export class App {
   /** Cornerback the user controls; kept from play to play. */
   private defSlot: DefSlot = 'CB1';
   private presnapTimer = 0;
+  /** Phase 3c: audibles at the line on the user's snaps. */
+  private aud: AudibleSession | null = null;
+  private audMenu = new AudibleMenu((p) => this.audible(p));
+  private playSeed = 1;
 
   constructor(canvas: HTMLCanvasElement, ui: HTMLElement) {
     this.view = new SceneView(canvas);
@@ -117,7 +123,7 @@ export class App {
       onTimeout: () => this.timeout(),
       onDefense: (call) => this.callDefense(call),
     });
-    ui.append(this.touch.root, this.hud.root, this.playcall.root, this.intro.root, this.modal.root,
+    ui.append(this.touch.root, this.audMenu.root, this.hud.root, this.playcall.root, this.intro.root, this.modal.root,
       h('div', { id: 'rotate' }, 'Rotate your iPad to landscape for the best experience.'));
     this.hud.pauseBtn.addEventListener('pointerup', () => this.input.pressPause());
     this.hud.timeoutBtn.addEventListener('pointerup', () => this.input.pressTimeout());
@@ -155,6 +161,7 @@ export class App {
 
   private setPhase(p: Phase) {
     this.phase = p;
+    if (p !== 'presnap') this.audMenu.hide();
     const onField = p === 'presnap' || p === 'live' || p === 'postplay' || p === 'kick' || p === 'kickFlight' || p === 'return' || p === 'returnPost';
     this.touch.setVisible(onField);
     if (!this.defense) this.touch.setDefenders(null);
@@ -502,21 +509,43 @@ export class App {
         scoreDiff: g.score[g.userSide] - g.score[other(g.userSide)] },
       g.tendencies, diff, this.rng,
     );
-    this.sim = new PlaySim({
-      play, defense, offenseTeam: this.userTeam, defenseTeam: this.cpuTeam,
-      ballX: g.ballX, los: g.ballY, difficulty: diff, seed: this.rng.int(1, 2 ** 31 - 1), penaltyBias: this.penaltyBias(),
-    });
+    this.playSeed = this.rng.int(1, 2 ** 31 - 1);
+    this.aud = new AudibleSession(play, defense, diff, new Rng(this.playSeed ^ 0x5a5a));
+    this.audMenu.hide();
     this.ret = null;
     this.callouts = [];
-    this.view.bindPlay(this.sim, this.userTeam, this.cpuTeam);
-    this.view.showRoutes(this.settings.showRoutes ? this.sim : null);
+    this.buildOffenseSim(play, defense);
     this.view.field.setMarkers(g.ballY, g.ballY + g.toGo);
     this.view.field.showMarkers(true);
     this.gazeYaw = 0;
     this.gazePitch = -0.06;
+    this.setPhase('presnap');
+  }
+
+  /** The user's snap with `play` against `defense` (also after an audible or the defense's re-read). */
+  private buildOffenseSim(play: PlayData, defense: DefenseCall) {
+    const g = this.game!;
+    this.play = play;
+    this.sim = new PlaySim({
+      play, defense, offenseTeam: this.userTeam, defenseTeam: this.cpuTeam,
+      ballX: g.ballX, los: g.ballY, difficulty: DIFFICULTY[g.difficulty], seed: this.playSeed, penaltyBias: this.penaltyBias(),
+    });
+    this.view.bindPlay(this.sim, this.userTeam, this.cpuTeam);
+    this.view.showRoutes(this.settings.showRoutes ? this.sim : null);
     this.target = play.run ? null : (play.primary ?? null);
     this.hud.setPlayName(play.name);
-    this.setPhase('presnap');
+  }
+
+  /** Phase 3c: check to another play at the line. */
+  private audible(play: PlayData) {
+    const g = this.game!;
+    const aud = this.aud;
+    if (!aud || this.phase !== 'presnap' || this.defense) return;
+    const r = aud.call(play, g.clock);
+    if (!r) return;
+    this.game = { ...g, clock: r.clock };
+    this.buildOffenseSim(play, aud.defense);
+    this.flash('AUDIBLE', `${play.name} · -${r.cost}s`, 1.2);
   }
 
   private snap() {
@@ -525,6 +554,9 @@ export class App {
     const clock = g.conversionTry ? { ...snapClock(g.clock), running: false } : snapClock(g.clock);
     this.game = { ...g, clock, tendencies: recordTendency(g.tendencies, this.play!.category) };
     this.view.showRoutes(null);
+    this.audMenu.hide();
+    // Phase 3c: a run audible the defense did not answer in time catches its blitz.
+    if (this.aud && this.sim && !this.defense) this.sim.audibleEdge = this.aud.edge;
     this.waiveDelayOfGame = false;
     this.acc = 0;
     this.playsRun++;
@@ -985,10 +1017,24 @@ export class App {
   private presnap(f: InputFrame, dt: number) {
     if (this.defense) return this.presnapDefense(f, dt);
     this.updateGaze(f, dt);
-    // Picking a receiver pre-snap only marks him; the QB does not turn his head.
-    if (f.slotPressed) this.target = f.slotPressed;
+    const aud = this.aud;
+    // Phase 3c: the defense re-reads an audible after its reaction time.
+    const reread = aud?.update(dt);
+    if (aud && reread) this.buildOffenseSim(aud.play, reread);
+    if (this.audMenu.visible) {
+      // 1 / 2 / 3 pick an audible while the menu is open; AUDIBLE again closes it.
+      const idx = f.slotPressed ? (['WR1', 'WR2', 'WR3'] as EligibleSlot[]).indexOf(f.slotPressed) : -1;
+      if (idx >= 0) this.audMenu.pick(idx);
+      else if (f.secondaryPressed) this.audMenu.hide();
+    } else {
+      // Picking a receiver pre-snap only marks him; the QB does not turn his head.
+      if (f.slotPressed) this.target = f.slotPressed;
+      if (f.secondaryPressed && aud?.canAudible && !this.game!.conversionTry) {
+        this.audMenu.show(aud.options, audibleCost(aud.count + 1), AUDIBLES.maxPerPlay - aud.count);
+      }
+    }
     this.touch.setPrimary('SNAP', 'snap');
-    this.touch.setSecondary(null);
+    this.touch.setSecondary(aud?.canAudible && !this.game!.conversionTry ? 'AUDIBLE' : null);
     this.touch.setSlots(this.target, this.blockingSlots(), true);
     this.touch.setCharge(false, 0, null);
     this.hud.setHint(this.playsRun < 3 ? 'All receivers are marked. Tap SNAP, then HOLD a receiver button to charge and RELEASE to throw.' : null);

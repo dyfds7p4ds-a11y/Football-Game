@@ -29,6 +29,7 @@ import {
   BLOCKING, assignProtection, blockQuality, holdTime, laneCandidates, pickLane, planRunBlocks, progressRate,
   type BlockAssignment, type BlockMode, type BlockRole, type LaneDefender, type Unit,
 } from './blocking';
+import { AUDIBLES } from './audible';
 import { BLITZ, blitzDesign, blitzPath, classifyBlitz, recognizeChance, surpriseReaction, type BlitzFacts, type BlitzOutcome, type BlitzPath } from './blitz';
 import { switchTarget } from './defenseSelect';
 import pocketJson from '../data/pocket.json';
@@ -289,6 +290,12 @@ export class PlaySim {
   private seenBlitz = new Set<number>();
   /** Phase 3c: rushes nobody planned for, by defender id. */
   readonly surprise = new Map<number, SurpriseRush>();
+  /**
+   * Phase 3c: a run audible caught the defense in a blitz it did not adjust
+   * (play/audible.ts): blitzers read the run late, run blocks grade better.
+   * Set before the first step.
+   */
+  audibleEdge = false;
   /** Phase 3c: the open receiver once the QB has noticed a surprise rush (null: no alert). */
   hot: EligibleSlot | null = null;
   private lastRip = -Infinity;
@@ -546,10 +553,18 @@ export class PlaySim {
       const designed = this.blitzers.has(d.id);
       if (designed && this.seenBlitz.has(d.id)) continue;
       if (!designed && d.assignment?.kind === 'rush') continue;
+      // A man defender running with his receiver (a back near the QB) is covering, not rushing.
+      const asg = d.assignment;
       // Linebackers stepping up on a play fake are not rushing.
       if (this.play.playAction && this.t < this.diff.playActionBite && d.id !== this.userDefId) continue;
       const to = sub(qb.pos, d.pos);
       const dd = len(to);
+      if (!designed && asg?.kind === 'man' && d.id !== this.userDefId) {
+        const r = this.get(asg.target);
+        const toR = sub(r.pos, d.pos);
+        const cosR = (toR.x * to.x + toR.y * to.y) / Math.max(1e-6, len(toR) * dd);
+        if (r.route?.blocks || len(toR) < S.coverRange || cosR > Math.cos((S.coverAngle * Math.PI) / 180)) continue;
+      }
       if (d.pos.y > this.los + S.maxDepth || dd > S.range || dd < 0.1) continue;
       const closing = (d.vel.x * to.x + d.vel.y * to.y) / dd;
       if (closing < S.minClosing) continue;
@@ -1279,7 +1294,7 @@ export class PlaySim {
     const c = this.carrier;
     if (c === d || (c && c.side === 'off' && dist(c.pos, d.pos) < 1.6)) return;
     const mode = this.blockMode(b);
-    const quality = blockQuality(b.player.ratings, d.player.ratings, mode);
+    const quality = clamp(blockQuality(b.player.ratings, d.player.ratings, mode) + (this.audibleEdge && mode === 'run' ? AUDIBLES.edge.lineGrade : 0), -1, 1);
     const holdT = holdTime(quality, { mode, passRush: this.diff.passRush * (mode === 'pass' ? this.diff.pocketPressure : 1), rng: this.blockRng });
     this.engagements.push({ blocker: b.id, defender: d.id, t: 0, mode, quality, holdT, progress: 0 });
     if (mode !== 'run' && (this.blitzers.has(d.id) || this.surprise.has(d.id))) {
@@ -1430,7 +1445,8 @@ export class PlaySim {
 
       if (carrier && carrier.side === 'def') {
         goal = d.pos;
-      } else if (runMode && this.t > this.runRecognizedAt + d.reaction * (carrier === qb ? SCRAMBLE.reactFactor : 1) + (isDeep ? 0.35 : 0)) {
+      } else if (runMode && this.t > this.runRecognizedAt + d.reaction * (carrier === qb ? SCRAMBLE.reactFactor : 1) + (isDeep ? 0.35 : 0) +
+        (this.audibleEdge && this.blitzers.has(d.id) ? AUDIBLES.edge.blitzRunRead : 0)) {
         goal = this.pursuit(d, carrier!);
       } else if (flight && asg.kind === 'man' && this.get(asg.target).id === flight.targetId && this.trailing(d, this.get(asg.target))) {
         // Trailing man defender can't see the ball: play through the receiver's hands.
@@ -1894,6 +1910,8 @@ export class PlaySim {
       const engaged = !!this.isEngaged(d);
       if (engaged && dist(d.pos, c.pos) > TACKLE.engagedRange) continue;
       let factor = this.diff.tackling * (diving ? DEF_CONTROL.tackle.diveFactor : 1);
+      // Phase 3c audible edge: a blitzer still rushing the QB only gets an arm on the runner going past.
+      if (this.audibleEdge && this.blitzers.has(d.id) && this.t < this.runRecognizedAt + d.reaction + AUDIBLES.edge.blitzRunRead) factor *= AUDIBLES.edge.blitzTackle;
       if (c.slot === 'QB' && !this.pastLos(c)) factor *= TACKLE.pocketSackFactor; // sacks: QB is a sitting duck
       else if (c.slot === 'QB') factor *= SCRAMBLE.tackleBonus; // a scrambling QB is no running back
       const out = resolveTackle({

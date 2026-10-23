@@ -35,7 +35,7 @@ export const BLITZ = blitzJson as unknown as {
   waypointRadius: number;
   surprise: {
     maxDepth: number; range: number; minClosing: number; lineReact: number; qbReact: number;
-    blindExtra: number; blindAngle: number; awarenessRef: number;
+    blindExtra: number; blindAngle: number; awarenessRef: number; coverRange: number; coverAngle: number;
   };
 };
 
