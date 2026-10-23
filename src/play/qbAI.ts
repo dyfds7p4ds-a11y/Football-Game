@@ -33,6 +33,7 @@ export const CPU_OFFENSE = cpuJson as {
   primaryBias: number;
   slotBias: Record<EligibleSlot, number>;
   checkdownAfter: number;
+  hot: { margin: number; bail: number };
   runner: { lookAhead: number; avoid: number };
   calls: Record<'short' | 'normal' | 'long', CallMix>;
   fourthDown: { goForItToGo: number; goForItFrom: number; fieldGoalFrom: number };
@@ -90,10 +91,23 @@ export class CpuQB {
       if (sim.t >= scr.release) this.choose(sim, scr.target);
       return;
     }
-    if (sim.t < this.nextRead) return;
-    this.nextRead = sim.t + CPU_OFFENSE.readEvery;
     const qb = sim.get('QB');
     const defenders = sim.actors.filter((a) => a.side === 'def' && !a.down).map(toWA);
+    if (sim.qbAlert && sim.hot && sim.t >= this.dropTime * 0.5) {
+      // Phase 3c: a rush nobody planned for: the ball comes out now, to the hot read or away.
+      const w = throwingWindow(qb.pos, toWA(sim.get(sim.hot)), defenders);
+      const m = w.margin + this.rng.normal() * (CPU_OFFENSE.readNoise / (this.skill * this.skill));
+      if (m > CPU_OFFENSE.hot.margin) {
+        this.choose(sim, sim.hot);
+        return;
+      }
+      if (sim.pressure > CPU_OFFENSE.hot.bail) {
+        this.throwAway = Math.sign(qb.pos.x - sim.ballX) || 1;
+        return;
+      }
+    }
+    if (sim.t < this.nextRead) return;
+    this.nextRead = sim.t + CPU_OFFENSE.readEvery;
     let best: { slot: EligibleSlot; m: number } | null = null;
     const pressuredNow = sim.pressure > CPU_OFFENSE.pressureBail;
     for (const slot of ELIGIBLE) {

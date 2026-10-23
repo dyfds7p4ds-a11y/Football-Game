@@ -178,9 +178,11 @@ export class TouchControls {
     this.primary.disabled = mode === 'none';
   }
 
-  setSlots(selected: EligibleSlot | null, blocking: Set<EligibleSlot>, visible = true) {
+  /** `hot` (Phase 3c): the open receiver once the QB is alerted to a blitz nobody picked up. */
+  setSlots(selected: EligibleSlot | null, blocking: Set<EligibleSlot>, visible = true, hot: EligibleSlot | null = null) {
     for (const [slot, btn] of this.slotBtns) {
       btn.classList.toggle('selected', slot === selected);
+      btn.classList.toggle('hot', slot === hot);
       btn.classList.toggle('blocking', blocking.has(slot));
       btn.classList.toggle('hidden', !visible);
     }

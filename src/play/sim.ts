@@ -29,7 +29,7 @@ import {
   BLOCKING, assignProtection, blockQuality, holdTime, laneCandidates, pickLane, planRunBlocks, progressRate,
   type BlockAssignment, type BlockMode, type BlockRole, type LaneDefender, type Unit,
 } from './blocking';
-import { BLITZ, blitzDesign, blitzPath, classifyBlitz, recognizeChance, type BlitzFacts, type BlitzOutcome, type BlitzPath } from './blitz';
+import { BLITZ, blitzDesign, blitzPath, classifyBlitz, recognizeChance, surpriseReaction, type BlitzFacts, type BlitzOutcome, type BlitzPath } from './blitz';
 import { switchTarget } from './defenseSelect';
 import pocketJson from '../data/pocket.json';
 
@@ -206,6 +206,21 @@ interface Engagement {
 }
 
 /** A blitzing non-lineman: his path, where he is on it, and what has happened to him. */
+/** Phase 3c: a rush the protection did not plan for (see blitz.json `surprise`). */
+export interface SurpriseRush {
+  id: number;
+  /** The call sent him (a designed blitzer the line missed) or not (the user's own blitz). */
+  scheduled: boolean;
+  rushAt: number;
+  /** When the line treats him as a rusher, and when the QB notices him. */
+  lineAt: number;
+  qbAt: number;
+  blind: boolean;
+  /** First throw / scramble after the QB noticed him. */
+  reactedAt: number | null;
+  facts: BlitzFacts;
+}
+
 interface BlitzRun {
   path: BlitzPath;
   delay: number;
@@ -270,6 +285,12 @@ export class PlaySim {
   private chipDone = new Set<number>();
   private laneX: number | null = null;
   private blitzers = new Map<number, BlitzRun>();
+  /** Designed blitzers the line identified at the snap. */
+  private seenBlitz = new Set<number>();
+  /** Phase 3c: rushes nobody planned for, by defender id. */
+  readonly surprise = new Map<number, SurpriseRush>();
+  /** Phase 3c: the open receiver once the QB has noticed a surprise rush (null: no alert). */
+  hot: EligibleSlot | null = null;
   private lastRip = -Infinity;
   private laneEvalAt = 0;
   private shedFrom = new Map<number, { blocker: number; until: number }>();
@@ -466,6 +487,7 @@ export class PlaySim {
     const awareness = ol.reduce((t, a) => t + a.player.ratings.awareness, 0) / ol.length;
     const seen = new Set<number>();
     for (const [id, bz] of this.blitzers) if (this.blockRng.chance(recognizeChance(bz.path, awareness))) seen.add(id);
+    this.seenBlitz = seen;
     const recognized = (r: Unit) => !this.blitzers.has(r.id) || seen.has(r.id);
     for (const a of assignProtection(blockers, rushers, qb.pos, this.ballX, recognized)) {
       this.blockRoles.set(a.blocker, a);
@@ -493,8 +515,88 @@ export class PlaySim {
     }));
   }
 
+  /** Phase 3c: is the QB alerted to a surprise rush right now? */
+  get qbAlert(): boolean {
+    for (const r of this.surprise.values()) if (this.t >= r.qbAt && !this.actors[r.id].down) return true;
+    return false;
+  }
+
+  /** Phase 3c: detection and outcome of every surprise rush (final once the play is over). */
+  surpriseReport(): { id: number; slot: DefSlot; scheduled: boolean; detect: number; react: number | null; blind: boolean; outcome: BlitzOutcome }[] {
+    return [...this.surprise.values()].map((r) => ({
+      id: r.id, slot: this.actors[r.id].slot as DefSlot, scheduled: r.scheduled, detect: r.qbAt - r.rushAt,
+      react: r.reactedAt === null ? null : r.reactedAt - r.rushAt, blind: r.blind, outcome: classifyBlitz(r.facts),
+    }));
+  }
+
+  /**
+   * Phase 3c: spot rushers the protection did not plan for by what they do,
+   * not by the call: a non-lineman at the LOS closing on the QB. Gives the
+   * line and the QB a reaction delay (awareness, field of view).
+   */
+  private trackSurprise() {
+    const qb = this.get('QB');
+    // Screens invite the rush on purpose: defenders rallying to the back are not a surprise.
+    if (this.play.run || this.play.screen || this.passThrown || this.handedOff || this.ball.holder !== qb.id) return;
+    const S = BLITZ.surprise;
+    const ol = OL_SLOTS.map((x) => this.get(x));
+    const lineAw = ol.reduce((t, a) => t + a.player.ratings.awareness, 0) / ol.length;
+    for (const d of this.actors) {
+      if (d.side !== 'def' || d.down || d.position === 'DL' || this.surprise.has(d.id)) continue;
+      const designed = this.blitzers.has(d.id);
+      if (designed && this.seenBlitz.has(d.id)) continue;
+      if (!designed && d.assignment?.kind === 'rush') continue;
+      // Linebackers stepping up on a play fake are not rushing.
+      if (this.play.playAction && this.t < this.diff.playActionBite && d.id !== this.userDefId) continue;
+      const to = sub(qb.pos, d.pos);
+      const dd = len(to);
+      if (d.pos.y > this.los + S.maxDepth || dd > S.range || dd < 0.1) continue;
+      const closing = (d.vel.x * to.x + d.vel.y * to.y) / dd;
+      if (closing < S.minClosing) continue;
+      const toward = Math.atan2(-to.x, -to.y); // heading from the QB to the rusher
+      let ang = ((toward - qb.facing) * 180) / Math.PI;
+      ang = ((ang + 540) % 360) - 180;
+      const react = surpriseReaction(ang, lineAw, qb.player.ratings.awareness);
+      this.surprise.set(d.id, {
+        id: d.id, scheduled: designed, rushAt: this.t, lineAt: this.t + react.line, qbAt: this.t + react.qb, blind: react.blind,
+        reactedAt: null, facts: { sacked: false, closest: dd, atRelease: Infinity, engaged: false },
+      });
+    }
+    for (const r of this.surprise.values()) {
+      const d = this.actors[r.id];
+      r.facts.closest = Math.min(r.facts.closest, dist(d.pos, qb.pos));
+      if (!r.facts.engaged && this.engagersOf(d) > 0) {
+        r.facts.engaged = true;
+        if (!r.scheduled) this.emit('pickup', r.id);
+      }
+    }
+  }
+
+  /** Phase 3c: once alerted, the most open receiver right now is the hot read. */
+  private updateHot() {
+    const qb = this.get('QB');
+    if (!this.qbAlert || this.passThrown || this.handedOff || this.ball.holder !== qb.id) {
+      this.hot = null;
+      return;
+    }
+    const defs = this.actors.filter((a) => a.side === 'def' && !a.down);
+    let best: { slot: EligibleSlot; m: number } | null = null;
+    for (const slot of ELIGIBLE) {
+      const r = this.get(slot);
+      if (r.down || r.route?.blocks) continue;
+      const m = throwingWindow(qb.pos, r, defs).margin;
+      if (!best || m > best.m) best = { slot, m };
+    }
+    this.hot = best ? best.slot : null;
+  }
+
+  private markReaction() {
+    for (const r of this.surprise.values()) if (r.reactedAt === null && this.t >= r.qbAt) r.reactedAt = this.t;
+  }
+
   private trackBlitzes() {
     const qb = this.get('QB');
+    this.trackSurprise();
     if (this.ball.holder !== qb.id || this.passThrown) return;
     for (const [id, b] of this.blitzers) {
       const d = this.actors[id];
@@ -609,6 +711,7 @@ export class PlaySim {
       this.finish(c ? 'tackle' : 'incomplete', c ?? this.get('QB'));
     }
     this.updatePressure();
+    this.updateHot();
     if (!this.result) this.checkLateHits();
     this.updateOfficials(dt);
     for (const a of this.actors) {
@@ -788,6 +891,7 @@ export class PlaySim {
       const holds = this.ball.holder === qb.id && !this.handedOff && !this.passThrown;
       if (holds && !this.scrambling && this.t > SCRAMBLE.minTime && len(qb.vel) > SCRAMBLE.speedToScramble && qb.vel.y > -1) {
         this.scrambling = true; // out of the pocket: the head follows the running path
+        this.markReaction();
       }
       if (holds && this.pastLos(qb) && this.runRecognizedAt === Infinity) {
         this.scrambling = true;
@@ -895,10 +999,12 @@ export class PlaySim {
     // A free rusher in the QB's face at the release hurries the throw.
     let hurrier: Actor | null = null;
     for (const d of this.actors) {
-      if (d.side !== 'def' || d.down || !this.isRushing(d) || this.engagersOf(d) > 0) continue;
+      if (d.side !== 'def' || d.down || !this.pressuring(d) || this.engagersOf(d) > 0) continue;
       const dd = dist(d.pos, qb.pos);
       const bz = this.blitzers.get(d.id);
       if (bz) bz.facts.atRelease = dd;
+      const sr = this.surprise.get(d.id);
+      if (sr) sr.facts.atRelease = dd;
       if (dd <= BLITZ.hurryRadius && (!hurrier || dd < dist(hurrier.pos, qb.pos))) hurrier = d;
     }
     if (hurrier) {
@@ -937,6 +1043,7 @@ export class PlaySim {
     this.passThrown = true;
     this.throwAt = this.t;
     this.emit('throw', target?.id);
+    this.markReaction();
   }
 
   private launchLateral(from: Vec2, to: Actor, T: number) {
@@ -1175,7 +1282,7 @@ export class PlaySim {
     const quality = blockQuality(b.player.ratings, d.player.ratings, mode);
     const holdT = holdTime(quality, { mode, passRush: this.diff.passRush * (mode === 'pass' ? this.diff.pocketPressure : 1), rng: this.blockRng });
     this.engagements.push({ blocker: b.id, defender: d.id, t: 0, mode, quality, holdT, progress: 0 });
-    if (mode !== 'run' && this.blitzers.has(d.id)) {
+    if (mode !== 'run' && (this.blitzers.has(d.id) || this.surprise.has(d.id))) {
       // Blitz pickup: both lose most of their momentum, so a fast blitzer can't slide past the block.
       d.vel = scale(d.vel, 0.35);
       b.vel = scale(b.vel, 0.35);
@@ -1274,12 +1381,20 @@ export class PlaySim {
   }
 
   /** Rushers, plus man defenders whose receiver stayed in to block (green dog). */
+  /** Rusher as the blockers see him: assigned, a green dog, or (Phase 3c) a surprise rusher once the line reacts. */
   private isRushing(d: Actor): boolean {
     const a = d.assignment;
     if (a?.kind === 'rush') return true;
+    const sr = this.surprise.get(d.id);
+    if (sr && this.t >= sr.lineAt) return true;
     if (a?.kind !== 'man' || this.t <= 1.2) return false;
     const r = this.get(a.target).route;
     return !!r?.blocks && !(r.type === 'check' && this.t > 1.5);
+  }
+
+  /** Phase 3c: pressure comes from whoever is actually rushing, seen by the line or not. */
+  private pressuring(d: Actor): boolean {
+    return this.isRushing(d) || this.surprise.has(d.id);
   }
 
   /** Defender is level with or behind his receiver, so his back is to the QB. */
@@ -1796,7 +1911,12 @@ export class PlaySim {
         d.vel = c.vel;
         const sack = c.slot === 'QB' && c.pos.y < this.los && !this.passThrown && !this.handedOff;
         this.contact = { carrier: c.id, tackler: d.id, whistleAt: this.t + out.contactTime, sack };
-        if (sack) { const bz = this.blitzers.get(d.id); if (bz) bz.facts.sacked = true; }
+        if (sack) {
+          const bz = this.blitzers.get(d.id);
+          if (bz) bz.facts.sacked = true;
+          const sr = this.surprise.get(d.id);
+          if (sr) sr.facts.sacked = true;
+        }
         if (rollFoul('facemask', this.penaltyBias, this.penRng)) this.addFoul('facemask', c.pos);
         return;
       }
@@ -1874,7 +1994,7 @@ export class PlaySim {
     let cue: PocketCue | null = null;
     const picked = new Set(this.passBlock.values());
     for (const d of this.actors) {
-      if (d.side !== 'def' || d.down || !this.isRushing(d)) continue;
+      if (d.side !== 'def' || d.down || !this.pressuring(d)) continue;
       const dd = dist(d.pos, qb.pos);
       const engaged = this.engagements.some((e) => e.defender === d.id);
       const free = clamp(1 - (dd - 1.2) / 5, 0, 1);

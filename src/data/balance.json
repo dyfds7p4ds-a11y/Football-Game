@@ -59,5 +59,19 @@
     ],
     "maxOpenRate": 0.15,
     "maxStray": 4
+  },
+  "surpriseBlitz": {
+    "_doc": "Phase 3c (tests/blitz.test.ts): the user's LB1 blitzes straight at the QB in Cover 3 (not called by the scheme), CPU QB, every pass play (no screens) x seeds, Normal, average teams. sackRate: allowed range of sacks per snap; detect: allowed range (s) of the QB's mean time to notice the rusher after he triggers.",
+    "defense": "cover3",
+    "slot": "LB1",
+    "seeds": 8,
+    "sackRate": [
+      0.12,
+      0.4
+    ],
+    "detect": [
+      0.2,
+      0.6
+    ]
   }
 }

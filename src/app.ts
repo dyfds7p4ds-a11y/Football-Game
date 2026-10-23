@@ -1103,7 +1103,7 @@ export class App {
   private updateLiveControls() {
     const sim = this.sim!;
     const qb = sim.get('QB');
-    this.touch.setSlots(this.target, this.blockingSlots(), sim.canThrow());
+    this.touch.setSlots(this.target, this.blockingSlots(), sim.canThrow(), sim.hot);
     if (sim.canThrow()) {
       this.touch.setPrimary(sim.charging ? 'RELEASE' : 'THROW', 'throw');
       const info = sim.throwInfo(this.target);
