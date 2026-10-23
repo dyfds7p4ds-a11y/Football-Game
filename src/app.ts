@@ -8,6 +8,7 @@
  * air) and return / returnPost (kick returns).
  */
 import { Rng } from './core/rng';
+import { dist } from './core/vec';
 import { DIFFICULTY, getTeam } from './data';
 import type { DefSlot, EligibleSlot, PlayData, TeamData } from './data/types';
 import { ELIGIBLE } from './data/types';
@@ -36,6 +37,7 @@ import { simulateCpuDrive } from './game/cpuDrive';
 import { loadSettings, saveSettings, type Settings } from './game/settings';
 import { Hud, type EdgeMarker } from './ui/hud';
 import { TouchControls } from './ui/touch';
+import { HotLatch, SLOT_STATE, slotDisplay, type SlotDisplay } from './ui/slotState';
 import { PlaycallScreen } from './ui/playcall';
 import { IntroOverlay } from './ui/intro';
 import { Modal, boxScore, button, driveSummary, helpContent, scoreLine, settingsPanel, titleScreen } from './ui/menus';
@@ -95,6 +97,9 @@ export class App {
   private gazeYaw = 0;
   private gazePitch = -0.06;
   private target: EligibleSlot | null = null;
+  /** Phase 3d: hot read shown without flicker, and when the user last pressed a receiver after the throw. */
+  private hotLatch = new HotLatch();
+  private latePress: { slot: EligibleSlot; t: number } | null = null;
   private acc = 0;
   private postTimer = 0;
   private bannerTimer = 0;
@@ -453,7 +458,7 @@ export class App {
     const left = Math.max(0, DEF_CONTROL.presnapAutoSnap - this.presnapTimer);
     this.touch.setPrimary(`READY ${Math.ceil(left)}`, 'snap');
     this.touch.setSecondary('SWITCH');
-    this.touch.setSlots(null, new Set(), false);
+    this.touch.setSlots(null);
     this.touch.setDefenders(this.defSlot);
     this.touch.setCharge(false, 0, null);
     this.hud.setEdgeMarkers(null);
@@ -494,7 +499,7 @@ export class App {
     const returner = sim.returning && c?.id === sim.userDefId;
     this.touch.setPrimary(returner ? 'JUKE' : runner ? 'DIVE' : blocked && sim.ball.state !== 'air' ? 'RIP' : 'JUMP', returner ? 'juke' : 'throw');
     this.touch.setSecondary(returner ? null : 'SWITCH');
-    this.touch.setSlots(null, new Set(), false);
+    this.touch.setSlots(null);
     // The strip shows whoever the user controls now (the returner after a takeaway).
     this.touch.setDefenders((sim.userDefender?.slot as DefSlot | undefined) ?? this.defSlot);
     this.touch.setCharge(false, 0, null);
@@ -559,6 +564,8 @@ export class App {
     const clock = g.conversionTry ? { ...snapClock(g.clock), running: false } : pacedSnap(g.clock);
     this.game = { ...g, clock, tendencies: recordTendency(g.tendencies, this.play!.category) };
     this.view.showRoutes(null);
+    this.hotLatch.reset();
+    this.latePress = null;
     this.audMenu.hide();
     // Phase 3c: a run audible the defense did not answer in time catches its blitz.
     if (this.aud && this.sim && !this.defense) this.sim.audibleEdge = this.aud.edge;
@@ -804,7 +811,7 @@ export class App {
         sub: aiming ? (punt ? 'Tap when the needle is in the green: the hang angle.' : 'Tap when the needle is in the green: straight through.') : 'Hold KICK, release in the green zone for power.',
       });
       this.touch.setPrimary(aiming ? 'TAP' : k.holding ? 'RELEASE' : 'KICK', 'kick');
-      this.touch.setSlots(null, new Set(), false);
+      this.touch.setSlots(null);
       this.touch.setSecondary(null);
       this.touch.setCharge(false, 0, null);
       this.hud.setHint(this.playsRun < 6 ? (aiming ? 'Second tap: stop the needle in the green.' : 'Hold KICK to fill the meter, release in the green zone.') : null);
@@ -870,7 +877,7 @@ export class App {
         this.touch.setPrimary(carrying ? 'DASH' : '', carrying ? 'juke' : 'none');
         this.touch.setSecondary(null);
       }
-      this.touch.setSlots(null, new Set(), false);
+      this.touch.setSlots(null);
       this.touch.setCharge(false, 0, null);
       this.hud.setHint(rs.coverMan && this.playsRun < 10 ? 'Cover the kick: left thumb runs your man down · DIVE to tackle (RIP when blocked) · SWITCH = man nearest the ball'
         : rs.userReturns && this.playsRun < 8 ? (carrying ? 'Steer with your left thumb · DASH for a burst' : 'Get under the ball...') : null);
@@ -1041,17 +1048,28 @@ export class App {
     }
     this.touch.setPrimary('SNAP', 'snap');
     this.touch.setSecondary(aud?.canAudible && !this.game!.conversionTry ? 'AUDIBLE' : null);
-    this.touch.setSlots(this.target, this.blockingSlots(), true);
+    this.touch.setSlots(this.slotLooks(false));
     this.touch.setCharge(false, 0, null);
     this.hud.setHint(this.playsRun < 3 ? 'All receivers are marked. Tap SNAP, then HOLD a receiver button to charge and RELEASE to throw.' : null);
     this.updateEdgeMarkers(true);
     if (f.primaryPressed) this.snap();
   }
 
-  private blockingSlots(): Set<EligibleSlot> {
-    const blocking = new Set<EligibleSlot>();
-    for (const s of ELIGIBLE) if (this.sim!.get(s).route?.blocks) blocking.add(s);
-    return blocking;
+  /** Phase 3d: receiver button looks (ui/slotState.ts). `live`: after the snap (hot read, late presses). */
+  private slotLooks(live: boolean): Partial<Record<EligibleSlot, SlotDisplay>> {
+    const sim = this.sim!;
+    const qb = sim.get('QB');
+    const hot = live ? this.hotLatch.update(sim.t, sim.hot) : null;
+    const out: Partial<Record<EligibleSlot, SlotDisplay>> = {};
+    for (const s of ELIGIBLE) {
+      const r = sim.get(s);
+      out[s] = slotDisplay({
+        blocks: !!r.route?.blocks, distance: dist(qb.pos, r.pos), thrown: live && sim.thrown,
+        pressedRecently: !!this.latePress && this.latePress.slot === s && sim.t - this.latePress.t < SLOT_STATE.thrownFlash,
+        selected: s === this.target, hot: s === hot,
+      });
+    }
+    return out;
   }
 
   private simInput(f: InputFrame): SimInput {
@@ -1098,7 +1116,7 @@ export class App {
       if (sim.result) break;
     }
     this.checkCallouts();
-    this.updateLiveControls();
+    this.updateLiveControls(f);
     if (sim.result) this.whistle();
   }
 
@@ -1165,10 +1183,13 @@ export class App {
     this.callouts = this.callouts.filter((x) => sim.t < x.at);
   }
 
-  private updateLiveControls() {
+  private updateLiveControls(f: InputFrame) {
     const sim = this.sim!;
     const qb = sim.get('QB');
-    this.touch.setSlots(this.target, this.blockingSlots(), sim.canThrow(), sim.hot);
+    if (sim.thrown && f.slotPressed) this.latePress = { slot: f.slotPressed, t: sim.t };
+    // Buttons stay up while the pass is in the air, so a late press shows why nothing happens.
+    const inAir = sim.thrown && sim.ball.state === 'air' && !sim.result;
+    this.touch.setSlots(sim.canThrow() || inAir ? this.slotLooks(true) : null);
     if (sim.canThrow()) {
       this.touch.setPrimary(sim.charging ? 'RELEASE' : 'THROW', 'throw');
       const info = sim.throwInfo(this.target);

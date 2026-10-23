@@ -711,6 +711,11 @@ export class PlaySim {
       dist(qb.pos, this.get('RB').pos) < 1.4;
   }
 
+  /** Phase 3d: the pass is out (the receiver buttons stay visible while it is in the air). */
+  get thrown(): boolean {
+    return this.passThrown;
+  }
+
   canThrow(): boolean {
     const qb = this.get('QB');
     return !this.result && this.ball.state === 'held' && this.ball.holder === qb.id && qb.pos.y <= this.los + 0.2;

@@ -13,5 +13,11 @@
     "size": 310
   },
   "minClearance": 24,
-  "_doc": "Phase 3c touch layout (input/joystick.ts, ui/touch.ts). joystick: fixed base at the bottom left (left / bottom offsets in px from the safe area), base radius and knob radius in px; the hit circle is radius + hitPadding (a thumb anywhere on or near it grabs the stick, no aiming). actions: the receiver / action cluster at the bottom right (right / bottom offsets, square size in px, never scaled down). minClearance: px the stick's hit area keeps from the cluster (tests/joystick.test.ts)."
+  "_doc": "Phase 3c touch layout (input/joystick.ts, ui/touch.ts). joystick: fixed base at the bottom left (left / bottom offsets in px from the safe area), base radius and knob radius in px; the hit circle is radius + hitPadding (a thumb anywhere on or near it grabs the stick, no aiming). actions: the receiver / action cluster at the bottom right (right / bottom offsets, square size in px, never scaled down). minClearance: px the stick's hit area keeps from the cluster (tests/joystick.test.ts).",
+  "slotState": {
+    "maxThrowRange": 60,
+    "hotMinHold": 0.8,
+    "thrownFlash": 0.6
+  },
+  "_docSlotState": "Phase 3d receiver buttons (ui/slotState.ts): red (invalid) only when the receiver is not eligible (blocking), is farther than maxThrowRange yd from the QB, or the user presses a receiver after the ball is thrown (red for thrownFlash s). The HOT read is a calm outline, held at least hotMinHold s so it never flickers between receivers."
 }

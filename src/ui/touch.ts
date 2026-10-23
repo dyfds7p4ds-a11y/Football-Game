@@ -9,6 +9,7 @@ import type { InputManager } from '../input/input';
 import { VirtualJoystick } from '../input/joystick';
 import TOUCH from '../data/touch.json';
 import { h } from './dom';
+import type { SlotDisplay } from './slotState';
 
 const SLOT_LABEL: Record<EligibleSlot, string> = { WR1: '1', WR2: '2', WR3: '3', RB: 'RB', TE: 'TE' };
 // Arc of receiver buttons around the primary button (right, bottom offsets in px).
@@ -178,13 +179,16 @@ export class TouchControls {
     this.primary.disabled = mode === 'none';
   }
 
-  /** `hot` (Phase 3c): the open receiver once the QB is alerted to a blitz nobody picked up. */
-  setSlots(selected: EligibleSlot | null, blocking: Set<EligibleSlot>, visible = true, hot: EligibleSlot | null = null) {
+  /**
+   * Phase 3d: one look per receiver (ui/slotState.ts); null hides the buttons.
+   * Red (`invalid`) only for a real problem, never for the hot read.
+   */
+  setSlots(looks: Partial<Record<EligibleSlot, SlotDisplay>> | null) {
     for (const [slot, btn] of this.slotBtns) {
-      btn.classList.toggle('selected', slot === selected);
-      btn.classList.toggle('hot', slot === hot);
-      btn.classList.toggle('blocking', blocking.has(slot));
-      btn.classList.toggle('hidden', !visible);
+      const d = looks?.[slot];
+      btn.classList.toggle('hidden', !looks);
+      for (const look of ['selected', 'hot', 'invalid'] as const) btn.classList.toggle(look, d?.look === look);
+      btn.dataset.reason = d?.reason ?? '';
     }
   }
 

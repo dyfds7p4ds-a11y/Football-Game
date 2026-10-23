@@ -55,10 +55,11 @@ button:disabled { opacity: 0.45; }
 #btn-primary.juke { background: var(--accent2); }
 .slot { width: 68px; height: 68px; }
 .slot.selected { background: var(--accent); outline: 4px solid #fff; }
-.slot.blocking { opacity: 0.5; }
-/* Phase 3c: hot read when a blitz comes free */
-.slot.hot { background: #e63946; color: #fff; animation: hotpulse 0.45s ease-in-out infinite alternate; }
-@keyframes hotpulse { from { box-shadow: 0 4px 0 var(--ink); } to { box-shadow: 0 0 0 6px rgba(230, 57, 70, 0.55); } }
+/* Phase 3d: red only for a real problem (not eligible, out of range, pressed after the throw) */
+.slot.invalid { background: #e63946; color: #fff; }
+.slot.invalid[data-reason='ineligible'] { opacity: 0.55; }
+/* Phase 3c hot read, 3d: calm outline instead of a red pulse */
+.slot.hot { outline: 4px solid #8ecae6; box-shadow: 0 0 0 8px rgba(142, 202, 230, 0.35); }
 /* Phase 3b: every defender selectable; grouped DL | LB | DB, top right under the score bug */
 #defstrip { position: fixed; top: calc(84px + var(--safe-t)); right: calc(8px + var(--safe-r)); z-index: 5; display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; max-width: calc(100vw - 16px); }
 #defstrip .defgroup { display: flex; gap: 4px; }
