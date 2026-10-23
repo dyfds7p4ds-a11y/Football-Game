@@ -5,14 +5,17 @@ Three.js + TypeScript + Vite, installable as a PWA, touch-first with keyboard
 and gamepad as secondary inputs. Stylized-realistic 3D (stadium bowl, crowd,
 soft shadows) with an optional chunky "retro pixels" mode.
 
-This is **Phase 3b**: a playable single game where you run the offense against
+This is **Phase 3c**: a playable single game where you run the offense against
 a CPU defense that reads your route concepts, and play defense (any of the
 eleven defenders) against a CPU quarterback. Blocking is matchup-driven,
 blitzes can be picked up, kicks use a two-step meter and you cover your own
 kicks. Touchdowns are followed by a try (kick or two), ties go to college
-overtime, and each team has three timeouts per half. Officials, penalty
-flags, a crowd meter and intro cutscenes are in too. Visual and audio polish
-(Phase 3c), career mode and trading come later (see
+overtime, and each team has three timeouts per half. Phase 3c adds a fixed
+joystick, audibles at the line, pattern-match zones, a QB who reads blitzes
+nobody called, returnable interceptions and fumbles, NFL clock rules and a
+4 × 5-minute game that fits in about 15 minutes. Officials, penalty flags, a
+crowd meter and intro cutscenes are in too. Visual and audio polish (Phase
+3d), career mode and trading come later (see
 [ARCHITECTURE.md](ARCHITECTURE.md) for the modules, defaults, extension
 points and known gaps).
 
@@ -58,13 +61,15 @@ HTTPS, so the installed PWA also works offline.
 
 | Action | Touch (iPad) | Keyboard | Gamepad |
 | --- | --- | --- | --- |
-| Move QB / ball carrier / returner | Left thumb anywhere on the left half (invisible joystick) | WASD / arrow keys | Left stick |
+| Move QB / ball carrier / returner | Joystick at the bottom left (fixed; anywhere on or near it) | WASD / arrow keys | Left stick |
 | Look around | Drag on the right half | Q / E | Right stick |
 | Pick a receiver (pre-snap) | Tap **1 2 3 RB TE** | 1 2 3, 4/R, 5/T | X, Y, B, LB, RB |
 | Throw to a receiver | **Hold** his button to charge, **release** to throw | Hold / release the key | Hold / release the button |
 | Snap; throw to the last pick | Big button | Space / Enter | A or RT |
 | Juke (ball carrier) / dash (returner) | Big button | Space | A or RT |
 | Slide (scrambling QB) | **SLIDE** button | X / Shift | LT |
+| Audible (pre-snap, up to 3) | **AUDIBLE**, then tap a play | X / Shift, then 1 2 3 | LT, then X Y B |
+| Return a pick or fumble (defense) | Joystick; **JUKE** | WASD; Space | Left stick; A |
 | Kick (punt, field goal, kickoff) | Hold **KICK**, release in the green | Hold / release Space | Hold / release A |
 | Hand off on any play | Tap **RB** while the RB is next to you | 4 / R | LB |
 | Skip the intro | Tap anywhere | Any key | Any button |
@@ -97,7 +102,17 @@ HTTPS, so the installed PWA also works offline.
   down easily, so let blockers open a lane; SLIDE ends the run safely. Once
   past the line of scrimmage you can no longer throw.
 - **Tackles** depend on angle and speed: head-on hits stop runners cold,
-  arm tackles from behind can be dragged forward or shrugged off.
+  arm tackles from behind can be dragged forward or shrugged off. Big hits
+  can knock the ball loose: a fumble is live until someone falls on it.
+- **Audibles:** before the snap, AUDIBLE offers 2-3 plays from the same
+  formation. Each one costs play-clock time (3 s, then 5 s, then 7 s). The
+  defense re-reads after a moment (faster on Hard); snap before it does and a
+  run checked against a blitz look gets a real edge.
+- **Hot reads:** a red pulsing receiver button means a blitz came free and
+  that receiver is open now.
+- **Turnovers are returned:** after a pick or a fumble recovery the play goes
+  on. On defense you take over the man with the ball; on offense you steer
+  the nearest player to chase him down.
 - **Penalties:** an official throws a yellow flag at the spot of the foul; a
   call-out names the penalty and yardage; the penalty is applied (or
   declined) once the play is dead.
@@ -167,10 +182,14 @@ prints a timeline for a single play (play, defense, throw time, target, seed).
   4-2-5** on defense, so each eligible receiver maps to one button.
 - **NCAA/GFL hash marks** (40 ft apart). The ball is spotted between the
   hashes after each play.
-- **Simplified clock rules.** Real time with a 40-second play clock. The game
-  clock stops on incompletions, out of bounds, scores, turnovers, timeouts
-  and penalties, and keeps running after in-bounds tackles. A play that
-  starts before 0:00 is always finished.
+- **NFL clock rules (Phase 3c).** 40-second play clock. The game clock stops
+  on incompletions, scores, turnovers, possession changes and timeouts; out
+  of bounds and penalties stop it only late in a half; first downs never do;
+  two-minute warning in Q2 and Q4 (all scaled to the quarter length). On a
+  running clock the offense snaps with 5 s on the play clock, so the game
+  clock runs off between plays no matter how fast you snap (not in the
+  hurry-up after the warning). A play that starts before 0:00 is always
+  finished. Tunables and the real-time target: `src/data/pace.json`.
 - **Kickoffs, punts and field goals are played** (Quick sim brings back the
   Phase 1 instant results). Touchdowns count 6, then the try (Phase 3b).
   Kickoffs from the 35, touchbacks at the 25 (punts: 20).
@@ -184,7 +203,7 @@ prints a timeline for a single play (play, defense, throw time, target, seed).
 - Team/player names and colors are **fictional placeholders**, loosely
   inspired by German football (GFL) markets.
 
-## Known gaps (Phase 2; Phase 3a/3b gaps are in ARCHITECTURE.md)
+## Known gaps (Phase 2; Phase 3a/3b/3c gaps are in ARCHITECTURE.md)
 
 - **Defense is playable since Phase 3a/3b** (setting "CPU drives: PLAY
   DEFENSE"); "QUICK SIM" still simulates CPU drives from team grades.
@@ -197,12 +216,10 @@ prints a timeline for a single play (play, defense, throw time, target, seed).
   pass interference; no add-on yardage for personal fouls at the end of a
   run, no 10-second runoff, no declined-penalty choice for the user (the
   offended team automatically takes the better result).
-- **Simplified game rules:** no two-minute warning, no NCAA clock stop after
-  first downs. Overtime (college rules) since Phase 3b.
-- **No pre-snap adjustments.** No audibles, hot routes, motion or snap count,
-  and offensive personnel never changes (always 11 personnel).
-- **Interceptions end the play at the catch point.** There are no INT or
-  fumble returns and no fumbles.
+- **Simplified game rules:** NFL clock since Phase 3c, but no 10-second
+  runoff. Overtime (college rules) since Phase 3b.
+- **Pre-snap:** audibles since Phase 3c; still no user hot routes, motion or
+  snap count, and offensive personnel never changes (always 11 personnel).
 - **Balance is tuned by script**, not by extensive play-testing. The vertical
   concepts meet the open-rate thresholds at Normal, but Hard is very tight on
   deep balls and some medium concepts (smash corner) carry a high
