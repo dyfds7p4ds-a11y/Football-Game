@@ -142,7 +142,7 @@ button:disabled { opacity: 0.45; }
 @media (orientation: portrait) and (max-width: 700px) { #rotate { display: flex; } }
 
 /* ---------- Phase 2 HUD */
-#btn-secondary { right: 136px; bottom: 150px; width: 84px; height: 84px; font-size: 12px; background: #e9c46a; }
+#btn-secondary { right: 214px; bottom: 222px; width: 84px; height: 84px; font-size: 12px; background: #e9c46a; }
 #crowd { position: fixed; top: calc(52px + var(--safe-t)); right: calc(14px + var(--safe-r)); z-index: 4; pointer-events: none;
   display: flex; align-items: center; gap: 6px; font-family: var(--font); font-size: 8px; text-shadow: 1px 1px 0 #000; }
 #crowd .bar { width: 90px; height: 10px; border: 2px solid var(--ink); background: #2a2f38; border-radius: 3px; overflow: hidden; }

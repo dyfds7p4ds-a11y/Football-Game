@@ -460,7 +460,7 @@ export class App {
     this.hud.setHint(this.playsRun < 6 ? `You are ${this.defSlot}. Left thumb moves him · JUMP plays the ball (time it!), dives at the runner or rips a block · SWITCH or the top buttons change player` : null);
     if (f.primaryPressed || left <= 0) {
       const g = this.game!;
-      // Phase 3c: the CPU offense snaps on the pace (data/pace.json), not on the 4 s auto-snap.
+      // Phase 3c: the CPU offense snaps on the pace (data/pace.json): the game clock does not depend on the auto-snap.
       this.game = { ...g, clock: g.conversionTry ? { ...snapClock(g.clock), running: false } : pacedSnap(g.clock) };
       this.waiveDelayOfGame = false;
       this.acc = 0;
