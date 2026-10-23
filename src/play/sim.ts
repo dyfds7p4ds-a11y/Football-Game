@@ -531,12 +531,13 @@ export class PlaySim {
           };
         }
       }
-      if (runScheme(this.play.run) !== 'draw') {
+      const keyRead = (BLOCKING.runFit.keyReadByScheme as Record<string, number | undefined>)[runScheme(this.play.run)];
+      if (keyRead !== undefined) {
         const F = BLOCKING.runFit;
         for (const u of box) {
           const aw = this.actors[u.id].player.ratings.awareness;
           const miss = this.blockRng.chance(F.misread * (1.2 - aw / 100)) ? F.misreadDelay : 0;
-          this.runKeyAt.set(u.id, F.keyRead * Math.exp(this.blockRng.normal() * F.keySigma) + miss);
+          this.runKeyAt.set(u.id, keyRead * Math.exp(this.blockRng.normal() * F.keySigma) + miss);
         }
       }
       this.laneX = this.ballX + this.play.run.aim;
@@ -1434,7 +1435,7 @@ export class PlaySim {
     const run = this.play.run;
     const reach = mode === 'run' && run && !this.pastLos(this.carrier ?? this.get('RB')) && (runScheme(run) === 'zone' || runScheme(run) === 'toss')
       ? ((this.aligned.get(d.id) ?? d.pos).x - (this.aligned.get(b.id) ?? b.pos).x) * (Math.sign(run.aim) || 1) : undefined;
-    const grade = mode === 'run' ? runBlockGrade(b.player.ratings, d.player.ratings, { reachOffset: reach }) : blockQuality(b.player.ratings, d.player.ratings, mode);
+    const grade = mode === 'run' ? runBlockGrade(b.player.ratings, d.player.ratings, { reachOffset: reach, scheme: run ? runScheme(run) : undefined }) : blockQuality(b.player.ratings, d.player.ratings, mode);
     const quality = clamp(grade + (this.audibleEdge && mode === 'run' ? AUDIBLES.edge.lineGrade : 0), -1, 1);
     const holdT = holdTime(quality, { mode, passRush: this.diff.passRush * (mode === 'pass' ? this.diff.pocketPressure : 1), rng: this.blockRng });
     this.engagements.push({ blocker: b.id, defender: d.id, t: 0, mode, quality, holdT, progress: 0 });

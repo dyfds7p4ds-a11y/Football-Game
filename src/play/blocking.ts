@@ -110,11 +110,12 @@ export function comboBonus(engagers: number): number {
 }
 
 /**
- * Phase 3d: full run-block grade: the 3b matchup, minus the reach penalty,
+ * Phase 3d: full run-block grade: the 3b matchup, minus the reach penalty (scaled per scheme),
  * plus the combo bonus of a double team (clamped to -1..1).
  */
-export function runBlockGrade(blk: Ratings, def: Ratings, o: { reachOffset?: number; engagers?: number } = {}): number {
-  const reach = o.reachOffset !== undefined ? reachPenalty(blk, def, o.reachOffset) : 0;
+export function runBlockGrade(blk: Ratings, def: Ratings, o: { reachOffset?: number; engagers?: number; scheme?: RunScheme } = {}): number {
+  const factor = (BLOCKING.reach.schemeFactor as Record<string, number | undefined>)[o.scheme ?? 'toss'] ?? 1;
+  const reach = o.reachOffset !== undefined ? reachPenalty(blk, def, o.reachOffset) * factor : 0;
   const q = blockQuality(blk, def, 'run') - (Number.isFinite(reach) ? reach : 2) + comboBonus(o.engagers ?? 1);
   return Math.max(-1, Math.min(1, q));
 }
