@@ -41,5 +41,37 @@
       0.4,
       1.8
     ]
+  },
+  "zoneCoverage": {
+    "_doc": "Phase 3c (tests/coverage.test.ts): Cover 3 at Normal, every pass play (no runs, screens) x seeds, sampled at sampleTimes. A receiver inside the zone defender's area (landmark +- w, depth band yards past the LOS) is one sample; open = a perfect throw now beats every defender by openMargin s and nobody is in phase. maxOpenRate: the cap for that defender. maxStray: how far (yd, average) he may drift from his landmark before the throw.",
+    "defense": "cover3",
+    "slot": "LB1",
+    "difficulty": "normal",
+    "seeds": 6,
+    "sampleTimes": [
+      1.4,
+      1.9,
+      2.4
+    ],
+    "depth": [
+      1,
+      14
+    ],
+    "maxOpenRate": 0.15,
+    "maxStray": 4
+  },
+  "surpriseBlitz": {
+    "_doc": "Phase 3c (tests/blitz.test.ts): the user's LB1 blitzes straight at the QB in Cover 3 (not called by the scheme), CPU QB, every pass play (no screens) x seeds, Normal, average teams. sackRate: allowed range of sacks per snap; detect: allowed range (s) of the QB's mean time to notice the rusher after he triggers.",
+    "defense": "cover3",
+    "slot": "LB1",
+    "seeds": 8,
+    "sackRate": [
+      0.12,
+      0.4
+    ],
+    "detect": [
+      0.2,
+      0.6
+    ]
   }
 }

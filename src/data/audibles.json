@@ -1,0 +1,112 @@
+{
+  "_doc": "Phase 3c audibles (play/audible.ts). options: the 2-3 plays the QB can check to at the line, per called play, from the same formation (trips has no run, so its run-like check is the bubble screen; the pistol has a single play, so it checks to the shotgun set with the same personnel). maxPerPlay: audibles allowed before one snap. cost: play-clock seconds the k-th audible costs = first + (k-1) x step (repeated switching gets dearer). The CPU defense re-reads after difficulty audibleReact s and picks the right counter with chance audibleRead (else it keeps its call); counters: the calls it checks to against a run / a pass. edge: a run audible against a blitz look that the defense has not adjusted to by the snap: the blitzers need blitzRunRead s longer to read the run (until then they only get an arm on the runner: tackle x blitzTackle), run blocks grade lineGrade better.",
+  "maxPerPlay": 3,
+  "cost": {
+    "first": 3,
+    "step": 2
+  },
+  "counters": {
+    "run": [
+      "cover1blitz",
+      "cover1",
+      "cover0"
+    ],
+    "pass": [
+      "cover2",
+      "cover2man",
+      "cover3"
+    ]
+  },
+  "edge": {
+    "blitzRunRead": 0.45,
+    "lineGrade": 0.25,
+    "blitzTackle": 0.35
+  },
+  "options": {
+    "hb_dive": [
+      "pa_boot",
+      "hb_toss",
+      "deep_post"
+    ],
+    "hb_stretch": [
+      "pa_boot",
+      "hb_dive",
+      "deep_post"
+    ],
+    "hb_toss": [
+      "hb_dive",
+      "pa_boot"
+    ],
+    "deep_post": [
+      "hb_dive",
+      "pa_boot",
+      "hb_stretch"
+    ],
+    "pa_boot": [
+      "hb_dive",
+      "deep_post"
+    ],
+    "pa_shot": [
+      "hb_dive",
+      "pa_boot",
+      "hb_toss"
+    ],
+    "hb_draw": [
+      "slants",
+      "quick_outs",
+      "mesh"
+    ],
+    "slants": [
+      "hb_draw",
+      "quick_outs",
+      "rb_screen"
+    ],
+    "quick_outs": [
+      "hb_draw",
+      "slants",
+      "mesh"
+    ],
+    "mesh": [
+      "hb_draw",
+      "slants",
+      "y_cross"
+    ],
+    "levels": [
+      "hb_draw",
+      "slants",
+      "four_verts"
+    ],
+    "y_cross": [
+      "hb_draw",
+      "mesh",
+      "levels"
+    ],
+    "four_verts": [
+      "hb_draw",
+      "slants",
+      "rb_screen"
+    ],
+    "rb_screen": [
+      "hb_draw",
+      "slants",
+      "quick_outs"
+    ],
+    "curl_flat": [
+      "smash",
+      "bubble"
+    ],
+    "smash": [
+      "curl_flat",
+      "bubble"
+    ],
+    "bubble": [
+      "curl_flat",
+      "smash"
+    ],
+    "counter": [
+      "hb_draw",
+      "slants",
+      "mesh"
+    ]
+  }
+}

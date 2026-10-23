@@ -44,9 +44,9 @@ export function applyReturn(s: GameState, kicking: TeamSide, kind: 'kickoff' | '
   return { state: possession(s, recv, y), stop: 'possession', possessionChanged: true, scored: null, headline };
 }
 
-/** Kickoff out of bounds: receiving team at its 40. */
+/** Phase 3c: kickoff out of bounds: the receiving team takes over at the kicking team's 40 (no return). */
 export function kickoffOutOfBounds(s: GameState, kicking: TeamSide): RulesResult {
-  return { state: possession(s, other(kicking), ST.rules.kickoffOutOfBounds), stop: 'possession', possessionChanged: true, scored: null, headline: 'KICKOFF OUT OF BOUNDS' };
+  return { state: possession(s, other(kicking), 100 - ST.rules.kickoffOutOfBounds), stop: 'possession', possessionChanged: true, scored: null, headline: 'KICKOFF OUT OF BOUNDS' };
 }
 
 /** A field goal attempt that was played (judged by the flight). */

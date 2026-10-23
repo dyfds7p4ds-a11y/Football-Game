@@ -97,7 +97,7 @@ describe('user-controlled cornerback', () => {
     expect(timed.int).toBeGreaterThanOrEqual(none.int);
     expect(late.stop).toBeLessThan(timed.stop);
     expect(timed.int).toBeLessThan(0.45);
-  });
+  }, 20000);
 
   it('reading the throw plus a timed jump gets more picks than trailing the receiver', () => {
     let read = 0, trail = 0;

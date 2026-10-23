@@ -48,5 +48,18 @@
     "bGap": 0.65,
     "delayed": 0.4
   },
-  "recognizeAwareness": 0.6
+  "recognizeAwareness": 0.6,
+  "surprise": {
+    "_doc": "Phase 3c: rushers the protection did not plan for: a defender the call did not send (the user's LB blitzing in Cover 3) or a designed blitzer the line did not identify. A non-lineman counts as rushing once he is within maxDepth yd of the LOS (or behind it), within range yd of the QB and closing on him at minClosing yd/s or more. The line treats him as a rusher (pickup by any free blocker) after lineReact s, the QB notices him after qbReact s (blindExtra more when he comes from outside the QB's field of view, blindAngle deg), both scaled by awarenessRef / awareness. After that the QB is alerted: pressure counts the rusher by how he is actually blocked, and the most open receiver is the hot read. A man defender within coverRange yd of his receiver (or whose receiver stays in to block: the Phase 3b green dog) is covering, not a surprise rusher; so is one whose receiver is within coverAngle deg of the line to the QB (a back in the backfield). The user's own defender is judged only by what he does.",
+    "maxDepth": 4,
+    "range": 12,
+    "minClosing": 4.5,
+    "lineReact": 0.5,
+    "qbReact": 0.35,
+    "blindExtra": 0.25,
+    "blindAngle": 100,
+    "awarenessRef": 75,
+    "coverRange": 4,
+    "coverAngle": 35
+  }
 }

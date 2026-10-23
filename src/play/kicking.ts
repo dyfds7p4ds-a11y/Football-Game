@@ -54,6 +54,18 @@ export function zoneQuality(value: number, z: KickZone): number {
   return clamp(0.75 - 0.375 * (off - 1), 0, 1);
 }
 
+/**
+ * Phase 3c: the one penalty curve both meter layers use. `off` is the miss in
+ * zone half-widths (|value - center| / halfWidth): 0 inside the zone, then it
+ * rises to 1 at `badAt` half-widths out.
+ */
+export function timingPenalty(value: number, z: KickZone): number {
+  const pen = ST.meter.penalty;
+  const off = Math.abs(value - z.center) / z.halfWidth;
+  if (off <= 1) return 0;
+  return clamp((off - 1) / (pen.badAt - 1), 0, 1) ** pen.exponent;
+}
+
 export interface KickRelease {
   kind: KickKind;
   power: number;
@@ -65,6 +77,9 @@ export interface KickRelease {
   /** Phase 3b second layer: the locked aim needle (-1..1) and, for kickoffs / field goals, the sideways direction it sets. */
   aim?: number;
   lateralDeg?: number;
+  /** Phase 3c: penalty 0..1 of each layer (`timingPenalty`); both cost distance in `kickFlight`. */
+  powerPenalty?: number;
+  aimPenalty?: number;
 }
 
 /** Aim needle (-1..1) `t` seconds after the power was locked: starts at the left end and sweeps back and forth. */
@@ -101,9 +116,15 @@ export function releaseKickAimed(kind: KickKind, held: number, aim: number, wind
   const w = ST.meter.aim.weight;
   const quality = pq * (1 - w) + aq * w;
   const inZone = Math.abs(power - z.center) <= z.halfWidth;
-  if (kind === 'punt') return { kind, power, angle: clamp(aimToAngle(aim), 10, 80), quality, inZone, aim };
-  const angle = kind === 'kickoff' ? ST.meter.kickoff.angle : ST.meter.fieldGoal.angle;
-  return { kind, power, angle, quality, inZone, aim, lateralDeg: clamp(aim, -1, 1) * ST.meter.aim.maxLateralDeg };
+  const powerPenalty = timingPenalty(power, z);
+  const aimPenalty = timingPenalty(aim, aimZone(kind, windowScale));
+  if (kind === 'punt') return { kind, power, angle: clamp(aimToAngle(aim), 10, 80), quality, inZone, aim, powerPenalty, aimPenalty };
+  const pen = ST.meter.penalty;
+  // A badly missed needle: the kick goes flat and further sideways.
+  const angle = (kind === 'kickoff' ? ST.meter.kickoff.angle : ST.meter.fieldGoal.angle) - aimPenalty * pen.flatAngleDeg;
+  const side = Math.sign(aim) || 1;
+  const lateralDeg = clamp(aim, -1, 1) * ST.meter.aim.maxLateralDeg + side * aimPenalty * pen.extraLateralDeg;
+  return { kind, power, angle, quality, inZone, aim, lateralDeg, powerPenalty, aimPenalty };
 }
 
 export function releaseKick(kind: KickKind, held: number, windowScale: number, fgDistance = 40): KickRelease {
@@ -117,7 +138,7 @@ export function releaseKick(kind: KickKind, held: number, windowScale: number, f
     quality = quality * 0.6 + aq * 0.4;
   }
   angle = clamp(angle, 10, 80);
-  return { kind, power, angle, quality, inZone: Math.abs(power - z.center) <= z.halfWidth };
+  return { kind, power, angle, quality, inZone: Math.abs(power - z.center) <= z.halfWidth, powerPenalty: timingPenalty(power, z) };
 }
 
 /** A CPU kicker: a release near the zone center with difficulty-dependent spread. */
@@ -154,6 +175,9 @@ export function kickFlight(rel: KickRelease, from: Vec2, aimX: number, rng: Rng)
   const ph = ST.physics;
   const maxSpeed = rel.kind === 'punt' ? ph.puntMaxSpeed : rel.kind === 'kickoff' ? ph.kickoffMaxSpeed : ph.fgMaxSpeed;
   let speed = maxSpeed * (0.45 + 0.55 * rel.power);
+  // Phase 3c: bad timing on either layer costs visible yards (same curve for both).
+  const pen = ST.meter.penalty;
+  speed *= (1 - pen.distanceLoss * (rel.powerPenalty ?? 0)) * (1 - pen.aimDistanceLoss * (rel.aimPenalty ?? 0));
   let lateral = (1 - rel.quality) * ph.maxLateralDeg * (rng.next() < 0.5 ? -1 : 1) * (0.5 + 0.5 * rng.next());
   // Aimed kicks: the needle sets the direction; only a little of the random spray remains.
   if (rel.lateralDeg !== undefined) lateral = rel.lateralDeg + lateral * ST.meter.aim.residualLateral;

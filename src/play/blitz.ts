@@ -33,7 +33,25 @@ export const BLITZ = blitzJson as unknown as {
   hurryRadius: number;
   hurryPressure: number;
   waypointRadius: number;
+  surprise: {
+    maxDepth: number; range: number; minClosing: number; lineReact: number; qbReact: number;
+    blindExtra: number; blindAngle: number; awarenessRef: number; coverRange: number; coverAngle: number;
+  };
 };
+
+/**
+ * Phase 3c: how long the line and the QB need to react to a rush nobody
+ * planned for. `angleDeg` = angle between the QB's facing and the rusher.
+ */
+export function surpriseReaction(angleDeg: number, lineAwareness: number, qbAwareness: number): { line: number; qb: number; blind: boolean } {
+  const S = BLITZ.surprise;
+  const blind = Math.abs(angleDeg) > S.blindAngle;
+  return {
+    line: S.lineReact * (S.awarenessRef / Math.max(30, lineAwareness)),
+    qb: (S.qbReact + (blind ? S.blindExtra : 0)) * (S.awarenessRef / Math.max(30, qbAwareness)),
+    blind,
+  };
+}
 
 /** Blitz design for a non-lineman rusher: from the call, else by alignment (wide = edge). */
 export function blitzDesign(callId: string, slot: DefSlot, startX: number, ballX: number): BlitzDesign {

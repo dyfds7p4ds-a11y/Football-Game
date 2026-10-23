@@ -1,0 +1,17 @@
+{
+  "joystick": {
+    "radius": 92,
+    "knobRadius": 38,
+    "left": 36,
+    "bottom": 36,
+    "hitPadding": 44,
+    "deadzone": 0.12
+  },
+  "actions": {
+    "right": 18,
+    "bottom": 18,
+    "size": 310
+  },
+  "minClearance": 24,
+  "_doc": "Phase 3c touch layout (input/joystick.ts, ui/touch.ts). joystick: fixed base at the bottom left (left / bottom offsets in px from the safe area), base radius and knob radius in px; the hit circle is radius + hitPadding (a thumb anywhere on or near it grabs the stick, no aiming). actions: the receiver / action cluster at the bottom right (right / bottom offsets, square size in px, never scaled down). minClearance: px the stick's hit area keeps from the cluster (tests/joystick.test.ts)."
+}

@@ -1,0 +1,26 @@
+{
+  "_doc": "Phase 3c game pace (game/clock.ts, game/pace.ts). NFL clock rules: incompletions, scores, turnovers, possession changes and timeouts stop the clock; first downs do not; out of bounds and accepted penalties stop it only inside the last lateStop.q2 s of the 2nd quarter and lateStop.q4 s of the 4th (otherwise it restarts when the ball is ready); two-minute warning at warningAt s in Q2 and Q4. playClock: seconds on the play clock. snapAt: on a running clock the offense snaps when the play clock shows this many seconds, so that much less real waiting: at the snap the game clock runs off (play clock left - snapAt), never inside the two-minute warning (hurry-up is real time) and never past it. cpuDrive uses the same runoff (plus jitter s). real: estimated real seconds per step for the game-length probe (call = picking a play, presnap = until the snap, live = average live play, post = after the whistle (the app's post-play pause), cpuPresnap = the CPU offense's auto-snap after the defensive call, cpuCall = the defensive call screen on CPU snaps, kick = a kickoff or punt with return, score = score / try screens, break = quarter / half breaks). targetRealMinutes: a full game at targetQuarterMinutes per quarter must fit in this. referenceQuarter: warningAt and lateStop are NFL seconds for a 15-minute quarter; shorter quarters scale them by quarterLength / referenceQuarter (a 5-minute quarter: warning at 0:40, Q4 late window 1:40). hurry: seconds between snaps of a simulated CPU drive in the hurry-up (inside the two-minute warning), where there is no runoff.",
+  "playClock": 40,
+  "snapAt": 5,
+  "jitter": 4,
+  "warningAt": 120,
+  "lateStop": {
+    "q2": 120,
+    "q4": 300
+  },
+  "real": {
+    "call": 6,
+    "presnap": 3,
+    "live": 6,
+    "post": 1.3,
+    "cpuCall": 3,
+    "kick": 12,
+    "score": 4,
+    "break": 5,
+    "cpuPresnap": 2.0
+  },
+  "targetQuarterMinutes": 5,
+  "targetRealMinutes": 15,
+  "referenceQuarter": 900,
+  "hurry": 12
+}

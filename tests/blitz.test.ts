@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { BLITZ, arrivalTime, blitzDesign, blitzPath, classifyBlitz, recognizeChance } from '../src/play/blitz';
+import { Rng } from '../src/core/rng';
+import { norm, sub } from '../src/core/vec';
+import { DIFFICULTY, PLAYS, getTeam } from '../src/data';
+import balance from '../src/data/balance.json';
+import type { DefSlot, TeamData } from '../src/data/types';
+import { BLITZ, arrivalTime, blitzDesign, blitzPath, classifyBlitz, recognizeChance, surpriseReaction } from '../src/play/blitz';
+import { getDefenseCall } from '../src/play/defenseCalls';
+import { CpuQB } from '../src/play/qbAI';
+import { PlaySim } from '../src/play/sim';
 import { assignProtection, type Unit } from '../src/play/blocking';
 import { runPlay } from './simHarness';
 
@@ -87,5 +95,82 @@ describe('nickel blitz in the sim', () => {
     expect(all.blocked).toBeGreaterThan(0);
     expect(all.late + cover0Hurries).toBeGreaterThan(0);
     expect(cover0Hurries).toBeGreaterThan(0);
+  });
+});
+
+describe('Phase 3c: a blitz the scheme did not call', () => {
+  const SB = balance.surpriseBlitz;
+  const passPlays = PLAYS.filter((p) => !p.run && !p.screen);
+  const run = (opts: { blitz: boolean; offense?: TeamData; seeds?: number }) => {
+    const out = { n: 0, sacks: 0, detect: [] as number[], blind: 0, throwT: [] as number[], hot: 0, unscheduled: 0, surprises: 0 };
+    for (const play of passPlays) for (let s = 0; s < (opts.seeds ?? SB.seeds); s++) {
+      const sim = new PlaySim({
+        play, defense: getDefenseCall(SB.defense), offenseTeam: opts.offense ?? getTeam('elbtal'), defenseTeam: getTeam('rheinstadt'),
+        ballX: 0, los: 30, difficulty: { ...DIFFICULTY.normal, penaltyRate: 0 }, seed: 500 + s, userDefense: opts.blitz,
+      });
+      if (opts.blitz) sim.selectDefender(SB.slot as DefSlot);
+      const qb = new CpuQB(play, DIFFICULTY.normal, new Rng(9 + s));
+      let sawHot = false;
+      for (let i = 0; i < 60 * 15 && !sim.result; i++) {
+        const inp = qb.input(sim);
+        if (opts.blitz) inp.defense = { move: norm(sub(sim.get('QB').pos, sim.userDefender!.pos)), jump: false };
+        sim.step(inp);
+        if (sim.hot) sawHot = true;
+        const th = sim.drainEvents().find((e) => e.type === 'throw');
+        if (th) out.throwT.push(th.t);
+      }
+      out.n++;
+      if (sim.result!.outcome === 'sack') out.sacks++;
+      if (sawHot) out.hot++;
+      if (sim.surprise.size > 0) out.surprises++;
+      for (const r of sim.surpriseReport()) {
+        if (r.slot === SB.slot && !r.scheduled) {
+          out.unscheduled++;
+          out.detect.push(r.detect);
+          if (r.blind) out.blind++;
+        }
+      }
+    }
+    return out;
+  };
+  const mean = (a: number[]) => a.reduce((t, x) => t + x, 0) / Math.max(1, a.length);
+
+  it('Cover 3 LB1 blitz against an average line: known, non-trivial sack rate; the QB notices it in a defined time', () => {
+    const r = run({ blitz: true });
+    if (process.env.BALANCE_STATS) console.log('surprise blitz', { sack: r.sacks / r.n, detect: mean(r.detect), n: r.n });
+    expect(r.unscheduled).toBeGreaterThan(r.n * 0.9); // he is seen as a rusher on (almost) every snap
+    expect(r.sacks / r.n).toBeGreaterThanOrEqual(SB.sackRate[0]);
+    expect(r.sacks / r.n).toBeLessThanOrEqual(SB.sackRate[1]);
+    expect(mean(r.detect)).toBeGreaterThanOrEqual(SB.detect[0]);
+    expect(mean(r.detect)).toBeLessThanOrEqual(SB.detect[1]);
+    expect(r.hot).toBeGreaterThan(r.n * 0.5);
+  }, 60000);
+
+  it('the pressure depends on the blocking, not on the scheme: a weak line gives up more sacks than a strong one', () => {
+    const line = (v: number): TeamData => {
+      const t = getTeam('elbtal');
+      return { ...t, roster: t.roster.map((p) => p.position === 'OL' || p.position === 'RB' || p.position === 'TE'
+        ? { ...p, ratings: { ...p.ratings, blocking: v, strength: v, awareness: v } } : p) };
+    };
+    const weak = run({ blitz: true, offense: line(45), seeds: 5 });
+    const strong = run({ blitz: true, offense: line(95), seeds: 5 });
+    expect(weak.sacks).toBeGreaterThan(strong.sacks);
+  }, 60000);
+
+  it('the QB reacts to the actual alignment: the ball comes out sooner against the blitzing LB than against the called zone', () => {
+    const blitz = run({ blitz: true, seeds: 5 });
+    const zone = run({ blitz: false, seeds: 5 });
+    expect(mean(blitz.throwT)).toBeLessThan(mean(zone.throwT) - 0.2);
+    // The all-CPU Cover 3 rarely looks like a surprise rush (no false alarms on most snaps).
+    expect(zone.surprises / zone.n).toBeLessThan(0.15);
+  }, 60000);
+
+  it('a rusher from outside the QB\'s field of view takes longer to notice; awareness speeds it up', () => {
+    const front = surpriseReaction(20, 75, 75);
+    const blind = surpriseReaction(150, 75, 75);
+    expect(blind.blind).toBe(true);
+    expect(blind.qb).toBeGreaterThan(front.qb);
+    expect(surpriseReaction(20, 75, 95).qb).toBeLessThan(front.qb);
+    expect(surpriseReaction(20, 50, 75).line).toBeGreaterThan(front.line);
   });
 });

@@ -8,7 +8,7 @@ import type { Rng } from '../core/rng';
 import { clamp } from '../core/vec';
 import { getTeam, teamGrades } from '../data';
 import type { DifficultyConfig } from '../data/types';
-import { snapClock, tickClock } from './clock';
+import { PACE, paceRunoff, snapClock, tickClock, type StopReason } from './clock';
 import { afterPlay, checkQuarter, type Break } from './flow';
 import { applyPlay, attemptFieldGoal, fieldGoalDistance, punt, type RulesResult } from './rules';
 import { ballOnText, downText, other, type GameState } from './state';
@@ -17,6 +17,7 @@ import { penaltyState } from './penalties';
 import { PENALTIES, makeFoul } from '../play/penalties';
 import { chooseConversion, quickConversion } from './conversion';
 import { callTimeout, cpuWantsTimeout } from './timeouts';
+import { callMix } from '../play/qbAI';
 
 export interface DriveEntry {
   clock: string;
@@ -40,6 +41,8 @@ export interface DriveOptions {
   crowdEffect?: boolean;
   /** Penalty chance scale (0 = off). */
   penalties?: number;
+  /** Phase 3c game-length probe: called after every snap with what stopped the clock and the game seconds it took (huddle included). */
+  onPlay?: (p: { stop: StopReason; seconds: number; clockStopped: boolean; kick: boolean }) => void;
 }
 
 export function simulateCpuDrive(start: GameState, diff: DifficultyConfig, rng: Rng, opts: DriveOptions = {}): DriveSummary {
@@ -63,10 +66,15 @@ export function simulateCpuDrive(start: GameState, diff: DifficultyConfig, rng: 
   };
 
   for (let guard = 0; guard < 40; guard++) {
+    const before = { q: s.clock.quarter, rem: s.clock.remaining };
     const situation = `${downText(s)} at ${ballOnText(s.ballY)}`;
     const clock = `Q${s.clock.quarter} ${Math.floor(s.clock.remaining / 60)}:${String(Math.floor(s.clock.remaining % 60)).padStart(2, '0')}`;
-    // Huddle / play clock time when the clock is running.
-    if (s.clock.running) run(rng.range(22, 34));
+    // Huddle / play clock time when the clock is running (Phase 3c: the same snap timing as played snaps).
+    if (s.clock.running) {
+      const runoff = paceRunoff({ ...s.clock, playClock: PACE.playClock + rng.range(-PACE.jitter, PACE.jitter) }) || PACE.hurry;
+      const t = tickClock(s.clock, runoff);
+      s = { ...s, clock: t.clock };
+    }
     const qc = checkQuarter(s);
     if (qc.brk !== 'none') {
       s = qc.state;
@@ -105,7 +113,8 @@ export function simulateCpuDrive(start: GameState, diff: DifficultyConfig, rng: 
         text = r.headline;
       }
     } else {
-      const passP = clamp(0.5 + (s.toGo > 7 ? 0.25 : 0) - (s.toGo <= 2 ? 0.25 : 0), 0.15, 0.9);
+      // Phase 3c: the same down-and-distance mix as played CPU snaps (no designed runs on 3rd / 4th and long).
+      const passP = 1 - callMix({ down: s.down, toGo: s.toGo, yardline: s.ballY }).run;
       let outcome: 'tackle' | 'incomplete' | 'interception' | 'touchdown' | 'sack' | 'outOfBounds';
       if (rng.chance(passP)) {
         const roll = rng.next();
@@ -166,6 +175,10 @@ export function simulateCpuDrive(start: GameState, diff: DifficultyConfig, rng: 
       defensiveStop: r.headline.includes('MISSED'),
     });
     const ap = afterPlay({ ...r.state, crowd }, r.stop);
+    opts.onPlay?.({
+      stop: r.stop, seconds: before.q === r.state.clock.quarter ? before.rem - r.state.clock.remaining : before.rem,
+      clockStopped: !ap.state.clock.running, kick: /FIELD GOAL|PUNT/.test(r.headline),
+    });
     s = ap.state;
     // Late in a half the CPU offense stops the clock with a timeout.
     if (!r.possessionChanged && cpuWantsTimeout(s, cpu)) {

@@ -33,8 +33,10 @@ export const CPU_OFFENSE = cpuJson as {
   primaryBias: number;
   slotBias: Record<EligibleSlot, number>;
   checkdownAfter: number;
+  hot: { margin: number; bail: number };
   runner: { lookAhead: number; avoid: number };
   calls: Record<'short' | 'normal' | 'long', CallMix>;
+  callsLate: Record<'short' | 'normal' | 'long', CallMix> & { shortTo: number; longFrom: number };
   fourthDown: { goForItToGo: number; goForItFrom: number; fieldGoalFrom: number };
 };
 
@@ -90,10 +92,23 @@ export class CpuQB {
       if (sim.t >= scr.release) this.choose(sim, scr.target);
       return;
     }
-    if (sim.t < this.nextRead) return;
-    this.nextRead = sim.t + CPU_OFFENSE.readEvery;
     const qb = sim.get('QB');
     const defenders = sim.actors.filter((a) => a.side === 'def' && !a.down).map(toWA);
+    if (sim.qbAlert && sim.hot && sim.t >= this.dropTime * 0.5) {
+      // Phase 3c: a rush nobody planned for: the ball comes out now, to the hot read or away.
+      const w = throwingWindow(qb.pos, toWA(sim.get(sim.hot)), defenders);
+      const m = w.margin + this.rng.normal() * (CPU_OFFENSE.readNoise / (this.skill * this.skill));
+      if (m > CPU_OFFENSE.hot.margin) {
+        this.choose(sim, sim.hot);
+        return;
+      }
+      if (sim.pressure > CPU_OFFENSE.hot.bail) {
+        this.throwAway = Math.sign(qb.pos.x - sim.ballX) || 1;
+        return;
+      }
+    }
+    if (sim.t < this.nextRead) return;
+    this.nextRead = sim.t + CPU_OFFENSE.readEvery;
     let best: { slot: EligibleSlot; m: number } | null = null;
     const pressuredNow = sim.pressure > CPU_OFFENSE.pressureBail;
     for (const slot of ELIGIBLE) {
@@ -145,12 +160,23 @@ export interface OffenseSituation {
   yardline: number;
 }
 
+/**
+ * Phase 3c: the call mix for down and distance. Long distance favours passes;
+ * on 3rd / 4th and long (`callsLate.longFrom`) there is no designed run.
+ */
+export function callMix(sit: OffenseSituation): CallMix {
+  const L = CPU_OFFENSE.callsLate;
+  const bucket = sit.toGo <= L.shortTo ? 'short' : sit.toGo >= L.longFrom ? 'long' : 'normal';
+  return sit.down >= 3 ? L[bucket] : CPU_OFFENSE.calls[bucket];
+}
+
 /** CPU play call by down and distance (fourth downs: see `fourthDownCall`). */
 export function chooseCpuPlay(sit: OffenseSituation, rng: Rng): PlayData {
-  const mix = sit.toGo <= 2 ? CPU_OFFENSE.calls.short : sit.toGo >= 8 ? CPU_OFFENSE.calls.long : CPU_OFFENSE.calls.normal;
+  const mix = callMix(sit);
   let r = rng.next();
-  let kind: keyof CallMix = 'run';
-  for (const k of Object.keys(mix) as (keyof CallMix)[]) {
+  const kinds = (Object.keys(mix) as (keyof CallMix)[]).filter((k) => mix[k] > 0);
+  let kind: keyof CallMix = kinds[kinds.length - 1];
+  for (const k of kinds) {
     if ((r -= mix[k]) <= 0) {
       kind = k;
       break;
@@ -159,7 +185,9 @@ export function chooseCpuPlay(sit: OffenseSituation, rng: Rng): PlayData {
   const cats: Record<keyof CallMix, PlayCategory[]> = { run: ['run'], short: ['short', 'screen'], medium: ['medium', 'playaction'], deep: ['deep', 'playaction'] };
   // Deep shots need room in front of the goal line.
   const pool = PLAYS.filter((p) => cats[kind].includes(p.category) && !(kind === 'deep' && sit.yardline > 80));
-  return rng.pick(pool.length ? pool : PLAYS);
+  // No room for a deep shot: a pass from the medium / short menu instead (never a run the mix did not ask for).
+  const fallback = PLAYS.filter((p) => (kind === 'run' ? p.run : !p.run && (p.category === 'medium' || p.category === 'short')));
+  return rng.pick(pool.length ? pool : fallback);
 }
 
 /** Fourth down: go for it, kick a field goal or punt. */

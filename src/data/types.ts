@@ -145,4 +145,7 @@ export interface DifficultyConfig {
   kickWindow: number;
   /** Multiplier on every foul chance (data/penalties.json); keeps flags rare. */
   penaltyRate: number;
+  /** Phase 3c: seconds the CPU defense needs to react to an audible, and its chance to pick the right counter. */
+  audibleReact: number;
+  audibleRead: number;
 }

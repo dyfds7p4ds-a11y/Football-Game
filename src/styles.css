@@ -36,16 +36,19 @@ button.ghost { background: transparent; color: var(--paper); border-color: var(-
 button:disabled { opacity: 0.45; }
 
 /* ---------- touch zones */
-#joyzone { position: fixed; left: 0; top: 70px; bottom: 0; width: 50vw; z-index: 1; }
+/* Phase 3c: fixed stick bottom left; the zone is the hit circle (sizes from data/touch.json) */
+#joyzone { position: fixed; z-index: 3; border-radius: 50%; touch-action: none; }
 #lookzone { position: fixed; right: 0; top: 70px; bottom: 0; width: 50vw; z-index: 1; }
 .joy-base, .joy-knob {
-  position: fixed; border-radius: 50%; pointer-events: none; z-index: 2; transform: translate(-50%, -50%);
+  position: absolute; left: 50%; top: 50%; border-radius: 50%; pointer-events: none; transform: translate(-50%, -50%);
 }
-.joy-base { width: 120px; height: 120px; border: 3px solid rgba(244, 241, 222, 0.5); background: rgba(16, 20, 24, 0.2); }
-.joy-knob { width: 54px; height: 54px; background: rgba(244, 241, 222, 0.75); border: 3px solid var(--ink); }
+.joy-base { box-sizing: border-box; border: 3px solid rgba(244, 241, 222, 0.45); background: rgba(16, 20, 24, 0.22); }
+.joy-knob { box-sizing: border-box; background: rgba(244, 241, 222, 0.6); border: 3px solid var(--ink); }
+#joyzone.active .joy-base { border-color: rgba(244, 241, 222, 0.8); }
+#joyzone.active .joy-knob { background: rgba(244, 241, 222, 0.9); }
 
 /* ---------- action cluster (bottom right) */
-#actions { position: fixed; right: calc(18px + var(--safe-r)); bottom: calc(18px + var(--safe-b)); width: 300px; height: 300px; z-index: 3; pointer-events: none; }
+#actions { position: fixed; z-index: 3; pointer-events: none; }
 #actions button { position: absolute; pointer-events: auto; border-radius: 50%; padding: 0; font-size: 15px; }
 #btn-primary { right: 0; bottom: 0; width: 124px; height: 124px; font-size: 14px; background: var(--accent); }
 #btn-primary.throw { background: #ff8c42; }
@@ -53,6 +56,9 @@ button:disabled { opacity: 0.45; }
 .slot { width: 68px; height: 68px; }
 .slot.selected { background: var(--accent); outline: 4px solid #fff; }
 .slot.blocking { opacity: 0.5; }
+/* Phase 3c: hot read when a blitz comes free */
+.slot.hot { background: #e63946; color: #fff; animation: hotpulse 0.45s ease-in-out infinite alternate; }
+@keyframes hotpulse { from { box-shadow: 0 4px 0 var(--ink); } to { box-shadow: 0 0 0 6px rgba(230, 57, 70, 0.55); } }
 /* Phase 3b: every defender selectable; grouped DL | LB | DB, top right under the score bug */
 #defstrip { position: fixed; top: calc(84px + var(--safe-t)); right: calc(8px + var(--safe-r)); z-index: 5; display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; max-width: calc(100vw - 16px); }
 #defstrip .defgroup { display: flex; gap: 4px; }
@@ -134,12 +140,9 @@ button:disabled { opacity: 0.45; }
 .title-art { font-family: var(--font); font-size: 34px; color: var(--accent); text-shadow: 4px 4px 0 #c8102e, 8px 8px 0 #000; margin: 10px 0 18px; line-height: 1.3; }
 #rotate { position: fixed; inset: 0; z-index: 50; background: #000; display: none; align-items: center; justify-content: center; text-align: center; font-family: var(--font); font-size: 14px; padding: 20px; line-height: 1.8; }
 @media (orientation: portrait) and (max-width: 700px) { #rotate { display: flex; } }
-@media (max-height: 600px) {
-  #actions { transform: scale(0.82); transform-origin: bottom right; }
-}
 
 /* ---------- Phase 2 HUD */
-#btn-secondary { right: 136px; bottom: 150px; width: 84px; height: 84px; font-size: 12px; background: #e9c46a; }
+#btn-secondary { right: 214px; bottom: 222px; width: 84px; height: 84px; font-size: 12px; background: #e9c46a; }
 #crowd { position: fixed; top: calc(52px + var(--safe-t)); right: calc(14px + var(--safe-r)); z-index: 4; pointer-events: none;
   display: flex; align-items: center; gap: 6px; font-family: var(--font); font-size: 8px; text-shadow: 1px 1px 0 #000; }
 #crowd .bar { width: 90px; height: 10px; border: 2px solid var(--ink); background: #2a2f38; border-radius: 3px; overflow: hidden; }
@@ -190,3 +193,15 @@ button:disabled { opacity: 0.45; }
   background: rgba(0,0,0,0.5); padding: 8px 12px; border-radius: 6px; z-index: 1; }
 #intro .bars { position: fixed; left: 0; right: 0; height: 7vh; background: #000; }
 #intro .bars.top { top: 0; } #intro .bars.bottom { bottom: 0; }
+
+/* ---------- Phase 3c: audible picker (above the action cluster) */
+#audible { position: fixed; right: calc(18px + var(--safe-r)); bottom: calc(330px + var(--safe-b)); z-index: 6; background: rgba(16, 20, 24, 0.92);
+  border: 3px solid var(--ink); border-radius: 8px; padding: 8px; min-width: 240px; font-family: var(--font); }
+#audible .aud-head { display: flex; justify-content: space-between; align-items: center; font-size: 10px; color: var(--accent); margin-bottom: 6px; }
+#audible .aud-close { min-height: 36px; min-width: 36px; padding: 0; }
+#audible .aud-list { display: flex; flex-direction: column; gap: 6px; }
+#audible .aud-opt { display: flex; gap: 10px; align-items: center; text-align: left; font-size: 11px; min-height: 48px; }
+#audible .aud-key { color: var(--accent); }
+#audible .aud-cat { margin-left: auto; font-size: 8px; opacity: 0.7; }
+#audible .aud-info { font-size: 8px; margin-top: 6px; opacity: 0.8; }
+@media (max-height: 600px) { #audible { bottom: auto; top: calc(70px + var(--safe-t)); } }

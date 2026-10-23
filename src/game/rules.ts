@@ -28,6 +28,8 @@ export interface RulesPlay {
   outcome: PlayOutcome;
   endY: number;
   endX: number;
+  /** Phase 3c: outcome 'interception' came from a lost fumble (headlines only). */
+  fumble?: boolean;
 }
 
 export interface RulesResult {
@@ -98,9 +100,9 @@ export function applyPlay(s: GameState, p: RulesPlay): RulesResult {
     }
     case 'interception': {
       const theirY = 100 - p.endY;
-      if (theirY >= 100) return scoreTouchdown(s, def, 'PICK SIX!');
+      if (theirY >= 100) return scoreTouchdown(s, def, p.fumble ? 'SCOOP AND SCORE!' : 'PICK SIX!');
       const st = startPossession(s, def, theirY <= 0 ? TOUCHBACK : theirY);
-      return { state: st, stop: 'turnover', possessionChanged: true, scored: null, headline: 'INTERCEPTED' };
+      return { state: st, stop: 'turnover', possessionChanged: true, scored: null, headline: p.fumble ? 'FUMBLE LOST' : 'INTERCEPTED' };
     }
     case 'incomplete':
       return advanceDown(s, s.ballY, s.ballX, 'incomplete', 'INCOMPLETE');

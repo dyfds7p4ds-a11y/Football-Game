@@ -1,5 +1,5 @@
 /**
- * Touch controls: invisible joystick (left half), look-drag (right half),
+ * Touch controls: fixed joystick (bottom left, Phase 3c), look-drag (right half),
  * receiver buttons + primary action button (bottom right). Multi-touch safe:
  * every control tracks its own pointerId.
  */
@@ -7,6 +7,7 @@ import type { DefSlot, EligibleSlot } from '../data/types';
 import { DEF_UNITS } from '../play/defenseSelect';
 import type { InputManager } from '../input/input';
 import { VirtualJoystick } from '../input/joystick';
+import TOUCH from '../data/touch.json';
 import { h } from './dom';
 
 const SLOT_LABEL: Record<EligibleSlot, string> = { WR1: '1', WR2: '2', WR3: '3', RB: 'RB', TE: 'TE' };
@@ -25,15 +26,25 @@ export class TouchControls {
   private slotBtns = new Map<EligibleSlot, HTMLButtonElement>();
   private defBtns = new Map<DefSlot, HTMLButtonElement>();
   private defStrip: HTMLElement;
-  private joy = new VirtualJoystick(60);
+  private joy = new VirtualJoystick();
   private joyId: number | null = null;
   private lookId: number | null = null;
   private lookLast = { x: 0, y: 0 };
-  private base = h('div', { class: 'joy-base hidden' });
-  private knob = h('div', { class: 'joy-knob hidden' });
+  private base = h('div', { class: 'joy-base' });
+  private knob = h('div', { class: 'joy-knob' });
+  private joyzone: HTMLElement;
 
   constructor(private input: InputManager) {
-    const joyzone = h('div', { id: 'joyzone' });
+    const J = TOUCH.joystick;
+    const hit = J.radius + J.hitPadding;
+    // The hit circle is the zone itself; base and knob are children, centered in it.
+    const joyzone = h('div', { id: 'joyzone', style: {
+      left: `calc(${J.left}px + var(--safe-l))`, bottom: `calc(${J.bottom}px + var(--safe-b))`,
+      width: `${hit * 2}px`, height: `${hit * 2}px`,
+    } }, this.base, this.knob);
+    this.base.style.width = this.base.style.height = `${J.radius * 2}px`;
+    this.knob.style.width = this.knob.style.height = `${J.knobRadius * 2}px`;
+    this.joyzone = joyzone;
     const lookzone = h('div', { id: 'lookzone' });
     this.primary = h('button', { id: 'btn-primary' }, 'SNAP');
     this.chargeZone = h('div', { class: 'zone' });
@@ -48,7 +59,11 @@ export class TouchControls {
     const secUp = () => this.secondary.classList.remove('down');
     this.secondary.addEventListener('pointerup', secUp);
     this.secondary.addEventListener('pointercancel', secUp);
-    const actions = h('div', { id: 'actions' }, this.chargeBox, this.primary, this.secondary);
+    const A = TOUCH.actions;
+    const actions = h('div', { id: 'actions', style: {
+      right: `calc(${A.right}px + var(--safe-r))`, bottom: `calc(${A.bottom}px + var(--safe-b))`,
+      width: `${A.size}px`, height: `${A.size}px`,
+    } }, this.chargeBox, this.primary, this.secondary);
     for (const slot of Object.keys(SLOT_POS) as EligibleSlot[]) {
       const [r, b] = SLOT_POS[slot];
       const btn = h('button', { class: 'slot', style: { right: `${r}px`, bottom: `${b}px` } }, SLOT_LABEL[slot]);
@@ -84,7 +99,7 @@ export class TouchControls {
       strip.append(group);
     }
     this.defStrip = strip;
-    this.root = h('div', { id: 'touch' }, joyzone, lookzone, this.base, this.knob, actions, strip);
+    this.root = h('div', { id: 'touch' }, joyzone, lookzone, actions, strip);
 
     // Primary button: hold state.
     this.primary.addEventListener('pointerdown', (e) => {
@@ -106,7 +121,10 @@ export class TouchControls {
       e.preventDefault();
       joyzone.setPointerCapture(e.pointerId);
       this.joyId = e.pointerId;
+      const r = joyzone.getBoundingClientRect();
+      this.joy.place(r.left + r.width / 2, r.top + r.height / 2);
       this.joy.start(e.clientX, e.clientY);
+      input.setTouchMove(this.joy.x, this.joy.y);
       this.drawJoy();
     });
     joyzone.addEventListener('pointermove', (e) => {
@@ -148,14 +166,9 @@ export class TouchControls {
   }
 
   private drawJoy() {
-    const on = this.joy.active;
-    this.base.classList.toggle('hidden', !on);
-    this.knob.classList.toggle('hidden', !on);
-    if (!on) return;
-    this.base.style.left = `${this.joy.originX}px`;
-    this.base.style.top = `${this.joy.originY}px`;
-    this.knob.style.left = `${this.joy.originX + this.joy.x * this.joy.radius}px`;
-    this.knob.style.top = `${this.joy.originY - this.joy.y * this.joy.radius}px`;
+    this.joyzone.classList.toggle('active', this.joy.active);
+    this.knob.style.transform =
+      `translate(calc(-50% + ${this.joy.x * this.joy.radius}px), calc(-50% + ${-this.joy.y * this.joy.radius}px))`;
   }
 
   setPrimary(label: string, mode: 'snap' | 'throw' | 'juke' | 'kick' | 'none') {
@@ -165,9 +178,11 @@ export class TouchControls {
     this.primary.disabled = mode === 'none';
   }
 
-  setSlots(selected: EligibleSlot | null, blocking: Set<EligibleSlot>, visible = true) {
+  /** `hot` (Phase 3c): the open receiver once the QB is alerted to a blitz nobody picked up. */
+  setSlots(selected: EligibleSlot | null, blocking: Set<EligibleSlot>, visible = true, hot: EligibleSlot | null = null) {
     for (const [slot, btn] of this.slotBtns) {
       btn.classList.toggle('selected', slot === selected);
+      btn.classList.toggle('hot', slot === hot);
       btn.classList.toggle('blocking', blocking.has(slot));
       btn.classList.toggle('hidden', !visible);
     }

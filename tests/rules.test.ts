@@ -119,7 +119,8 @@ describe('simulated CPU drives', () => {
       const r = simulateCpuDrive(start, DIFFICULTY.normal, new Rng(i));
       const ended = r.state.possession === 'home' || r.state.score.away > 0 || r.brk !== 'none';
       expect(ended, JSON.stringify(r.entries)).toBe(true);
-      expect(r.state.clock.remaining).toBeLessThan(start.clock.remaining);
+      // Game time was used (a long drive can run into the next quarter).
+      expect(r.state.clock.quarter > start.clock.quarter || r.state.clock.remaining < start.clock.remaining).toBe(true);
       expect(r.entries.length).toBeGreaterThan(0);
     }
   });

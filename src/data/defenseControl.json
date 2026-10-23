@@ -39,7 +39,7 @@
     "diveFactor": 1.1,
     "diveRange": 2.2
   },
-  "presnapAutoSnap": 4.0,
+  "presnapAutoSnap": 2.0,
   "read": {
     "undercut": 0.0,
     "even": -0.8,

@@ -102,6 +102,7 @@ export class ReturnSim {
   private tacklingFactor: number;
   private landing: Vec2;
   private rolling: Vec2 | null = null;
+  private muffed = false;
   /** User-controlled cover man (-1: none). */
   coverId = -1;
   private diveUntil = -Infinity;
@@ -503,6 +504,7 @@ export class ReturnSim {
         if (this.rng.chance(ST.return.muffChance * (1.4 - r.player.ratings.catching / 100))) {
           this.emit('drop', r.id);
           this.rolling = add(b.pos, v2(this.rng.range(-2, 2), -this.rng.range(1, 3)));
+          this.muffed = true;
           b.state = 'loose';
           b.looseVel = { x: 0, y: 0, h: 0 };
           return;
@@ -530,6 +532,11 @@ export class ReturnSim {
     this.rolling = { ...b.pos };
     if (b.pos.y < 0) {
       this.result = this.makeResult('touchback', b.pos);
+      return;
+    }
+    // Phase 3c: a kick that rolls out untouched is out of bounds like one that lands there.
+    if (!this.muffed && Math.abs(b.pos.x) > FIELD.halfWidth) {
+      this.finishKickOOB();
       return;
     }
     // Punt: the coverage team downs it if they get there first.
@@ -613,7 +620,8 @@ export class ReturnSim {
   }
 
   private finishKickOOB() {
-    this.result = { ...this.makeResult('tackle', this.ball.pos), outcome: 'outOfBoundsKick', description: 'Kick out of bounds' };
+    this.result = { ...this.makeResult('tackle', this.ball.pos), outcome: 'outOfBoundsKick',
+      description: this.kind === 'kickoff' ? `Kickoff out of bounds: ball at the kicking team's ${ST.rules.kickoffOutOfBounds}` : 'Kick out of bounds' };
   }
 
   private makeResult(outcome: ReturnOutcome, at: Vec2): ReturnResult {

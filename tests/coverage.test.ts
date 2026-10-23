@@ -3,9 +3,10 @@ import { Rng } from '../src/core/rng';
 import { v2 } from '../src/core/vec';
 import type { EligibleSlot } from '../src/data/types';
 import balance from '../src/data/balance.json';
-import { COVERAGE, CoverageReader, isVertical, readDelay, type ReadTarget } from '../src/play/coverage';
+import { COVERAGE, CoverageReader, ZoneMatcher, isVertical, readDelay, type ReadTarget, type ZoneArea } from '../src/play/coverage';
+import { getPlay } from '../src/data';
 import { inPhase, throwingWindow } from '../src/play/windows';
-import { openRates } from './simHarness';
+import { openRates, runPlay, zoneOpenRate } from './simHarness';
 
 const B = balance as {
   verticalConcepts: Record<string, EligibleSlot[]>;
@@ -92,4 +93,67 @@ describe('throwing windows', () => {
     expect(inPhase(r, { pos: v2(0.6, 39.5), vel: v2(8, 0) }, 1.8)).toBe(false);
     expect(inPhase(r, { pos: v2(4, 39.5), vel: v2(0, 9) }, 1.8)).toBe(false);
   });
+});
+
+describe('Phase 3c: Cover 3 pattern-match zones', () => {
+  const Z = balance.zoneCoverage;
+  const rt = (id: number, x: number, y: number): ReadTarget => ({ id, pos: v2(x, y), vel: v2(0, 0), maxSpeed: 8, blocks: false });
+  const hookL: ZoneArea = { id: 1, land: v2(-5, 38), w: 6, minY: 29, maxY: 45 };
+  const hookR: ZoneArea = { id: 2, land: v2(5, 38), w: 6, minY: 29, maxY: 45 };
+
+  it('a receiver entering a zone is picked up, released when he leaves, and handed to the next zone', () => {
+    const m = new ZoneMatcher();
+    expect(m.update([hookL, hookR], [rt(10, -6, 36)])).toEqual([]);
+    expect(m.matches.get(1)).toBe(10);
+    // Crossing: still inside hookL (+ release margin) -> hookL keeps him, hookR does not double him.
+    m.update([hookL, hookR], [rt(10, 0.5, 36)]);
+    expect(m.matches.get(1)).toBe(10);
+    expect(m.matches.has(2)).toBe(false);
+    // Past hookL's edge + margin: released, and hookR takes him (handoff).
+    const h = m.update([hookL, hookR], [rt(10, 3, 36)]);
+    expect(m.matches.get(1)).toBeUndefined();
+    expect(m.matches.get(2)).toBe(10);
+    expect(h).toEqual([{ from: 1, to: 2, receiver: 10 }]);
+  });
+
+  it('nobody chases a receiver out of his area; blockers are ignored', () => {
+    const m = new ZoneMatcher();
+    m.update([hookL], [rt(10, -6, 36), { ...rt(11, -4, 31), blocks: true }]);
+    expect(m.matches.get(1)).toBe(10);
+    m.update([hookL], [rt(10, 9, 36)]);
+    expect(m.matches.size).toBe(0);
+  });
+
+  it(`balance: the Cover 3 ${Z.slot} leaves receivers in his zone open less than ${Z.maxOpenRate * 100}% (Normal) and stays in his zone`, () => {
+    const r = zoneOpenRate(Z.defense, Z.slot, {
+      sampleTimes: Z.sampleTimes, seeds: Z.seeds, dropFor: B.dropFor, openMargin: B.openMargin, inPhaseDist: COVERAGE.inPhaseDist,
+      depth: Z.depth as [number, number], difficulty: Z.difficulty as 'normal',
+    });
+    if (process.env.BALANCE_STATS) console.log('zone', JSON.stringify(r));
+    expect(r.samples).toBeGreaterThan(30);
+    expect(r.rate).toBeLessThan(Z.maxOpenRate);
+    expect(r.stray).toBeLessThan(Z.maxStray);
+  }, 60000);
+
+  it('crossers are handed off between zone defenders', () => {
+    let handoffs = 0;
+    for (let s = 0; s < 4; s++) handoffs += runPlay('mesh', 'cover3', s * 7 + 1, { throwAt: null, target: null, dropFor: 0.8 }).sim.handoffs.length;
+    expect(handoffs).toBeGreaterThan(3);
+  });
+
+  it('a throw into a zone gap is contested, not automatically complete', () => {
+    let n = 0, comp = 0, contested = 0;
+    for (const play of ['levels', 'curl_flat', 'smash', 'y_cross', 'mesh']) {
+      for (let s = 0; s < 10; s++) {
+        const r = runPlay(play, 'cover3', s * 11 + 5, { throwAt: 1.7, target: getPlay(play).primary!, dropFor: 0.8 });
+        if (!r.events.some((e) => e.type === 'throw')) continue;
+        n++;
+        if (r.events.some((e) => e.type === 'catch')) comp++;
+        if (r.events.some((e) => e.type === 'deflection' || e.type === 'interception')) contested++;
+      }
+    }
+    expect(n).toBeGreaterThan(30);
+    expect(comp / n).toBeLessThan(0.8);
+    expect(contested / n).toBeGreaterThan(0.12);
+  }, 60000);
 });

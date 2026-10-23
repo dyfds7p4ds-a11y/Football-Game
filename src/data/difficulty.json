@@ -2,16 +2,19 @@
   "easy": {
     "label": "Easy", "reactionTime": 0.42, "coverageError": 1.6, "passRush": 0.7, "tackling": 0.75,
     "ballSkills": 0.65, "playActionBite": 0.9, "callIntelligence": 0.0, "throwWindow": 1.5, "cpuOffense": 0.8,
-    "coverageRead": 0.35, "pocketPressure": 0.75, "kickWindow": 1.4, "penaltyRate": 0.2
+    "coverageRead": 0.35, "pocketPressure": 0.75, "kickWindow": 1.4, "penaltyRate": 0.2,
+    "audibleReact": 1.5, "audibleRead": 0.4
   },
   "normal": {
     "label": "Normal", "reactionTime": 0.28, "coverageError": 0.9, "passRush": 1.0, "tackling": 1.0,
     "ballSkills": 1.0, "playActionBite": 0.6, "callIntelligence": 0.5, "throwWindow": 1.0, "cpuOffense": 1.0,
-    "coverageRead": 0.7, "pocketPressure": 1.0, "kickWindow": 1.0, "penaltyRate": 0.25
+    "coverageRead": 0.7, "pocketPressure": 1.0, "kickWindow": 1.0, "penaltyRate": 0.25,
+    "audibleReact": 1.0, "audibleRead": 0.65
   },
   "hard": {
     "label": "Hard", "reactionTime": 0.17, "coverageError": 0.4, "passRush": 1.3, "tackling": 1.2,
     "ballSkills": 1.3, "playActionBite": 0.35, "callIntelligence": 1.0, "throwWindow": 0.75, "cpuOffense": 1.2,
-    "coverageRead": 0.95, "pocketPressure": 1.25, "kickWindow": 0.7, "penaltyRate": 0.3
+    "coverageRead": 0.95, "pocketPressure": 1.25, "kickWindow": 0.7, "penaltyRate": 0.3,
+    "audibleReact": 0.6, "audibleRead": 0.9
   }
 }

@@ -64,6 +64,8 @@ export interface CoverageTuning {
   noReceiverInt: number;
   /** Phase 3b: share of in-flight tips (undercut throws) that are caught (Phase 2: 0.3). */
   undercutInt: number;
+  /** Phase 3c: underneath zone matching and handoffs (see coverage.json `zone._doc`). */
+  zone: { minDepth: number; maxExtra: number; releaseMargin: number; sink: number; leash: number; ballReadFactor: number };
 }
 
 export const COVERAGE = coverageJson as CoverageTuning;
@@ -164,4 +166,74 @@ export function inPhaseSpot(r: { pos: Vec2; vel: Vec2 }, ballX: number, t = COVE
 export function carrySpot(r: { pos: Vec2; vel: Vec2 }, ballX: number): Vec2 {
   const inward = Math.sign(ballX - r.pos.x) || 1;
   return v2(r.pos.x + inward * 0.9 + r.vel.x * 0.3, r.pos.y - 0.6 + r.vel.y * 0.3);
+}
+
+/** Phase 3c: one underneath zone defender's area (sim frame, absolute yards). */
+export interface ZoneArea {
+  id: number;
+  land: Vec2;
+  w: number;
+  minY: number;
+  maxY: number;
+}
+
+export interface ZoneHandoff {
+  from: number;
+  to: number;
+  receiver: number;
+}
+
+function inArea(a: ZoneArea, p: Vec2, margin: number): boolean {
+  return Math.abs(p.x - a.land.x) <= a.w + margin && p.y >= a.minY - margin && p.y <= a.maxY + margin;
+}
+
+/**
+ * Phase 3c: pattern-match zone. Each underneath zone defender owns at most one
+ * receiver, and only while that receiver is inside his area (plus
+ * `releaseMargin`). A receiver who leaves is released; the next defender whose
+ * area he enters picks him up, and that is a handoff. Nobody chases a crosser
+ * out of his zone, which is what keeps a zone from turning into man.
+ */
+export class ZoneMatcher {
+  /** Defender id -> receiver id. */
+  readonly matches = new Map<number, number>();
+  /** Receiver id -> the last defender who had him. */
+  private lastOwner = new Map<number, number>();
+
+  update(areas: ZoneArea[], receivers: ReadTarget[], releaseMargin = COVERAGE.zone.releaseMargin): ZoneHandoff[] {
+    const byId = new Map(receivers.map((r) => [r.id, r]));
+    const active = new Set(areas.map((a) => a.id));
+    for (const [d, rid] of [...this.matches]) {
+      const a = areas.find((x) => x.id === d);
+      const r = byId.get(rid);
+      if (!active.has(d) || !a || !r || r.blocks || !inArea(a, r.pos, releaseMargin)) this.matches.delete(d);
+    }
+    const owned = new Set(this.matches.values());
+    const handoffs: ZoneHandoff[] = [];
+    for (const a of areas) {
+      if (this.matches.has(a.id)) continue;
+      let best: ReadTarget | null = null;
+      let bd = Infinity;
+      for (const r of receivers) {
+        if (r.blocks || owned.has(r.id) || !inArea(a, r.pos, 0)) continue;
+        const d = Math.hypot(r.pos.x - a.land.x, r.pos.y - a.land.y);
+        if (d < bd) {
+          bd = d;
+          best = r;
+        }
+      }
+      if (!best) continue;
+      this.matches.set(a.id, best.id);
+      owned.add(best.id);
+      const prev = this.lastOwner.get(best.id);
+      if (prev !== undefined && prev !== a.id) handoffs.push({ from: prev, to: a.id, receiver: best.id });
+      this.lastOwner.set(best.id, a.id);
+    }
+    return handoffs;
+  }
+
+  clear() {
+    this.matches.clear();
+    this.lastOwner.clear();
+  }
 }
