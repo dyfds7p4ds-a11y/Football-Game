@@ -3,7 +3,8 @@ import { Rng } from '../src/core/rng';
 import { DIFFICULTY, getPlay, getTeam } from '../src/data';
 import type { Ratings, TeamData } from '../src/data/types';
 import {
-  BLOCKING, assignProtection, blockQuality, holdTime, laneCandidates, pickLane, planRunBlocks, progressRate, type Unit,
+  BLOCKING, assignProtection, blockQuality, comboBonus, holdTime, laneCandidates, pickLane, planRunBlocks, progressRate, reachPenalty,
+  runBlockGrade, type Unit,
 } from '../src/play/blocking';
 import { getDefenseCall } from '../src/play/defenseCalls';
 import { PlaySim, idleInput } from '../src/play/sim';
@@ -187,4 +188,94 @@ describe('matchups show in outcomes', () => {
       expect(b.progress).toBeLessThanOrEqual(1);
     }
   });
+});
+
+describe('Phase 3d: reach blocks, double teams, assignments', () => {
+  const ol = R({ blocking: 80, strength: 82, speed: 55 });
+  const de = R({ strength: 80, tackling: 72, speed: 65 });
+
+  it('reach: free up to `easy`, harder the wider the man, impossible beyond `max`', () => {
+    const r = BLOCKING.reach;
+    expect(reachPenalty(ol, de, 0)).toBe(0);
+    expect(reachPenalty(ol, de, -2)).toBe(0); // down block: no reach
+    expect(reachPenalty(ol, de, r.easy)).toBe(0);
+    const mid = reachPenalty(ol, de, (r.easy + r.max) / 2);
+    const wide = reachPenalty(ol, de, r.max);
+    expect(mid).toBeGreaterThan(0);
+    expect(wide).toBeGreaterThan(mid);
+    expect(reachPenalty(ol, de, r.max + 0.1)).toBe(Infinity);
+    // A quick lineman reaches a slow end more easily than the other way round.
+    expect(reachPenalty(R({ speed: 75 }), R({ speed: 50 }), 1.5)).toBeLessThan(reachPenalty(R({ speed: 50 }), R({ speed: 75 }), 1.5));
+  });
+
+  it('block grade: a reach costs grade, a combo adds it', () => {
+    const base = runBlockGrade(ol, de);
+    expect(base).toBeCloseTo(blockQuality(ol, de, 'run'), 6);
+    expect(runBlockGrade(ol, de, { reachOffset: 1.8 })).toBeLessThan(base);
+    expect(runBlockGrade(ol, de, { engagers: 2 })).toBeCloseTo(Math.min(1, base + BLOCKING.double.grade), 6);
+    expect(comboBonus(1)).toBe(0);
+    // A double team also holds longer (3b): both effects together.
+    expect(progressRate(2)).toBeLessThan(progressRate(1));
+  });
+
+  it('assignments: toss seals inside, zone stretches playside, a man out of reach is nobody\'s', () => {
+    const line: Unit[] = [0, 1, 2, 3, 4].map((i) => ({ id: i, x: (i - 2) * 1.3, y: 29, kind: 'ol' }));
+    const box: Unit[] = [
+      { id: 10, x: -9, y: 31, kind: 'def', rushing: true }, { id: 11, x: -1, y: 31, kind: 'def', rushing: true },
+      { id: 12, x: 1, y: 31, kind: 'def', rushing: true }, { id: 13, x: 3.8, y: 31, kind: 'def', rushing: true },
+      { id: 14, x: -2.5, y: 34.5, kind: 'def', lb: true },
+    ];
+    const toss = planRunBlocks({ aim: -10, style: 'toss', scheme: 'toss' }, 0, line, box);
+    expect(toss.every((p) => p.drive === 1)).toBe(true); // run goes left (-1): seal to the right
+    expect(toss.some((p) => p.target === 10)).toBe(false); // the wide edge rusher is out of reach
+    const zone = planRunBlocks({ aim: -6, style: 'handoff', scheme: 'zone' }, 0, line, box);
+    expect(zone.every((p) => p.drive === -1)).toBe(true);
+  });
+});
+
+describe('Phase 3d: block quality moves run and pass outcomes', () => {
+  const home = getTeam('rheinstadt');
+  const away = getTeam('elbtal');
+  const play = (team: TeamData, playId: string, def: string, seed: number, drop = false) => {
+    const sim = new PlaySim({
+      play: getPlay(playId), defense: getDefenseCall(def), offenseTeam: team, defenseTeam: away,
+      ballX: 0, los: 30, difficulty: DIFFICULTY.normal, seed, penaltyBias: { off: 0, def: 0 },
+    });
+    for (let i = 0; i < 60 * 15 && !sim.result; i++) {
+      const inp = idleInput();
+      if (drop && sim.t < 0.8) inp.move = { x: 0, y: -1 };
+      sim.step(inp);
+    }
+    return sim.result!;
+  };
+
+  it('toss and outside zone: a strong line gains more and loses fewer yards behind the line', () => {
+    const run = (team: TeamData) => {
+      let y = 0, tfl = 0, n = 0;
+      for (const p of ['hb_toss', 'hb_stretch']) for (const d of ['cover1', 'cover3', 'cover2']) for (let s = 0; s < 16; s++) {
+        const r = play(team, p, d, 40 + s);
+        y += r.yards;
+        if (r.yards < 0) tfl++;
+        n++;
+      }
+      return { ypc: y / n, tfl: tfl / n };
+    };
+    const weak = run(withLine(home, 50));
+    const strong = run(withLine(home, 95));
+    expect(strong.ypc).toBeGreaterThan(weak.ypc + 1);
+    expect(strong.tfl).toBeLessThanOrEqual(weak.tfl);
+  }, 60000);
+
+  it('pass: a weak line is sacked sooner than a strong one when the QB holds the ball (four-man rush)', () => {
+    const sackT = (team: TeamData) => {
+      let t = 0;
+      for (let s = 0; s < 24; s++) {
+        const r = play(team, 'deep_post', 'cover3', 70 + s, true);
+        t += r.outcome === 'sack' ? Math.min(r.duration, 10) : 10;
+      }
+      return t / 24;
+    };
+    // Measured: about 5.4 s (line of 50s) vs 8.8 s (line of 95s).
+    expect(sackT(withLine(home, 95))).toBeGreaterThan(sackT(withLine(home, 50)) + 2);
+  }, 60000);
 });

@@ -73,5 +73,19 @@
       0.2,
       0.6
     ]
+  },
+  "toss": {
+    "seedsPerDefense": 60,
+    "avgMin": 3.5,
+    "avgMax": 5.5,
+    "sdMin": 4.5,
+    "sdMax": 9,
+    "tflMin": 0.05,
+    "tflMax": 0.25,
+    "bigPlayYards": 20,
+    "bigPlayMin": 0.02,
+    "stoutFront": 15,
+    "stoutBlitzTflMin": 0.15,
+    "_doc": "Phase 3d toss corridor (tests/tossBalance.test.ts): HB Toss, auto-run carrier, Normal, rheinstadt vs elbtal, every CPU coverage x seedsPerDefense. Average yards in [avgMin, avgMax], standard deviation in [sdMin, sdMax], tackles for loss in [tflMin, tflMax], runs of bigPlayYards+ at least bigPlayMin. Against the blitzes (Cover 1 Blitz, Cover 0, Fire Zone) with the front seven's strength / tackling / awareness + stoutFront (speed + half): TFL at least stoutBlitzTflMin and fewer yards than overall. Measured: 4.65 avg, sd 6.0, 15 % TFL, 4 % 20+; blitz + stout front 3.5 avg, 34 % TFL."
   }
 }

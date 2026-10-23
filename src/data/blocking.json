@@ -54,5 +54,24 @@
     "drivePush": 0.9,
     "laneEvalDepth": 1.0,
     "openCap": 5.0
-  }
+  },
+  "reach": {
+    "easy": 0.3,
+    "max": 2.6,
+    "penalty": 1.2,
+    "speedScale": 40,
+    "maxAthleticEdge": 0.35
+  },
+  "double": {
+    "grade": 0.25,
+    "drive": 1.35
+  },
+  "_docPhase3d": "Phase 3d (play/blocking.ts). reach: on zone and toss runs a blocker whose man lines up playside of him has to reach his outside shoulder. Up to `easy` yd of playside offset is free; the grade penalty grows linearly to `penalty` at `max` yd, eased or worsened by the speed difference (blocker - defender) / speedScale (at most maxAthleticEdge of the penalty either way). Defenders more than `max` yd playside of a blocker are never his assignment (the next man out, or nobody: the edge is set by an unblocked defender). double: a defender with two blockers on him plays against grade + `grade` (combo) and is driven `drive` x as far (on top of the 3b hold-time factor).",
+  "runFit": {
+    "keyRead": 0.25,
+    "keySigma": 0.35,
+    "misread": 0.3,
+    "misreadDelay": 0.6
+  },
+  "_docRunFit": "Phase 3d run fits (play/sim.ts): on designed runs (not draws) box defenders (DL, LB, rushers and anyone within 6 yd of the ball and 8 yd of the LOS) read the run off the line's run blocks after keyRead s x a lognormal(keySigma) draw, plus their own reaction; with chance misread x (1.2 - awareness / 100) a defender misreads and reads misreadDelay s later (block RNG stream, run plays only). While a toss is in the air they pursue the back it is pitched to. Before 3d they only reacted once the back had the ball, so blitzers kept running at a QB who no longer had it."
 }
