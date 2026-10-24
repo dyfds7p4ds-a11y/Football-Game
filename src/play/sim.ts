@@ -20,13 +20,15 @@ import { resolveCatch, type CatchCandidate } from './catch';
 import { FIELD } from './field';
 import { COVERAGE, CoverageReader, ZoneMatcher, carrySpot, inPhaseSpot, overTop, type Helper, type ReadTarget, type ZoneArea } from './coverage';
 import { inPhase, throwingWindow } from './windows';
+import RUN_GAME from '../data/runGame.json';
+import { freshSprint, sprintFumbleFactor, sprintSpeed, stepSprint, type SprintState } from './sprint';
 import { TACKLE, resolveTackle, type ContactKind } from './tackle';
 import { SCREEN, screenTiming, type ScreenTiming } from './screen';
 import { nearestOfficial, setupOfficials, updateOfficials, type Official } from './officials';
 import { PENALTIES, callFoul, makeFoul, rollFoul, type Flag, type Foul, type FoulType, type PenaltyBias } from './penalties';
 import { DEF_CONTROL, combinedEffect, jumpTiming, readGrade, type JumpGrade, type ReadGrade } from './interception';
 import {
-  BLOCKING, assignProtection, blockQuality, holdTime, laneCandidates, pickLane, planRunBlocks, progressRate,
+  BLOCKING, assignProtection, blockQuality, comboBonus, holdTime, runBlockGrade, runScheme, laneCandidates, pickLane, planRunBlocks, progressRate,
   type BlockAssignment, type BlockMode, type BlockRole, type LaneDefender, type Unit,
 } from './blocking';
 import { AUDIBLES } from './audible';
@@ -111,6 +113,8 @@ export interface SimInput {
   juke: boolean;
   /** Edge-triggered: QB slides (gives himself up) while scrambling. */
   slide?: boolean;
+  /** Phase 3d: SPRINT held (user ball carrier). */
+  sprint?: boolean;
   /** User on defense: stick for the selected defender and the edge-triggered JUMP button. */
   defense?: { move: Vec2; jump: boolean };
 }
@@ -326,10 +330,18 @@ export class PlaySim {
   private passThrown = false;
   private handedOff = false;
   private runRecognizedAt = Infinity;
+  /** Phase 3d: box defenders key the run off the line's run blocks at this time (designed runs, not draws). */
+  private runKeyAt = new Map<number, number>();
+  /** Phase 3d: the toss's contain man (-1: none), and where everyone lined up (reach blocks use the alignment). */
+  private edgeSetter = -1;
+  private edgePlan = { read: Infinity, aim: v2() };
+  private aligned = new Map<number, Vec2>();
   private throwAt = Infinity;
   private pitched = false;
   private jukeUntil = 0;
   private jukeCooldown = 0;
+  /** Phase 3d: the user carrier's sprint and stamina (per play). */
+  readonly sprint: SprintState = freshSprint();
   private carrierPath: Vec2[] = [];
   private carrierIdx = 0;
   private bySlot = new Map<string, Actor>();
@@ -443,7 +455,7 @@ export class PlaySim {
       const aimX = this.ballX + run.aim;
       this.carrierPath =
         run.style === 'toss'
-          ? [v2(this.ballX + run.aim * 0.55, this.los - 4.5), v2(aimX, this.los - 1.5), v2(aimX + Math.sign(run.aim), this.los + 40)]
+          ? [v2(this.ballX + run.aim * 0.55, this.los - RUN_GAME.toss.depth), v2(aimX, this.los - RUN_GAME.toss.cornerDepth), v2(aimX + Math.sign(run.aim), this.los + 40)]
           : [v2(aimX, this.los + 0.5), v2(aimX + run.aim * 0.15, this.los + 40)];
       if (run.style === 'toss') rb.route = { type: 'flat', points: this.carrierPath.slice(0, 2), continues: true, delay: 0, blocks: false };
     }
@@ -501,6 +513,33 @@ export class PlaySim {
         ...unit(d, 'def'), rushing: d.position === 'DL' || d.assignment?.kind === 'rush', lb: d.position !== 'DL',
       }));
       for (const a of planRunBlocks(this.play.run, this.ballX, blockers, box)) this.blockRoles.set(a.blocker, a);
+      for (const a of this.actors) this.aligned.set(a.id, { ...a.pos });
+      if (runScheme(this.play.run) === 'toss') {
+        const dir = Math.sign(this.play.run.aim) || 1;
+        let best: Actor | null = null;
+        for (const d of defs) {
+          const inBoxOrRush = box.some((u) => u.id === d.id) || d.assignment?.kind === 'rush';
+          if (inBoxOrRush && d.pos.y < this.los + RUN_GAME.edge.maxDepth && (!best || (d.pos.x - best.pos.x) * dir > 0)) best = d;
+        }
+        this.edgeSetter = best ? best.id : -1;
+        if (best) {
+          const E = RUN_GAME.edge;
+          const late = this.blockRng.chance(E.late * (1.2 - best.player.ratings.awareness / 100)) ? E.lateDelay : 0;
+          this.edgePlan = {
+            read: E.read * Math.exp(this.blockRng.normal() * E.readSigma) + late,
+            aim: v2(this.blockRng.normal() * E.aimSigma, this.blockRng.normal() * E.aimSigma),
+          };
+        }
+      }
+      const keyRead = (BLOCKING.runFit.keyReadByScheme as Record<string, number | undefined>)[runScheme(this.play.run)];
+      if (keyRead !== undefined) {
+        const F = BLOCKING.runFit;
+        for (const u of box) {
+          const aw = this.actors[u.id].player.ratings.awareness;
+          const miss = this.blockRng.chance(F.misread * (1.2 - aw / 100)) ? F.misreadDelay : 0;
+          this.runKeyAt.set(u.id, keyRead * Math.exp(this.blockRng.normal() * F.keySigma) + miss);
+        }
+      }
       this.laneX = this.ballX + this.play.run.aim;
       return;
     }
@@ -709,6 +748,11 @@ export class PlaySim {
     const qb = this.get('QB');
     return !this.result && this.ball.state === 'held' && this.ball.holder === qb.id && !this.pastLos(qb) && !this.passThrown &&
       dist(qb.pos, this.get('RB').pos) < 1.4;
+  }
+
+  /** Phase 3d: the pass is out (the receiver buttons stay visible while it is in the air). */
+  get thrown(): boolean {
+    return this.passThrown;
   }
 
   canThrow(): boolean {
@@ -956,7 +1000,10 @@ export class PlaySim {
       // Ball carriers auto-run their designed path, then straight upfield.
       move = this.autoRunDirection(controlled);
     }
-    let v = scale(move, controlled.maxSpeed * (controlled === qb ? 1 : 0.9));
+    // Phase 3d: SPRINT for a runner, or a QB once he is out of the pocket.
+    const mayRun = controlled !== qb || this.scrambling || this.pastLos(qb);
+    stepSprint(this.sprint, !!input.sprint && mayRun && len(move) > 0.15, this.t, SIM_DT);
+    let v = scale(move, controlled.maxSpeed * sprintSpeed(this.sprint, controlled === qb));
     if (controlled === qb && v.y < 0) v = scale(v, 0.9); // backpedal / drop
     if (input.juke && this.jukeCooldown <= 0 && (controlled !== qb || this.pastLos(qb))) {
       const side = Math.abs(move.x) > 0.2 ? Math.sign(move.x) : this.rng.chance(0.5) ? 1 : -1;
@@ -990,9 +1037,9 @@ export class PlaySim {
       const close = dist(qb.pos, rb.pos) < 1.4;
       const auto = this.play.run?.style === 'handoff' && !this.keep && this.t > 0.15;
       if (close && (auto || input.handoff)) this.handoff(rb);
-      if (this.play.run?.style === 'toss' && !this.pitched && this.t > 0.25 && !this.keep) {
+      if (this.play.run?.style === 'toss' && !this.pitched && this.t > RUN_GAME.toss.pitchAt && !this.keep) {
         this.pitched = true;
-        this.launchLateral(qb.pos, rb, 0.45);
+        this.launchLateral(qb.pos, rb, RUN_GAME.toss.pitchTime);
         this.emit('pitch', rb.id);
       }
     }
@@ -1016,9 +1063,25 @@ export class PlaySim {
     while (this.carrierIdx < this.carrierPath.length && a.slot === 'RB') {
       const p = this.carrierPath[this.carrierIdx];
       if (dist(a.pos, p) < 1.2 || p.y < a.pos.y - 0.5) this.carrierIdx++;
+      else if (this.carrierIdx >= 2 && this.play.run?.style === 'toss') return this.openFieldDirection(a, norm(sub(p, a.pos)));
       else return norm(sub(p, a.pos));
     }
     return v2(0, 1);
+  }
+
+  /** Phase 3d: toss past the corner: bend away from unblocked defenders ahead, stay off the sideline. */
+  private openFieldDirection(a: Actor, base: Vec2): Vec2 {
+    const O = RUN_GAME.openField;
+    let dir = base;
+    for (const d of this.actors) {
+      if (d.side !== 'def' || d.down || this.isEngaged(d)) continue;
+      const off = sub(a.pos, d.pos);
+      const l = len(off);
+      if (l > O.lookAhead || d.pos.y < a.pos.y - 1) continue;
+      dir = add(dir, v2(Math.sign(off.x || 1) * ((O.lookAhead - l) / O.lookAhead) * O.avoid, 0));
+    }
+    if (Math.abs(a.pos.x) > FIELD.halfWidth - O.sidelineMargin) dir = v2(dir.x - Math.sign(a.pos.x), dir.y);
+    return norm(v2(dir.x, Math.max(dir.y, 0.5)));
   }
 
   /**
@@ -1049,7 +1112,7 @@ export class PlaySim {
     this.ball.holder = rb.id;
     this.controlledId = rb.id;
     this.handedOff = true;
-    this.runRecognizedAt = this.t;
+    this.runRecognizedAt = Math.min(this.runRecognizedAt, this.t);
     this.carrierIdx = 0;
     this.emit('handoff', rb.id);
   }
@@ -1368,7 +1431,12 @@ export class PlaySim {
     const c = this.carrier;
     if (c === d || (c && c.side === 'off' && dist(c.pos, d.pos) < 1.6)) return;
     const mode = this.blockMode(b);
-    const quality = clamp(blockQuality(b.player.ratings, d.player.ratings, mode) + (this.audibleEdge && mode === 'run' ? AUDIBLES.edge.lineGrade : 0), -1, 1);
+    // Phase 3d: zone / toss blocks on a man lined up playside have to reach him.
+    const run = this.play.run;
+    const reach = mode === 'run' && run && !this.pastLos(this.carrier ?? this.get('RB')) && (runScheme(run) === 'zone' || runScheme(run) === 'toss')
+      ? ((this.aligned.get(d.id) ?? d.pos).x - (this.aligned.get(b.id) ?? b.pos).x) * (Math.sign(run.aim) || 1) : undefined;
+    const grade = mode === 'run' ? runBlockGrade(b.player.ratings, d.player.ratings, { reachOffset: reach, scheme: run ? runScheme(run) : undefined }) : blockQuality(b.player.ratings, d.player.ratings, mode);
+    const quality = clamp(grade + (this.audibleEdge && mode === 'run' ? AUDIBLES.edge.lineGrade : 0), -1, 1);
     const holdT = holdTime(quality, { mode, passRush: this.diff.passRush * (mode === 'pass' ? this.diff.pocketPressure : 1), rng: this.blockRng });
     this.engagements.push({ blocker: b.id, defender: d.id, t: 0, mode, quality, holdT, progress: 0 });
     if (mode !== 'run' && (this.blitzers.has(d.id) || this.surprise.has(d.id))) {
@@ -1505,7 +1573,11 @@ export class PlaySim {
     const qb = this.get('QB');
     const carrier = this.carrier;
     const flight = this.ball.state === 'air' && this.ball.flight && !this.ball.flight.lateral ? this.ball.flight : null;
-    const runMode = carrier && carrier.side === 'off' && (carrier !== qb || this.runRecognizedAt < Infinity);
+    // Phase 3d: a pitch in the air is still a run: the defense fits on the back it goes to.
+    const lat = this.ball.state === 'air' && this.ball.flight?.lateral ? this.ball.flight.targetId : null;
+    const pitchTo = lat !== null ? this.actors[lat] : null;
+    const runner = carrier && carrier.side === 'off' ? carrier : pitchTo;
+    const runMode = runner && (runner !== qb || this.runRecognizedAt < Infinity);
     for (const d of this.actors) {
       if (d.side !== 'def' || d.down || desired.has(d.id)) continue;
       if (this.contact && d.id === this.contact.tackler) {
@@ -1521,13 +1593,24 @@ export class PlaySim {
         desired.set(d.id, this.looseGoal(d));
         continue;
       }
+      // A blitzer caught by a run audible (3c edge) is still in his blitz: nobody sets the edge.
+      if (d.id === this.edgeSetter && runner && !this.pastLos(runner) && this.carrierIdx < 2 && this.t > this.edgePlan.read &&
+        !(this.audibleEdge && this.blitzers.has(d.id))) {
+        // Phase 3d: contain on a toss: attack the corner before the back gets there.
+        const corner = this.carrierPath[1];
+        const dir = Math.sign(this.play.run!.aim) || 1;
+        const aim = add(v2(corner.x + dir * 0.5, corner.y - RUN_GAME.edge.aimBehind), this.edgePlan.aim);
+        desired.set(d.id, dist(d.pos, runner.pos) < 2.5 ? this.pursuit(d, runner) : this.seek(d, aim, 1));
+        continue;
+      }
       if (carrier && carrier.side === 'def') {
         // Phase 3c: the returner runs, the rest of the defense blocks for him.
         desired.set(d.id, d === carrier ? this.returnRun(d) : this.escort(d, carrier));
         continue;
-      } else if (runMode && this.t > this.runRecognizedAt + d.reaction * (carrier === qb ? SCRAMBLE.reactFactor : 1) + (isDeep ? 0.35 : 0) +
+      } else if (runMode && this.t > Math.min(this.runRecognizedAt, this.audibleEdge && this.blitzers.has(d.id) ? Infinity : this.runKeyAt.get(d.id) ?? Infinity) +
+        d.reaction * (runner === qb ? SCRAMBLE.reactFactor : 1) + (isDeep ? 0.35 : 0) +
         (this.audibleEdge && this.blitzers.has(d.id) ? AUDIBLES.edge.blitzRunRead : 0)) {
-        goal = this.pursuit(d, carrier!);
+        goal = this.pursuit(d, runner!);
       } else if (flight && asg.kind === 'man' && this.get(asg.target).id === flight.targetId && this.trailing(d, this.get(asg.target))) {
         // Trailing man defender can't see the ball: play through the receiver's hands.
         const r = this.get(asg.target);
@@ -1764,7 +1847,9 @@ export class PlaySim {
         this.emit('shed', d.id);
         continue;
       }
-      const defStat = -e.quality;
+      // Phase 3d: a double team (combo) grades better and drives the man further.
+      const defStat = -(e.quality + comboBonus(n));
+      const comboDrive = n >= 2 ? BLOCKING.double.drive : 1;
       keep.push(e);
       // Defender fights toward his goal slowly; blocker mirrors in front.
       const goalVel = desired.get(d.id) ?? v2();
@@ -1777,7 +1862,7 @@ export class PlaySim {
         const away = this.play.run && this.laneX !== null && drive !== undefined && !this.pastLos(carrier)
           ? norm(v2(drive || Math.sign(d.pos.x - this.laneX) || 1, 0.5))
           : norm(sub(d.pos, carrier.pos));
-        dv = add(dv, scale(away, clamp(e.quality * BLOCKING.run.drivePush + 0.3, 0, 0.9)));
+        dv = add(dv, scale(away, clamp((e.quality + comboBonus(n)) * BLOCKING.run.drivePush + 0.3, 0, 0.9) * comboDrive));
       }
       desired.set(d.id, dv);
       const front = add(d.pos, scale(norm(sub(rushing ? qb.pos : carrier.pos, d.pos)), 0.85));
@@ -1792,7 +1877,8 @@ export class PlaySim {
         a.vel = v2();
         continue;
       }
-      const want = clampLen(desired.get(a.id) ?? v2(), a.maxSpeed);
+      const boost = a.id === this.controlledId && this.sprint.sprinting ? Math.max(1, sprintSpeed(this.sprint, a.slot === 'QB')) : 1;
+      const want = clampLen(desired.get(a.id) ?? v2(), a.maxSpeed * boost);
       const k = this.contact;
       if (k && (a.id === k.carrier || a.id === k.tackler)) a.vel = want; // contact: momentum is scripted
       else a.vel = add(a.vel, clampLen(sub(want, a.vel), a.accel * dt));
@@ -1865,7 +1951,7 @@ export class PlaySim {
         if (tgt.slot !== 'QB') this.controlledId = tgt.id;
         if (tgt.slot === 'RB' && this.play.run) {
           this.handedOff = true;
-          this.runRecognizedAt = this.t;
+          this.runRecognizedAt = Math.min(this.runRecognizedAt, this.t);
           this.carrierIdx = 1;
         }
         this.syncHeldBall();
@@ -2000,7 +2086,9 @@ export class PlaySim {
     const F = TURNOVERS.fumble;
     const p = F.base * (kind === 'shoulder' ? F.shoulder : 1) * (sack ? F.sack : 1) *
       (1 + F.strengthWeight * (d.player.ratings.strength - c.player.ratings.strength) / 100);
-    return this.fumbleRng.chance(clamp(p, 0, F.max));
+    // Phase 3d: a sprinting user carrier puts the ball on the ground more often (after the cap).
+    const sprint = c.id === this.controlledId ? sprintFumbleFactor(this.sprint, this.t) : 1;
+    return this.fumbleRng.chance(clamp(p, 0, F.max) * sprint);
   }
 
   private startFumble(c: Actor) {
@@ -2134,6 +2222,8 @@ export class PlaySim {
       if (this.audibleEdge && this.blitzers.has(d.id) && this.t < this.runRecognizedAt + d.reaction + AUDIBLES.edge.blitzRunRead) factor *= AUDIBLES.edge.blitzTackle;
       if (c.side === 'off' && c.slot === 'QB' && !this.pastLos(c)) factor *= TACKLE.pocketSackFactor; // sacks: QB is a sitting duck
       else if (c.side === 'off' && c.slot === 'QB') factor *= SCRAMBLE.tackleBonus; // a scrambling QB is no running back
+      // Phase 3d: a runner going sideways behind the line (toss, stretch) can't lower his shoulder.
+      else if (c.side === 'off' && c.pos.y < this.los && len(c.vel) > 1 && Math.abs(c.vel.x) >= RUN_GAME.backfield.minLateral * len(c.vel)) factor *= RUN_GAME.backfield.lateralTackle;
       const out = resolveTackle({
         tacklerPos: d.pos, tacklerVel: d.vel, carrierPos: c.pos, carrierVel: c.vel,
         tackling: d.player.ratings.tackling, carrierStrength: c.player.ratings.strength, carrierSpeed: c.player.ratings.speed,

@@ -13,5 +13,23 @@
     "size": 310
   },
   "minClearance": 24,
-  "_doc": "Phase 3c touch layout (input/joystick.ts, ui/touch.ts). joystick: fixed base at the bottom left (left / bottom offsets in px from the safe area), base radius and knob radius in px; the hit circle is radius + hitPadding (a thumb anywhere on or near it grabs the stick, no aiming). actions: the receiver / action cluster at the bottom right (right / bottom offsets, square size in px, never scaled down). minClearance: px the stick's hit area keeps from the cluster (tests/joystick.test.ts)."
+  "_doc": "Phase 3c touch layout (input/joystick.ts, ui/touch.ts). joystick: fixed base at the bottom left (left / bottom offsets in px from the safe area), base radius and knob radius in px; the hit circle is radius + hitPadding (a thumb anywhere on or near it grabs the stick, no aiming). actions: the receiver / action cluster at the bottom right (right / bottom offsets, square size in px, never scaled down). minClearance: px the stick's hit area keeps from the cluster (tests/joystick.test.ts).",
+  "slotState": {
+    "maxThrowRange": 60,
+    "hotMinHold": 0.8,
+    "thrownFlash": 0.6
+  },
+  "_docSlotState": "Phase 3d receiver buttons (ui/slotState.ts): red (invalid) only when the user presses a receiver who blocks on this play or presses one after the ball is thrown (red for thrownFlash s), or the receiver is farther than maxThrowRange yd from the QB. A blocker nobody pressed is dimmed, not red. The HOT read is a calm outline, held at least hotMinHold s so it never flickers between receivers.",
+  "tapSelect": {
+    "radius": 72,
+    "maxMs": 320,
+    "maxMove": 16,
+    "aimHeight": 1.0
+  },
+  "switchButton": {
+    "left": 12,
+    "topPct": 42,
+    "size": 64
+  },
+  "_docPhase3d": "Phase 3d defense controls (ui/touch.ts, ui/tapSelect.ts). tapSelect: a tap on the field (shorter than maxMs ms, moving less than maxMove px) takes over the defender whose body (aimHeight yd above the turf, projected through the camera) is nearest the tap, within radius px. switchButton: SWITCH moved out of the action cluster (it sat in the defender's view) to the left screen edge: left px from the safe area, top at topPct % of the screen height, size px. The defender strip is folded into a PLAYERS menu (top right) and closes after a pick."
 }

@@ -29,6 +29,8 @@ export interface ReturnInput {
   move: Vec2;
   /** Edge-triggered dash. */
   dash: boolean;
+  /** Phase 3d: edge-triggered TOUCHBACK (take a knee) after a kickoff caught in the end zone. */
+  touchback?: boolean;
   /** Phase 3b, user on the kicking team: stick for the cover man, edge-triggered DIVE and SWITCH. */
   cover?: { move: Vec2; dive: boolean; switch: boolean };
 }
@@ -107,6 +109,8 @@ export class ReturnSim {
   coverId = -1;
   private diveUntil = -Infinity;
   private lastDive = -Infinity;
+  /** Phase 3d: kickoff caught in the end zone, the receiving team decides until `until` (s). */
+  endZoneDecision: { until: number; cpuKneel: boolean } | null = null;
 
   constructor(o: ReturnOptions) {
     this.kind = o.kind;
@@ -226,6 +230,7 @@ export class ReturnSim {
     this.dashCooldown = Math.max(0, this.dashCooldown - dt);
     const desired = new Map<number, Vec2>();
     this.controlCover(input.cover, desired);
+    if (this.updateEndZoneDecision(input)) return;
     this.controlReturner(input, desired);
     this.returnTeamAI(desired);
     this.coverageAI(desired);
@@ -258,6 +263,14 @@ export class ReturnSim {
     }
     const hasBall = this.carrier === r;
     let move: Vec2;
+    if (hasBall && this.endZoneDecision) {
+      // Phase 3d: deciding in the end zone. Idle stick (user) or a CPU kneel = stand; any push = return.
+      const go = this.userReturns ? len(input.move) > 0.15 : !this.endZoneDecision.cpuKneel && this.t >= this.endZoneDecision.until;
+      if (!go) {
+        desired.set(r.id, v2());
+        return;
+      }
+    }
     if (!hasBall) {
       // Getting under the ball is automatic: the return starts at the catch.
       const target = this.rolling ?? this.landing;
@@ -495,7 +508,9 @@ export class ReturnSim {
         this.finishKickOOB();
         return;
       }
-      if (b.pos.y < -FIELD.endzone || (this.kind === 'kickoff' && b.pos.y < 0) || (this.kind === 'punt' && b.pos.y < 0)) {
+      // Phase 3d: a kickoff the returner gets to in the end zone is live (he decides); punts there stay touchbacks.
+      const reachable = this.kind === 'kickoff' && b.pos.y >= -FIELD.endzone && dist(r.pos, b.pos) <= ST.return.catchRadius;
+      if (b.pos.y < -FIELD.endzone || (b.pos.y < 0 && !reachable && (this.kind === 'punt' || ST.endZone.untouchedIsTouchback))) {
         this.result = this.makeResult('touchback', b.pos);
         this.emit('incomplete');
         return;
@@ -556,6 +571,34 @@ export class ReturnSim {
     this.rolling = null;
     this.caughtAt = { ...r.pos };
     this.emit('catch', r.id);
+    if (this.kind === 'kickoff' && r.pos.y < 0) {
+      const E = ST.endZone;
+      this.endZoneDecision = { until: this.t + (this.userReturns ? E.decisionTime : E.cpuDecideDelay), cpuKneel: r.pos.y <= -E.cpuKneelDepth };
+    }
+  }
+
+  /** Phase 3d: the TOUCHBACK button is live (caught in the end zone, still there, no contact). */
+  get canTouchback(): boolean {
+    return !!this.endZoneDecision && !this.result && this.userReturns && !this.contact;
+  }
+
+  /** Phase 3d: end-zone decision after a kickoff. Returns true when the play ended (touchback). */
+  private updateEndZoneDecision(input: ReturnInput): boolean {
+    const e = this.endZoneDecision;
+    const r = this.returner;
+    if (!e || this.contact) return false;
+    if (r.pos.y > 0) {
+      this.endZoneDecision = null; // he ran it out: a return
+      return false;
+    }
+    const kneel = this.userReturns ? !!input.touchback || (this.t >= e.until && len(input.move) <= 0.15) : e.cpuKneel && this.t >= e.until;
+    if (!this.userReturns && !e.cpuKneel && this.t >= e.until) this.endZoneDecision = null;
+    if (!kneel) return false;
+    r.vel = v2();
+    r.down = true;
+    this.emit('tackle', r.id);
+    this.result = { ...this.makeResult('touchback', r.pos), description: 'Touchback: the returner takes a knee' };
+    return true;
   }
 
   // ---------------------------------------------------------------- whistle

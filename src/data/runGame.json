@@ -1,0 +1,27 @@
+{
+  "_doc": "Phase 3d run game (play/sim.ts). toss: the QB pitches pitchAt s after the snap, the pitch takes pitchTime s; the back's path catches it depth yd behind the LOS at 55 % of the aim, turns the corner cornerDepth yd behind the LOS at the aim, then goes upfield. backfield: a carrier behind the LOS who is running mostly sideways (lateral share of his speed >= minLateral) cannot lower his shoulder: tackles on him get x lateralTackle. edge (toss only): the contain man is the box defender or rusher lined up furthest to the play side within maxDepth yd of the LOS. He reads the toss after `read` s (no run key needed: anything wide is his) and attacks the corner point aimBehind yd behind it until the back is past the LOS; blocked, he plays the reach block (blocking.json reach) and goes back to the corner once free. Variance: his read is read x lognormal(readSigma), with chance late x (1.2 - awareness / 100) he is fooled and reads lateDelay s later, and his aim point is off by a normal(aimSigma) yd (block RNG stream). openField (toss): past the corner the auto-run back bends away from unblocked defenders within lookAhead yd ahead of him (weight avoid), keeping sidelineMargin yd off the sideline.",
+  "toss": {
+    "pitchAt": 0.25,
+    "pitchTime": 0.45,
+    "depth": 4.5,
+    "cornerDepth": 1.5
+  },
+  "backfield": {
+    "lateralTackle": 1.35,
+    "minLateral": 0.6
+  },
+  "edge": {
+    "read": 0.15,
+    "maxDepth": 7,
+    "aimBehind": 0.8,
+    "readSigma": 0.5,
+    "late": 0.3,
+    "lateDelay": 0.45,
+    "aimSigma": 1.2
+  },
+  "openField": {
+    "lookAhead": 8,
+    "avoid": 0.5,
+    "sidelineMargin": 3
+  }
+}

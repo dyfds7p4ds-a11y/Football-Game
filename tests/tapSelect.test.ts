@@ -1,0 +1,40 @@
+import { describe, expect, it } from 'vitest';
+import TOUCH from '../src/data/touch.json';
+import { TAP_SELECT, isTap, pickAtTap } from '../src/ui/tapSelect';
+import { actionsRect, joystickLayout } from '../src/input/joystick';
+
+describe('Phase 3d: defender selection in the camera view', () => {
+  const cands = [
+    { slot: 'CB1', x: 300, y: 400, onScreen: true },
+    { slot: 'LB1', x: 520, y: 380, onScreen: true },
+    { slot: 'FS', x: 505, y: 300, onScreen: false },
+  ];
+
+  it('a tap takes the nearest on-screen defender within the radius', () => {
+    expect(pickAtTap({ x: 510, y: 390 }, cands)).toBe('LB1');
+    expect(pickAtTap({ x: 310, y: 395 }, cands)).toBe('CB1');
+    // FS is off screen (behind the camera): never picked even right under the tap.
+    expect(pickAtTap({ x: 505, y: 300 }, cands)).not.toBe('FS');
+    expect(pickAtTap({ x: 900, y: 100 }, cands)).toBeNull();
+    expect(pickAtTap({ x: 300 + TAP_SELECT.radius + 1, y: 400 }, cands)).toBeNull();
+  });
+
+  it('a quick touch is a tap, a drag is a look', () => {
+    expect(isTap(120, 4)).toBe(true);
+    expect(isTap(TAP_SELECT.maxMs + 50, 2)).toBe(false);
+    expect(isTap(100, TAP_SELECT.maxMove + 10)).toBe(false);
+  });
+
+  it('SWITCH sits at the left screen edge, clear of the joystick and the action cluster (iPad landscape / portrait)', () => {
+    const SB = TOUCH.switchButton;
+    for (const [w, h] of [[1180, 820], [820, 1180], [1366, 1024], [1024, 768]]) {
+      const top = (SB.topPct / 100) * h;
+      const btn = { left: SB.left, right: SB.left + SB.size, top, bottom: top + SB.size };
+      const j = joystickLayout(w, h);
+      const a = actionsRect(w, h);
+      expect(btn.left).toBeLessThan(w * 0.1); // at the edge, not in the middle of the picture
+      expect(btn.bottom).toBeLessThan(j.cy - j.hitRadius); // above the stick
+      expect(btn.right).toBeLessThan(a.left);
+    }
+  });
+});

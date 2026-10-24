@@ -96,9 +96,11 @@ describe('Phase 3c: audibles', () => {
   });
 
   it('the edge is worth yards: a run audible into an unadjusted blitz gains more than the same run into a blitz that saw it coming', () => {
+    // Phase 3d: 30 seeds (was 12): the toss now has realistic variance (TFLs and big plays), so 12 seeds were too noisy.
+    const SEEDS = 30;
     const ypp = (edge: boolean) => {
       let y = 0, n = 0;
-      for (const playId of ['hb_dive', 'hb_draw', 'counter', 'hb_toss']) for (const def of ['cover1blitz', 'cover0', 'firezone']) for (let s = 0; s < 12; s++) {
+      for (const playId of ['hb_dive', 'hb_draw', 'counter', 'hb_toss']) for (const def of ['cover1blitz', 'cover0', 'firezone']) for (let s = 0; s < SEEDS; s++) {
         const play = getPlay(playId);
         const sim = new PlaySim({ play, defense: getDefenseCall(def), offenseTeam: getTeam('rheinstadt'), defenseTeam: getTeam('elbtal'),
           ballX: 0, los: 30, difficulty: { ...DIFFICULTY.normal, penaltyRate: 0 }, seed: 300 + s });

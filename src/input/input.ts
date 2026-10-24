@@ -20,8 +20,12 @@ export interface InputFrame {
   slotHeld: EligibleSlot | null;
   /** Secondary action: slide (QB) / dash (returner). */
   secondaryPressed: boolean;
+  /** Phase 3d: SPRINT held (touch button, C, pad R3). */
+  sprintHeld: boolean;
   /** On defense: on-screen cornerback button pressed this frame (switch control to him). */
   defenderPressed: DefSlot | null;
+  /** Phase 3d: a short tap on the field this frame (screen px), for picking a defender. */
+  tap: { x: number; y: number } | null;
   /** Any button, key or tap this frame (skips cutscenes). */
   anyPressed: boolean;
   pausePressed: boolean;
@@ -39,6 +43,8 @@ const PAD_SECONDARY = [6, 10];
 export class InputManager {
   private touchMove: Vec2 = { x: 0, y: 0 };
   private touchPrimary = false;
+  private touchSprint = false;
+  private padSprint = false;
   private keys = new Set<string>();
   private lookYaw = 0;
   private lookPitch = 0;
@@ -50,6 +56,7 @@ export class InputManager {
   private padSlot: EligibleSlot | null = null;
   private pendingSecondary = false;
   private pendingDefender: DefSlot | null = null;
+  private pendingTap: { x: number; y: number } | null = null;
   private pendingAny = false;
   /** Latched so a tap shorter than one frame is never lost. */
   private pendingPrimary = false;
@@ -104,6 +111,10 @@ export class InputManager {
     this.touchPrimary = held;
     if (held) this.pendingPrimary = true;
   }
+  setTouchSprint(held: boolean) {
+    this.lastDevice = 'touch';
+    this.touchSprint = held;
+  }
   pressSlot(slot: EligibleSlot) {
     this.pendingSlot = slot;
   }
@@ -123,6 +134,10 @@ export class InputManager {
   pressDefender(slot: DefSlot) {
     this.lastDevice = 'touch';
     this.pendingDefender = slot;
+  }
+  tapAt(x: number, y: number) {
+    this.lastDevice = 'touch';
+    this.pendingTap = { x, y };
   }
   pressPause() {
     this.pendingPause = true;
@@ -179,6 +194,7 @@ export class InputManager {
       for (const [i, slot] of PAD_SLOTS) if (edge(i)) this.pendingSlot = slot;
       this.padSlot = PAD_SLOTS.find(([i]) => btn(i))?.[1] ?? null;
       if (PAD_SECONDARY.some(edge)) this.pendingSecondary = true;
+      this.padSprint = btn(11);
       if (pad.buttons.some((_, i) => edge(i))) this.pendingAny = true;
       if (edge(9)) this.pendingPause = true;
       if (edge(8)) this.pendingTimeout = true;
@@ -195,7 +211,9 @@ export class InputManager {
       slotPressed: this.pendingSlot,
       slotHeld: this.touchSlot ?? this.keySlots[this.keySlots.length - 1] ?? this.padSlot,
       secondaryPressed: this.pendingSecondary,
+      sprintHeld: this.touchSprint || k.has('KeyC') || this.padSprint,
       defenderPressed: this.pendingDefender,
+      tap: this.pendingTap,
       anyPressed: this.pendingAny,
       pausePressed: this.pendingPause,
       timeoutPressed: this.pendingTimeout,
@@ -206,6 +224,7 @@ export class InputManager {
     this.pendingSlot = null;
     this.pendingSecondary = false;
     this.pendingDefender = null;
+    this.pendingTap = null;
     this.pendingAny = false;
     this.pendingPrimary = false;
     this.pendingPause = false;

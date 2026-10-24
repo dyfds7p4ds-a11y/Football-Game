@@ -9,6 +9,8 @@ import type { InputManager } from '../input/input';
 import { VirtualJoystick } from '../input/joystick';
 import TOUCH from '../data/touch.json';
 import { h } from './dom';
+import type { SlotDisplay } from './slotState';
+import { isTap } from './tapSelect';
 
 const SLOT_LABEL: Record<EligibleSlot, string> = { WR1: '1', WR2: '2', WR3: '3', RB: 'RB', TE: 'TE' };
 // Arc of receiver buttons around the primary button (right, bottom offsets in px).
@@ -23,9 +25,16 @@ export class TouchControls {
   readonly chargeFill: HTMLElement;
   readonly chargeBox: HTMLElement;
   readonly secondary: HTMLButtonElement;
+  /** Phase 3d: SPRINT (hold) next to JUKE for the ball carrier. */
+  readonly sprint: HTMLButtonElement;
   private slotBtns = new Map<EligibleSlot, HTMLButtonElement>();
   private defBtns = new Map<DefSlot, HTMLButtonElement>();
   private defStrip: HTMLElement;
+  /** Phase 3d: SWITCH at the screen edge and the PLAYERS menu that holds the defender strip. */
+  readonly switchBtn: HTMLButtonElement;
+  private playersBtn: HTMLButtonElement;
+  private stripOpen = false;
+  private lookStart = { x: 0, y: 0, t: 0, moved: 0 };
   private joy = new VirtualJoystick();
   private joyId: number | null = null;
   private lookId: number | null = null;
@@ -59,11 +68,24 @@ export class TouchControls {
     const secUp = () => this.secondary.classList.remove('down');
     this.secondary.addEventListener('pointerup', secUp);
     this.secondary.addEventListener('pointercancel', secUp);
+    this.sprint = h('button', { id: 'btn-sprint', class: 'hidden' }, 'SPRINT');
+    this.sprint.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      this.sprint.setPointerCapture(e.pointerId);
+      this.sprint.classList.add('down');
+      input.setTouchSprint(true);
+    });
+    const sprintUp = () => {
+      this.sprint.classList.remove('down');
+      input.setTouchSprint(false);
+    };
+    this.sprint.addEventListener('pointerup', sprintUp);
+    this.sprint.addEventListener('pointercancel', sprintUp);
     const A = TOUCH.actions;
     const actions = h('div', { id: 'actions', style: {
       right: `calc(${A.right}px + var(--safe-r))`, bottom: `calc(${A.bottom}px + var(--safe-b))`,
       width: `${A.size}px`, height: `${A.size}px`,
-    } }, this.chargeBox, this.primary, this.secondary);
+    } }, this.chargeBox, this.primary, this.secondary, this.sprint);
     for (const slot of Object.keys(SLOT_POS) as EligibleSlot[]) {
       const [r, b] = SLOT_POS[slot];
       const btn = h('button', { class: 'slot', style: { right: `${r}px`, bottom: `${b}px` } }, SLOT_LABEL[slot]);
@@ -92,6 +114,7 @@ export class TouchControls {
         btn.addEventListener('pointerdown', (e) => {
           e.preventDefault();
           input.pressDefender(slot);
+          this.setStripOpen(false);
         });
         this.defBtns.set(slot, btn);
         group.append(btn);
@@ -99,7 +122,20 @@ export class TouchControls {
       strip.append(group);
     }
     this.defStrip = strip;
-    this.root = h('div', { id: 'touch' }, joyzone, lookzone, actions, strip);
+    const SB = TOUCH.switchButton;
+    this.switchBtn = h('button', { id: 'btn-switch', class: 'hidden', style: {
+      left: `calc(${SB.left}px + var(--safe-l))`, top: `${SB.topPct}%`, width: `${SB.size}px`, height: `${SB.size}px`,
+    } }, 'SWITCH');
+    this.switchBtn.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      input.pressSecondary();
+    });
+    this.playersBtn = h('button', { id: 'btn-players', class: 'hidden' }, 'PLAYERS ▾');
+    this.playersBtn.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      this.setStripOpen(!this.stripOpen);
+    });
+    this.root = h('div', { id: 'touch' }, joyzone, lookzone, actions, strip, this.switchBtn, this.playersBtn);
 
     // Primary button: hold state.
     this.primary.addEventListener('pointerdown', (e) => {
@@ -150,17 +186,23 @@ export class TouchControls {
       lookzone.setPointerCapture(e.pointerId);
       this.lookId = e.pointerId;
       this.lookLast = { x: e.clientX, y: e.clientY };
+      this.lookStart = { x: e.clientX, y: e.clientY, t: performance.now(), moved: 0 };
     });
     lookzone.addEventListener('pointermove', (e) => {
       if (e.pointerId !== this.lookId) return;
       const dx = e.clientX - this.lookLast.x;
       const dy = e.clientY - this.lookLast.y;
       this.lookLast = { x: e.clientX, y: e.clientY };
+      this.lookStart.moved = Math.max(this.lookStart.moved, Math.hypot(e.clientX - this.lookStart.x, e.clientY - this.lookStart.y));
       input.addLook(dx * 0.006, -dy * 0.004);
     });
     const lookEnd = (e: PointerEvent) => {
       if (e.pointerId === this.lookId) this.lookId = null;
     };
+    // Phase 3d: a quick tap (no drag) picks the defender under the finger.
+    lookzone.addEventListener('pointerup', (e) => {
+      if (e.pointerId === this.lookId && isTap(performance.now() - this.lookStart.t, this.lookStart.moved)) input.tapAt(e.clientX, e.clientY);
+    });
     lookzone.addEventListener('pointerup', lookEnd);
     lookzone.addEventListener('pointercancel', lookEnd);
   }
@@ -178,20 +220,40 @@ export class TouchControls {
     this.primary.disabled = mode === 'none';
   }
 
-  /** `hot` (Phase 3c): the open receiver once the QB is alerted to a blitz nobody picked up. */
-  setSlots(selected: EligibleSlot | null, blocking: Set<EligibleSlot>, visible = true, hot: EligibleSlot | null = null) {
+  /**
+   * Phase 3d: one look per receiver (ui/slotState.ts); null hides the buttons.
+   * Red (`invalid`) only for a real problem, never for the hot read.
+   */
+  setSlots(looks: Partial<Record<EligibleSlot, SlotDisplay>> | null) {
     for (const [slot, btn] of this.slotBtns) {
-      btn.classList.toggle('selected', slot === selected);
-      btn.classList.toggle('hot', slot === hot);
-      btn.classList.toggle('blocking', blocking.has(slot));
-      btn.classList.toggle('hidden', !visible);
+      const d = looks?.[slot];
+      btn.classList.toggle('hidden', !looks);
+      for (const look of ['selected', 'hot', 'blocking', 'invalid'] as const) btn.classList.toggle(look, d?.look === look);
+      btn.dataset.reason = d?.reason ?? '';
     }
   }
 
-  /** Defender strip on defense (null hides it); `selected` is the one under control. */
-  setDefenders(selected: DefSlot | null) {
-    this.defStrip.classList.toggle('hidden', !selected);
+  /**
+   * Defender selection on defense (null hides it); `selected` is the one under control.
+   * Phase 3d: the strip lives in the PLAYERS menu (closed by default); SWITCH sits at the screen edge.
+   */
+  setDefenders(selected: DefSlot | null, canSwitch = !!selected) {
+    this.playersBtn.classList.toggle('hidden', !selected);
+    if (selected && this.playersBtn.textContent !== `${selected} ▾`) this.playersBtn.textContent = `${selected} ▾`;
+    this.defStrip.classList.toggle('hidden', !selected || !this.stripOpen);
+    this.switchBtn.classList.toggle('hidden', !canSwitch);
+    if (!selected) this.stripOpen = false;
     for (const [slot, btn] of this.defBtns) btn.classList.toggle('selected', slot === selected);
+  }
+
+  /** Phase 3d: the SWITCH edge button on its own (kick coverage). */
+  setSwitch(visible: boolean) {
+    this.switchBtn.classList.toggle('hidden', !visible);
+  }
+
+  private setStripOpen(open: boolean) {
+    this.stripOpen = open;
+    this.defStrip.classList.toggle('hidden', !open);
   }
 
   /** Secondary action button (SLIDE / DASH); null hides it. */
@@ -199,6 +261,14 @@ export class TouchControls {
     this.secondary.classList.toggle('hidden', !label);
     if (label && this.secondary.textContent !== label) this.secondary.textContent = label;
     this.secondary.disabled = !ready;
+  }
+
+  /** Phase 3d: SPRINT button (hidden unless the user carries the ball); `stamina` 0..1 fills it. */
+  setSprint(visible: boolean, stamina = 1, active = false) {
+    this.sprint.classList.toggle('hidden', !visible);
+    this.sprint.classList.toggle('active', active);
+    this.sprint.style.setProperty('--stamina', `${Math.round(stamina * 100)}%`);
+    if (!visible) this.input.setTouchSprint(false);
   }
 
   /** Charge meter: fill 0..1 and the sweet-spot window (null hides it). */
@@ -225,6 +295,7 @@ export class TouchControls {
       this.joy.end();
       this.input.setTouchMove(0, 0);
       this.input.setTouchPrimary(false);
+      this.input.setTouchSprint(false);
       for (const slot of this.slotBtns.keys()) this.input.setTouchSlot(slot, false);
       this.drawJoy();
     }

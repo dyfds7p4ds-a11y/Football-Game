@@ -5,7 +5,7 @@ Three.js + TypeScript + Vite, installable as a PWA, touch-first with keyboard
 and gamepad as secondary inputs. Stylized-realistic 3D (stadium bowl, crowd,
 soft shadows) with an optional chunky "retro pixels" mode.
 
-This is **Phase 3c**: a playable single game where you run the offense against
+This is **Phase 3d**: a playable single game where you run the offense against
 a CPU defense that reads your route concepts, and play defense (any of the
 eleven defenders) against a CPU quarterback. Blocking is matchup-driven,
 blitzes can be picked up, kicks use a two-step meter and you cover your own
@@ -13,9 +13,12 @@ kicks. Touchdowns are followed by a try (kick or two), ties go to college
 overtime, and each team has three timeouts per half. Phase 3c adds a fixed
 joystick, audibles at the line, pattern-match zones, a QB who reads blitzes
 nobody called, returnable interceptions and fumbles, NFL clock rules and a
-4 × 5-minute game that fits in about 15 minutes. Officials, penalty flags, a
-crowd meter and intro cutscenes are in too. Visual and audio polish (Phase
-3d), career mode and trading come later (see
+4 × 5-minute game that fits in about 15 minutes. Phase 3d adds a sprint
+button, a touchback-or-return choice on kickoffs into the end zone, reach
+blocks and double teams, a rebalanced toss, tap-to-select defenders, lineman
+body types and orange sideline down markers. Officials, penalty flags, a
+crowd meter and intro cutscenes are in too. Cutscenes, crowd sound and the
+environment (Phase 3e), career mode and trading come later (see
 [ARCHITECTURE.md](ARCHITECTURE.md) for the modules, defaults, extension
 points and known gaps).
 
@@ -62,11 +65,14 @@ HTTPS, so the installed PWA also works offline.
 | Action | Touch (iPad) | Keyboard | Gamepad |
 | --- | --- | --- | --- |
 | Move QB / ball carrier / returner | Joystick at the bottom left (fixed; anywhere on or near it) | WASD / arrow keys | Left stick |
-| Look around | Drag on the right half | Q / E | Right stick |
+| Look around | Drag on the field | Q / E | Right stick |
 | Pick a receiver (pre-snap) | Tap **1 2 3 RB TE** | 1 2 3, 4/R, 5/T | X, Y, B, LB, RB |
 | Throw to a receiver | **Hold** his button to charge, **release** to throw | Hold / release the key | Hold / release the button |
 | Snap; throw to the last pick | Big button | Space / Enter | A or RT |
 | Juke (ball carrier) / dash (returner) | Big button | Space | A or RT |
+| Sprint (ball carrier, costs stamina, loosens the ball) | **Hold SPRINT** (next to JUKE) | Hold C | Hold R3 |
+| Touchback (kickoff caught in the end zone) | **TOUCH BACK**, or run it out | X / Shift | LT |
+| Change defender | **Tap him** on the field; **SWITCH** (left edge); **PLAYERS** menu | X / Shift; 1 2 3 | LT |
 | Slide (scrambling QB) | **SLIDE** button | X / Shift | LT |
 | Audible (pre-snap, up to 3) | **AUDIBLE**, then tap a play | X / Shift, then 1 2 3 | LT, then X Y B |
 | Return a pick or fumble (defense) | Joystick; **JUKE** | WASD; Space | Left stick; A |
@@ -118,8 +124,10 @@ HTTPS, so the installed PWA also works offline.
   declined) once the play is dead.
 - **Special teams:** punts, field goals and kickoffs use a hold-and-release
   meter with a timing zone; punts also lock an angle needle on release.
-  Kicks into the end zone are touchbacks. On returns you steer the returner
-  and tap DASH for a short burst.
+  A kickoff caught in the end zone is your call: TOUCH BACK takes a knee
+  (or stand still until the decision time runs out), running it out is a
+  return. Uncaught kicks into the end zone and punts there are touchbacks.
+  On returns you steer the returner and tap DASH for a short burst.
 - **Crowd:** the meter under the scoreboard rises after big plays, takeaways
   and scores and drops after penalties, turnovers and failed fourth downs.
   The stands and the crowd noise follow it.

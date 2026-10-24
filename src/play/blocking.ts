@@ -91,6 +91,36 @@ export function holdTime(quality: number, o: HoldOptions): number {
 }
 
 /**
+ * Phase 3d: reach block. `offset` = how far (yd) the defender lines up on
+ * the playside of the blocker (<= 0: he is inside, a down block, no reach).
+ * Returns the grade penalty (>= 0); Infinity when the man is out of reach.
+ */
+export function reachPenalty(blk: Ratings, def: Ratings, offset: number): number {
+  const r = BLOCKING.reach;
+  if (offset <= r.easy) return 0;
+  if (offset > r.max) return Infinity;
+  const base = r.penalty * (offset - r.easy) / (r.max - r.easy);
+  const edge = Math.max(-r.maxAthleticEdge, Math.min(r.maxAthleticEdge, (blk.speed - def.speed) / r.speedScale));
+  return base * (1 - edge);
+}
+
+/** Phase 3d: grade bonus of a combo (double team) for every blocker on the man. */
+export function comboBonus(engagers: number): number {
+  return engagers >= 2 ? BLOCKING.double.grade : 0;
+}
+
+/**
+ * Phase 3d: full run-block grade: the 3b matchup, minus the reach penalty (scaled per scheme),
+ * plus the combo bonus of a double team (clamped to -1..1).
+ */
+export function runBlockGrade(blk: Ratings, def: Ratings, o: { reachOffset?: number; engagers?: number; scheme?: RunScheme } = {}): number {
+  const factor = (BLOCKING.reach.schemeFactor as Record<string, number | undefined>)[o.scheme ?? 'toss'] ?? 1;
+  const reach = o.reachOffset !== undefined ? reachPenalty(blk, def, o.reachOffset) * factor : 0;
+  const q = blockQuality(blk, def, 'run') - (Number.isFinite(reach) ? reach : 2) + comboBonus(o.engagers ?? 1);
+  return Math.max(-1, Math.min(1, q));
+}
+
+/**
  * How fast an engagement uses up its hold time: a double team slows it
  * down, a QB who holds the ball past the grace period speeds it up.
  */
@@ -256,6 +286,8 @@ export function planRunBlocks(run: RunDesign, ballX: number, blockers: Unit[], d
       const ahead = d.y >= b.y - 1;
       if (!ahead) continue;
       const lateral = Math.abs(d.x - b.x);
+      // Phase 3d (toss): a man further playside than a reach can get to is not this blocker's.
+      if (scheme === 'toss' && (d.x - b.x) * dir > BLOCKING.reach.max) continue;
       // Zone: take the man in your playside gap first.
       const lean = scheme === 'zone' || scheme === 'toss' ? (Math.sign(d.x - b.x) === dir ? -0.6 : 0.6) : 0;
       const score = lateral + Math.abs(d.y - b.y) * 0.4 + (d.lb ? 1.2 : 0) + lean;
@@ -265,7 +297,8 @@ export function planRunBlocks(run: RunDesign, ballX: number, blockers: Unit[], d
       }
     }
     if (best) used.set(best.id, 1);
-    const drive = scheme === 'zone' || scheme === 'toss' ? dir : best ? (Math.sign(best.x - aimX) || -dir) : 0;
+    // Zone stretches the front playside; a toss seals it inside (Phase 3d) so the back can get outside.
+    const drive = scheme === 'zone' ? dir : scheme === 'toss' ? -dir : best ? (Math.sign(best.x - aimX) || -dir) : 0;
     out.push({ blocker: b.id, role: 'runBlock', target: best?.id ?? null, drive });
   }
   return out;

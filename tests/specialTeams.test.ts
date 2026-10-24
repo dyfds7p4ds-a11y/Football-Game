@@ -391,3 +391,59 @@ describe('Phase 3c: missed kicks are punished', () => {
     expect(r.aimPenalty).toBe(0);
   });
 });
+
+describe('Phase 3d: kickoffs into the end zone', () => {
+  const kick = (power: number, seed: number, userReturns: boolean, input: (s: ReturnSim) => { move: { x: number; y: number }; dash: boolean; touchback?: boolean }) => {
+    const rel = { ...releaseKick('kickoff', heldFor(power), 1), power };
+    const flight = kickFlight(rel, v2(0, ST.rules.kickoffSpot), 0, new Rng(seed));
+    const sim = new ReturnSim({ kind: 'kickoff', flight, kickingTeam: getTeam('elbtal'), receivingTeam: getTeam('rheinstadt'), userReturns, tackling: 1, seed });
+    let decided = false;
+    for (let i = 0; i < 60 * 25 && !sim.result; i++) {
+      sim.step(input(sim), SIM_DT);
+      if (sim.endZoneDecision) decided = true;
+    }
+    return { sim, res: sim.result!, decided };
+  };
+  const idle = () => ({ move: { x: 0, y: 0 }, dash: false });
+
+  it('a catch in the end zone is not an automatic touchback: the user decides', () => {
+    let pressedAt = -1;
+    const { res, decided } = kick(0.9, 1, true, (s) => {
+      const tb = s.canTouchback && pressedAt < 0;
+      if (tb) pressedAt = s.t;
+      return { ...idle(), touchback: tb };
+    });
+    expect(decided).toBe(true);
+    expect(pressedAt).toBeGreaterThan(0);
+    expect(res.outcome).toBe('touchback');
+    expect(res.description).toMatch(/knee/);
+  });
+
+  it('the user can run it out instead (a return, with the 3c return control)', () => {
+    const { res, decided } = kick(0.9, 1, true, () => ({ move: { x: 0, y: 1 }, dash: false }));
+    expect(decided).toBe(true);
+    expect(res.outcome).not.toBe('touchback');
+    expect(res.endY).toBeGreaterThan(0);
+  });
+
+  it('standing in the end zone until the decision time runs out is a touchback', () => {
+    const { res, sim } = kick(0.9, 1, true, idle);
+    expect(res.outcome).toBe('touchback');
+    expect(sim.t).toBeGreaterThan(ST.endZone.decisionTime);
+  });
+
+  it('the CPU kneels on a deep catch and returns a shallow one', () => {
+    const deep = kick(0.95, 1, false, idle);
+    expect(deep.decided).toBe(true);
+    expect(deep.res.outcome).toBe('touchback');
+    const shallow = kick(0.85, 1, false, idle);
+    expect(shallow.decided).toBe(true);
+    expect(shallow.res.outcome).not.toBe('touchback');
+  });
+
+  it('a ball nobody touches in the end zone, or past the end line, is still a touchback; punts unchanged', () => {
+    const { res, decided } = kick(0.9, 2, false, idle);
+    expect(decided).toBe(false);
+    expect(res.outcome).toBe('touchback');
+  });
+});
