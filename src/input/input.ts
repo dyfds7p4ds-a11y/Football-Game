@@ -30,6 +30,8 @@ export interface InputFrame {
   anyPressed: boolean;
   pausePressed: boolean;
   timeoutPressed: boolean;
+  /** Phase 4: ADJUST (defensive audible menu) pressed (touch button, Q). */
+  adjustPressed: boolean;
 }
 
 const KEY_SLOTS: Record<string, EligibleSlot> = {
@@ -62,6 +64,7 @@ export class InputManager {
   private pendingPrimary = false;
   private pendingPause = false;
   private pendingTimeout = false;
+  private pendingAdjust = false;
   private padPrev: boolean[] = [];
   lookSensitivity = 1;
   /** Which device was used last: lets the UI hide touch buttons for keyboard/pad players. */
@@ -81,6 +84,7 @@ export class InputManager {
       if (SECONDARY_KEYS.has(e.code)) this.pendingSecondary = true;
       if (e.code === 'Escape' || e.code === 'KeyP') this.pendingPause = true;
       if (e.code === 'KeyO') this.pendingTimeout = true;
+      if (e.code === 'KeyQ') this.pendingAdjust = true;
       if (e.code === 'Space' || e.code === 'Enter') this.pendingPrimary = true;
       if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
     });
@@ -144,6 +148,9 @@ export class InputManager {
   }
   pressTimeout() {
     this.pendingTimeout = true;
+  }
+  pressAdjust() {
+    this.pendingAdjust = true;
   }
 
   /** Build this frame's input; call once per animation frame. */
@@ -217,6 +224,7 @@ export class InputManager {
       anyPressed: this.pendingAny,
       pausePressed: this.pendingPause,
       timeoutPressed: this.pendingTimeout,
+      adjustPressed: this.pendingAdjust,
     };
     this.primaryWasHeld = primary;
     this.lookYaw = 0;
@@ -229,6 +237,7 @@ export class InputManager {
     this.pendingPrimary = false;
     this.pendingPause = false;
     this.pendingTimeout = false;
+    this.pendingAdjust = false;
     return frame;
   }
 }

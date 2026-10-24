@@ -63,6 +63,8 @@ button:disabled { opacity: 0.45; }
 /* Phase 3b: every defender selectable; grouped DL | LB | DB, top right under the score bug */
 /* Phase 3d: SWITCH at the left screen edge (out of the defender's view), PLAYERS menu top right */
 #btn-switch { position: fixed; z-index: 4; border-radius: 12px; padding: 0; font-size: 11px; background: rgba(233, 196, 106, 0.85); }
+#btn-adjust { position: fixed; z-index: 5; top: calc(132px + var(--safe-t)); right: calc(8px + var(--safe-r)); min-height: 40px; padding: 4px 10px; font-size: 12px; border-radius: 8px; background: rgba(233, 196, 106, 0.85); }
+#btn-adjust.disabled { opacity: 0.4; }
 #btn-players { position: fixed; z-index: 5; top: calc(84px + var(--safe-t)); right: calc(8px + var(--safe-r)); min-height: 40px; padding: 4px 10px; font-size: 12px; border-radius: 8px; }
 #defstrip { position: fixed; top: calc(132px + var(--safe-t)); right: calc(8px + var(--safe-r)); z-index: 5; display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; max-width: calc(100vw - 16px); }
 #defstrip .defgroup { display: flex; gap: 4px; }

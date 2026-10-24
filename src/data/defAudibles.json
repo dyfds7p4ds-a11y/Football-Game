@@ -1,0 +1,21 @@
+{
+  "_doc": "Phase 4 defensive audibles (play/defAudible.ts). Before the snap the user can change the defensive call: another coverage shell (shells, minus the current call) or a blitz look (blitzLooks, minus the current call), at most maxOptions of each, maxPerPlay changes per snap. cost: play-clock seconds the k-th change costs = first + (k-1) x step; a change is only allowed while the play clock stays at least minPlayClock s after paying (the offense must still get the snap off). The game clock runoff at the snap is computed from the play clock before the changes (an adjustment never saves game time). minAfterAdjust: real seconds the auto-snap waits at least after a change. cpuOffense (per difficulty): react = seconds until the CPU offense re-reads the new look, read = chance it recognizes it; when it does it checks to the first play of its same-formation audible list (audibles.json options) that is in the counters list for the look (blitz / man / cover2 / cover3); a play already in that list is kept. A snap before the re-read catches the offense in its old play.",
+  "maxPerPlay": 2,
+  "maxOptions": 3,
+  "cost": { "first": 3, "step": 2 },
+  "minPlayClock": 6,
+  "minAfterAdjust": 0.6,
+  "shells": ["cover1", "cover3", "cover2", "cover2man"],
+  "blitzLooks": ["firezone", "cover1blitz", "cover0"],
+  "cpuOffense": {
+    "easy": { "react": 1.6, "read": 0.35 },
+    "normal": { "react": 1.1, "read": 0.6 },
+    "hard": { "react": 0.7, "read": 0.85 }
+  },
+  "counters": {
+    "blitz": ["slants", "quick_outs", "bubble", "rb_screen", "hb_draw", "curl_flat"],
+    "man": ["mesh", "slants", "y_cross", "smash", "pa_boot"],
+    "cover2": ["smash", "four_verts", "hb_dive", "hb_draw", "levels", "deep_post"],
+    "cover3": ["curl_flat", "levels", "quick_outs", "hb_stretch", "hb_toss", "pa_boot"]
+  }
+}

@@ -20,6 +20,8 @@ import { PlaySim, SIM_DT, type PlayEvent, type PlayResult, type SimInput } from 
 import { ReturnSim } from './play/returnSim';
 import { AUDIBLES, AudibleSession, audibleCost } from './play/audible';
 import { AudibleMenu } from './ui/audible';
+import { DEF_AUDIBLES, DefAudibleSession, defAudibleCost } from './play/defAudible';
+import { isBlitz } from './play/audible';
 import { chooseDefense, emptyTendencies, recordTendency, type DefenseCall } from './play/defenseCalls';
 import { PENALTIES, calloutText, type Flag } from './play/penalties';
 import { ST, aimNeedle, aimToAngle, aimZone, cpuRelease, judgeFieldGoal, kickFlight, kickZone, meterPower, releaseKickAimed, type KickFlight, type KickKind } from './play/kicking';
@@ -118,6 +120,10 @@ export class App {
   /** Phase 3c: audibles at the line on the user's snaps. */
   private aud: AudibleSession | null = null;
   private audMenu = new AudibleMenu((p) => this.audible(p));
+  /** Phase 4: defensive audibles before a CPU snap. */
+  private defAud: DefAudibleSession | null = null;
+  private defMenu = new AudibleMenu<DefenseCall>((c) => this.defAudible(c), 'ADJUST', (c) => (isBlitz(c) ? 'BLITZ' : 'SHELL'));
+  private defSeeds = { sim: 1, qb: 1 };
   private playSeed = 1;
 
   constructor(canvas: HTMLCanvasElement, ui: HTMLElement) {
@@ -130,7 +136,7 @@ export class App {
       onTimeout: () => this.timeout(),
       onDefense: (call) => this.callDefense(call),
     });
-    ui.append(this.touch.root, this.audMenu.root, this.hud.root, this.playcall.root, this.intro.root, this.modal.root,
+    ui.append(this.touch.root, this.audMenu.root, this.defMenu.root, this.hud.root, this.playcall.root, this.intro.root, this.modal.root,
       h('div', { id: 'rotate' }, 'Rotate your iPad to landscape for the best experience.'));
     this.hud.pauseBtn.addEventListener('pointerup', () => this.input.pressPause());
     this.hud.timeoutBtn.addEventListener('pointerup', () => this.input.pressTimeout());
@@ -169,6 +175,8 @@ export class App {
   private setPhase(p: Phase) {
     this.phase = p;
     if (p !== 'presnap') this.audMenu.hide();
+    if (p !== 'presnap') this.defMenu.hide();
+    if (p !== 'presnap') this.touch.setAdjust(null);
     if (p !== 'live') this.touch.setSprint(false);
     if (p !== 'return') this.touch.setSwitch(false);
     const onField = p === 'presnap' || p === 'live' || p === 'postplay' || p === 'kick' || p === 'kickFlight' || p === 'return' || p === 'returnPost';
@@ -409,31 +417,54 @@ export class App {
     const g = this.game!;
     if (!this.defense || this.phase !== 'playcall') return;
     this.playcall.hide();
-    const diff = DIFFICULTY[g.difficulty];
     const sit = { down: g.down, toGo: g.toGo, yardline: g.ballY };
     const defense = call ?? chooseDefense(
       { ...sit, halfSecondsLeft: (g.clock.quarter % 2 === 1 ? g.clock.quarterLength : 0) + g.clock.remaining, scoreDiff: g.score[g.possession] - g.score[g.userSide] },
       emptyTendencies(), DIFFICULTY.normal, this.rng,
     );
     const play = chooseCpuPlay(sit, this.rng);
+    this.defSeeds = { sim: this.rng.int(1, 2 ** 31 - 1), qb: this.rng.int(1, 2 ** 31 - 1) };
+    this.defAud = new DefAudibleSession(defense, play, g.difficulty, new Rng(this.defSeeds.sim ^ 0x3c3c));
+    this.defMenu.hide();
+    this.ret = null;
+    this.callouts = [];
+    this.target = null;
+    this.buildDefenseSim(play, defense);
+    this.setMarkersFor(g);
+    this.presnapTimer = 0;
+    this.setPhase('presnap');
+  }
+
+  /** CPU snap: the CPU's `play` against the user's `defense` (also after a defensive audible or the offense's re-read). */
+  private buildDefenseSim(play: PlayData, defense: DefenseCall) {
+    const g = this.game!;
+    const diff = DIFFICULTY[g.difficulty];
     this.play = play;
     // The defenders are the user's team: they cover at Normal. Difficulty shows in the CPU QB (cpuOffense) and the flag rate.
     this.sim = new PlaySim({
       play, defense, offenseTeam: this.cpuTeam, defenseTeam: this.userTeam, ballX: g.ballX, los: g.ballY,
-      difficulty: { ...DIFFICULTY.normal, penaltyRate: diff.penaltyRate }, seed: this.rng.int(1, 2 ** 31 - 1),
+      difficulty: { ...DIFFICULTY.normal, penaltyRate: diff.penaltyRate }, seed: this.defSeeds.sim,
       penaltyBias: this.penaltyBias(), userDefense: true,
     });
     this.sim.selectDefender(this.defSlot);
-    this.cpuQB = new CpuQB(play, diff, new Rng(this.rng.int(1, 2 ** 31 - 1)));
-    this.ret = null;
-    this.callouts = [];
-    this.target = null;
+    this.cpuQB = new CpuQB(play, diff, new Rng(this.defSeeds.qb));
     this.view.bindPlay(this.sim, this.cpuTeam, this.userTeam);
     this.view.showRoutes(null);
-    this.setMarkersFor(g);
     this.hud.setPlayName(`DEFENSE · ${defense.name}`);
-    this.presnapTimer = 0;
-    this.setPhase('presnap');
+  }
+
+  /** Phase 4: the user changes the defensive call at the line (coverage shell or blitz look). */
+  private defAudible(call: DefenseCall) {
+    const g = this.game!;
+    const aud = this.defAud;
+    if (!aud || this.phase !== 'presnap' || !this.defense) return;
+    const r = aud.call(call, g.clock);
+    if (!r) return;
+    this.game = { ...g, clock: r.clock };
+    this.buildDefenseSim(aud.play, call);
+    // The offense needs a moment to snap after the change.
+    this.presnapTimer = Math.min(this.presnapTimer, DEF_CONTROL.presnapAutoSnap - DEF_AUDIBLES.minAfterAdjust);
+    this.flash('ADJUST', `${call.name} · -${r.cost}s`, 1.2);
   }
 
   /**
@@ -468,8 +499,27 @@ export class App {
   }
 
   private presnapDefense(f: InputFrame, dt: number) {
-    this.presnapTimer += dt;
-    this.switchDefender(f, false);
+    const aud = this.defAud;
+    // Phase 4: the CPU offense re-reads a defensive audible after its reaction time.
+    const reread = aud?.update(dt);
+    if (aud && reread) {
+      this.buildDefenseSim(reread, aud.defense);
+      this.flash('OFFENSE AUDIBLE', reread.name, 1.2);
+    }
+    if (this.defMenu.visible) {
+      // 1 / 2 / 3 pick while the menu is open; ADJUST again closes it. The offense waits while the user reads.
+      const idx = f.slotPressed ? (['WR1', 'WR2', 'WR3', 'TE', 'RB'] as EligibleSlot[]).indexOf(f.slotPressed) : -1;
+      if (idx >= 0) this.defMenu.pick(idx);
+      else if (f.adjustPressed) this.defMenu.hide();
+    } else {
+      this.presnapTimer += dt;
+      this.switchDefender(f, false);
+      if (f.adjustPressed && aud?.canAdjust(this.game!.clock)) {
+        const o = aud.options;
+        this.defMenu.show([...o.shell, ...o.blitz], defAudibleCost(aud.count + 1), DEF_AUDIBLES.maxPerPlay - aud.count);
+      }
+    }
+    this.touch.setAdjust('ADJUST', !!aud?.canAdjust(this.game!.clock));
     const left = Math.max(0, DEF_CONTROL.presnapAutoSnap - this.presnapTimer);
     this.touch.setPrimary(`READY ${Math.ceil(left)}`, 'snap');
     this.touch.setSecondary(null);
@@ -477,11 +527,15 @@ export class App {
     this.touch.setDefenders(this.defSlot);
     this.touch.setCharge(false, 0, null);
     this.hud.setEdgeMarkers(null);
-    this.hud.setHint(this.playsRun < 6 ? `You are ${this.defSlot}. Left thumb moves him · JUMP plays the ball (time it!), dives at the runner or rips a block · tap a defender, SWITCH (left edge) or the PLAYERS menu changes player` : null);
+    this.hud.setHint(this.playsRun < 6 ? `You are ${this.defSlot}. Left thumb moves him · JUMP plays the ball (time it!), dives at the runner or rips a block · tap a defender, SWITCH (right edge) or the PLAYERS menu changes player · ADJUST changes the call` : null);
     if (f.primaryPressed || left <= 0) {
       const g = this.game!;
       // Phase 3c: the CPU offense snaps on the pace (data/pace.json): the game clock does not depend on the auto-snap.
-      this.game = { ...g, clock: g.conversionTry ? { ...snapClock(g.clock), running: false } : pacedSnap(g.clock) };
+      // Phase 4: play-clock seconds spent on defensive audibles never shorten the game-clock runoff.
+      const base = { ...g.clock, playClock: g.clock.playClock + (this.defAud?.spent ?? 0) };
+      this.game = { ...g, clock: g.conversionTry ? { ...snapClock(g.clock), running: false } : pacedSnap(base) };
+      this.defMenu.hide();
+      this.touch.setAdjust(null);
       this.waiveDelayOfGame = false;
       this.acc = 0;
       this.playsRun++;
