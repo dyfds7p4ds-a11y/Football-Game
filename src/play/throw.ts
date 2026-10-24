@@ -8,6 +8,7 @@
 import type { Rng } from '../core/rng';
 import { clamp, dist, norm, sub, type Vec2 } from '../core/vec';
 import { FIELD } from './field';
+import passingJson from '../data/passing.json';
 
 export const THROW = {
   /** Seconds to go from 0 to full charge. */
@@ -86,6 +87,10 @@ export interface ThrowSolution {
   quality: number;
   missDistance: number;
   window: ThrowWindow;
+  /** Phase 4: released inside the green window (|charge - center| <= half-width). */
+  green: boolean;
+  /** Pressure at the release (as passed in). */
+  pressure: number;
 }
 
 /** Iteratively lead a moving target for a ball travelling at `speed`. */
@@ -116,12 +121,14 @@ export function computeThrow(inp: ThrowInput): ThrowSolution {
   const along = bias * (Math.abs(bias) > 1 ? 1.3 : 0.35);
 
   // Random error grows with poor timing, pressure, low accuracy and movement.
+  // Phase 4: inside the green window the rating / distance scatter shrinks (passing.json greenScatter).
+  const green = Math.abs(inp.charge - win.center) <= win.halfWidth;
+  const skill = ((1 - inp.accuracy / 100) * 1.6 + baseDist * 0.012) * (green ? passingJson.greenScatter : 1);
   const radius =
     (1 - quality) * THROW.maxMiss +
     inp.pressure * 2.2 +
-    (1 - inp.accuracy / 100) * 1.6 +
     Math.min(inp.qbSpeed, 8) * 0.12 +
-    baseDist * 0.012;
+    skill;
   const ang = inp.rng.next() * Math.PI * 2;
   const mag = radius * Math.sqrt(inp.rng.next()) * 0.8;
 
@@ -129,6 +136,11 @@ export function computeThrow(inp: ThrowInput): ThrowSolution {
     x: aim.x + dir.x * along + Math.cos(ang) * mag,
     y: aim.y + dir.y * along + Math.sin(ang) * mag,
   };
+  // Phase 4: a green ball to a receiver at the sideline stays in bounds (scatter alone never carries it out).
+  if (green && inp.pressure <= passingJson.cleanCatch.maxPressure) {
+    landing.x = clamp(landing.x, -FIELD.halfWidth + 0.5, FIELD.halfWidth - 0.5);
+    landing.y = Math.min(landing.y, FIELD.length + FIELD.endzone - 0.5);
+  }
   const d = dist(inp.from, landing);
   const flightTime = Math.max(0.15, d / speed);
   const h = (THROW.catchHeight - THROW.releaseHeight) / flightTime + 0.5 * THROW.gravity * flightTime;
@@ -142,6 +154,8 @@ export function computeThrow(inp: ThrowInput): ThrowSolution {
     quality,
     missDistance: dist(aim, landing),
     window: win,
+    green,
+    pressure: inp.pressure,
   };
 }
 

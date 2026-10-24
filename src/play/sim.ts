@@ -145,6 +145,24 @@ interface Flight {
   tipChecked: Set<number>;
   /** Screen throws: how well the throw hit the timing window. */
   screen?: ScreenTiming;
+  /** Phase 4: pressure at the release, the aim point and whether the release was inside the green window. */
+  pressure?: number;
+  aim?: Vec2;
+  green?: boolean;
+}
+
+/** Phase 4: why a pass fell incomplete (logged in debug mode, `PlaySim.incompleteReason`). */
+export interface IncompleteReason {
+  reason: 'tipped' | 'defended' | 'drop' | 'contestedDrop' | 'outOfReach' | 'outOfBounds';
+  /** The release: inside the green window? quality 0..1, pressure 0..1. */
+  green: boolean;
+  quality: number;
+  pressure: number;
+  /** Yards between the aim point and the landing, and from the target to the landing at the arrival. */
+  miss: number;
+  targetDist: number | null;
+  /** Nearest defender to the landing at the arrival (yd). */
+  defenderDist: number;
 }
 
 export interface Ball {
@@ -281,6 +299,10 @@ export class PlaySim {
   pocketCue: PocketCue | null = null;
   /** QB is running with the ball (out of the pocket or past the LOS). */
   scrambling = false;
+  /** Phase 4: debug mode logs the reason for every incomplete pass (console.debug). */
+  static debug = false;
+  /** Phase 4: why the last pass fell incomplete (null: no incomplete pass). */
+  incompleteReason: IncompleteReason | null = null;
   /** Phase 4: when the QB left the pocket (Infinity = never). */
   scrambleAt = Infinity;
   charge = 0;
@@ -1189,6 +1211,7 @@ export class PlaySim {
       speed: sol.speed,
       tipChecked: new Set(),
       screen: this.play.screen && target?.slot === this.play.screen.target ? screenTiming(this.t, this.play.screen) : undefined,
+      pressure: sol.pressure, aim: sol.aim, green: sol.green,
     };
     this.passThrown = true;
     this.throwAt = this.t;
@@ -2003,7 +2026,7 @@ export class PlaySim {
             this.finishInterception(d);
           } else {
             this.emit('deflection', d.id);
-            this.incomplete(b.pos);
+            this.incomplete(b.pos, 'tipped');
           }
           return;
         }
@@ -2033,13 +2056,14 @@ export class PlaySim {
       landing: f.landing, quality: f.quality, speed: f.speed, offense, defense,
       ballSkills: this.diff.ballSkills, inPhaseBreakup: COVERAGE.inPhaseBreakup, inPhaseInt: COVERAGE.inPhaseInt,
       catchFactor: f.screen?.catchFactor, intBonus: f.screen?.intBonus, intBase: COVERAGE.intBase, noReceiverInt: COVERAGE.noReceiverInt, rng: this.rng,
+      green: f.green, pressure: f.pressure,
     });
     const b = this.ball;
     switch (out.kind) {
       case 'catch': {
         const r = this.actors[out.id];
         if (Math.abs(f.landing.x) > FIELD.halfWidth || f.landing.y > FIELD.length + FIELD.endzone) {
-          this.incomplete(f.landing);
+          this.incomplete(f.landing, 'outOfBounds');
           return;
         }
         b.state = 'held';
@@ -2059,10 +2083,10 @@ export class PlaySim {
       case 'deflection':
       case 'drop':
         this.emit(out.kind, out.id);
-        this.incomplete(f.landing);
+        this.incomplete(f.landing, out.kind === 'deflection' ? 'defended' : out.kind === 'drop' && out.contested ? 'contestedDrop' : 'drop');
         return;
       case 'incomplete':
-        this.incomplete(f.landing);
+        this.incomplete(f.landing, 'outOfReach');
     }
   }
 
@@ -2078,8 +2102,18 @@ export class PlaySim {
     return combinedEffect(t.grade, read);
   }
 
-  private incomplete(at: Vec2) {
+  private incomplete(at: Vec2, reason: IncompleteReason['reason']) {
     const f = this.ball.flight;
+    if (f && !f.lateral) {
+      let defenderDist = Infinity;
+      for (const d of this.actors) if (d.side === 'def' && !d.down) defenderDist = Math.min(defenderDist, dist(d.pos, f.landing));
+      const tgt = f.targetId !== null ? this.actors[f.targetId] : null;
+      this.incompleteReason = {
+        reason, green: !!f.green, quality: f.quality, pressure: f.pressure ?? 0,
+        miss: f.aim ? dist(f.aim, f.landing) : 0, targetDist: tgt ? dist(tgt.pos, f.landing) : null, defenderDist,
+      };
+      if (PlaySim.debug) console.debug('[incomplete]', this.incompleteReason);
+    }
     this.ball.state = 'loose';
     this.ball.looseVel = f ? { x: f.vel.x * 0.35, y: f.vel.y * 0.35, h: 1.5 } : { x: 0, y: 0, h: 0 };
     this.ball.flight = null;

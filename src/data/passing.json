@@ -1,0 +1,7 @@
+{
+  "_doc": "Phase 4 pass resolution (play/catch.ts, play/throw.ts). A clean ball = released inside the green window, pressure at the release at most cleanCatch.maxPressure, and no defender within the contest radius (catch reach + contest) of the landing when it arrives: if the receiver is within reach it is caught, never a random drop (Part D bug fix). Only pressure, defender proximity and a release outside the green window can make a well-placed ball incomplete. greenScatter: inside the green window the scatter from the QB's accuracy rating and the throw distance is scaled by this factor (timing, pressure and throwing on the run keep their full scatter), so a green ball lands within reach of a receiver who keeps running his route.",
+  "cleanCatch": {
+    "maxPressure": 0.35
+  },
+  "greenScatter": 0.35
+}
