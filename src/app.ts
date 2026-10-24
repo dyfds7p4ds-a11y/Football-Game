@@ -508,8 +508,8 @@ export class App {
       this.flash('OFFENSE AUDIBLE', reread.name, 1.2);
     }
     if (this.defMenu.visible) {
-      // 1 / 2 / 3 pick while the menu is open; ADJUST again closes it. The offense waits while the user reads.
-      const idx = f.slotPressed ? (['WR1', 'WR2', 'WR3', 'TE', 'RB'] as EligibleSlot[]).indexOf(f.slotPressed) : -1;
+      // 1-5 pick while the menu is open; ADJUST again closes it. The offense waits while the user reads.
+      const idx = f.slotPressed ? (['WR1', 'WR2', 'WR3', 'RB', 'TE'] as EligibleSlot[]).indexOf(f.slotPressed) : -1;
       if (idx >= 0) this.defMenu.pick(idx);
       else if (f.adjustPressed) this.defMenu.hide();
     } else {
