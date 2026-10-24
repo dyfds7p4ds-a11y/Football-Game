@@ -87,6 +87,8 @@ export function settingsPanel(s: Settings, onChange: (s: Settings) => void, inGa
     row('Intro cutscenes', onOff('intro'), 'Tunnel, team intro and coin toss before the opening kickoff. Tap to skip.'),
     row('Sound', segmented([{ value: 1, label: 'ON' }, { value: 0, label: 'MUTE' }], s.sound ? 1 : 0, (v) => set('sound', v === 1)), 'Stadium atmosphere: volume follows the crowd meter; cheers, boos, roars.'),
     row('Soft shadows', onOff('shadows'), 'Turn off for more speed on older iPads.'),
+    row('Graphics quality', segmented([{ value: 'low', label: 'LOW' }, { value: 'medium', label: 'MEDIUM' }, { value: 'high', label: 'HIGH' }] as const, s.graphics, (v) => set('graphics', v)),
+      'LOW: no shadows, no rim light, plain materials, native resolution capped at 1x (older iPads). HIGH: sharper image and soft shadows (newest iPads).'),
   );
 }
 

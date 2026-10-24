@@ -28,9 +28,9 @@
     "follow": 4
   },
   "formation": {
-    "behindBall": 24,
-    "behindDeepest": 9,
-    "height": 15,
+    "behindBall": 26,
+    "behindDeepest": 16,
+    "height": 16,
     "lookAhead": 4,
     "lookHeight": 0,
     "lateralShare": 0.6,

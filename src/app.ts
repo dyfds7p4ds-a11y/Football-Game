@@ -122,7 +122,7 @@ export class App {
   private audMenu = new AudibleMenu((p) => this.audible(p));
   /** Phase 4: defensive audibles before a CPU snap. */
   private defAud: DefAudibleSession | null = null;
-  private defMenu = new AudibleMenu<DefenseCall>((c) => this.defAudible(c), 'ADJUST', (c) => (isBlitz(c) ? 'BLITZ' : 'SHELL'));
+  private defMenu = new AudibleMenu<DefenseCall>((c) => this.defAudible(c), 'ADJUST', (c) => (isBlitz(c) ? 'BLITZ' : 'SHELL'), 'audible-def');
   private defSeeds = { sim: 1, qb: 1 };
   private playSeed = 1;
 
@@ -159,6 +159,7 @@ export class App {
 
   private applySettings() {
     this.view.setPixelScale(this.settings.retroPixels ? 0.4 : 1);
+    this.view.setQuality(this.settings.graphics);
     this.view.setShadows(this.settings.shadows);
     this.input.lookSensitivity = this.settings.lookSensitivity;
     this.audio.setEnabled(this.settings.sound);

@@ -20,6 +20,7 @@ import { PlayerMesh, buildFor } from './playerMesh';
 import { PALETTE } from './palette';
 import { headingToRotY, setFrameFlip, toWorld } from './coords';
 import cameraJson from '../data/camera.json';
+import { GRAPHICS, qualityPreset, type GraphicsQuality, type QualityPreset } from './graphics';
 
 type CamRig = { back: number; height: number; lookAhead: number; lookHeight: number };
 type DefRig = CamRig & { lookToBall: number; follow: number };
@@ -71,6 +72,10 @@ export class SceneView {
   readonly ball: THREE.Mesh;
   private heldBall: THREE.Mesh;
   private sun: THREE.DirectionalLight;
+  /** Phase 4: shadowless light from behind the play (as the camera sees it): brighter player edges. */
+  private rim: THREE.DirectionalLight;
+  private quality: QualityPreset = qualityPreset(GRAPHICS.default);
+  private shadowsWanted = true;
   private pixelScale = 1;
   private time = 0;
   private camPos = new THREE.Vector3();
@@ -88,7 +93,7 @@ export class SceneView {
     this.renderer.setClearColor(PALETTE.sky);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.05;
+    this.renderer.toneMappingExposure = GRAPHICS.lighting.exposure;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.scene.background = new THREE.Color(PALETTE.sky);
@@ -98,8 +103,9 @@ export class SceneView {
     this.scene.add(this.camera);
     this.scene.add(this.skyDome());
 
-    this.scene.add(new THREE.HemisphereLight(0xe3f0ff, 0x46603a, 1.25));
-    this.sun = new THREE.DirectionalLight(0xfff0d8, 2.1);
+    const L = GRAPHICS.lighting;
+    this.scene.add(new THREE.HemisphereLight(L.hemiSky, L.hemiGround, L.hemiIntensity));
+    this.sun = new THREE.DirectionalLight(L.sunColor, L.sunIntensity);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
     const sc = this.sun.shadow.camera;
@@ -113,6 +119,9 @@ export class SceneView {
     this.sun.shadow.normalBias = 0.03;
     this.sun.shadow.radius = 4;
     this.scene.add(this.sun, this.sun.target);
+    this.rim = new THREE.DirectionalLight(L.rimColor, L.rimIntensity);
+    this.rim.castShadow = false;
+    this.scene.add(this.rim, this.rim.target);
 
     this.field = new FieldView(this.renderer);
     this.scene.add(this.field.group);
@@ -167,9 +176,37 @@ export class SceneView {
   }
 
   setShadows(on: boolean) {
+    this.shadowsWanted = on;
+    on = on && this.quality.shadows;
     this.renderer.shadowMap.enabled = on;
     this.sun.castShadow = on;
     for (const p of [...this.players, ...this.officials]) p.setCastShadow(on);
+  }
+
+  /** Phase 4: graphics quality preset (data/graphics.json): pixel ratio, shadows, rim light, materials. */
+  setQuality(q: GraphicsQuality) {
+    const Q = (this.quality = qualityPreset(q));
+    this.renderer.shadowMap.type = Q.softShadows ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
+    if (this.sun.shadow.mapSize.x !== Q.shadowMapSize) {
+      this.sun.shadow.mapSize.set(Q.shadowMapSize, Q.shadowMapSize);
+      this.sun.shadow.map?.dispose();
+      this.sun.shadow.map = null as unknown as THREE.WebGLRenderTarget;
+    }
+    this.rim.visible = Q.rimLight;
+    for (const p of [...this.players, ...this.officials]) p.setQuality(Q);
+    this.setShadows(this.shadowsWanted);
+    this.resize();
+  }
+
+  /** The rim light sits behind the play as seen from the camera, high up, so it outlines the players. */
+  private placeRim() {
+    if (!this.rim.visible) return;
+    const dir = this.camera.getWorldDirection(this.tmp).setY(0);
+    if (dir.lengthSq() < 1e-6) dir.set(0, 0, -1);
+    dir.normalize();
+    const look = this.tmp2.copy(this.camera.position).addScaledVector(dir, 25).setY(0);
+    this.rim.target.position.copy(look);
+    this.rim.position.copy(look).addScaledVector(dir, 40).setY(look.y + 22);
   }
 
   setPixelScale(scale: number) {
@@ -181,7 +218,7 @@ export class SceneView {
   resize() {
     const w = window.innerWidth;
     const h = window.innerHeight;
-    const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+    const dpr = Math.min(window.devicePixelRatio || 1, this.quality.pixelRatioCap);
     this.renderer.setPixelRatio(dpr * this.pixelScale);
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
@@ -667,6 +704,7 @@ export class SceneView {
   }
 
   render() {
+    this.placeRim();
     this.renderer.render(this.scene, this.camera);
   }
 }

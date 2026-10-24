@@ -1,0 +1,25 @@
+{
+  "_doc": "Phase 4 graphics (render/graphics.ts, render/view.ts, render/playerMesh.ts). quality: the Settings choice (LOW / MEDIUM / HIGH, default `default`). Per preset: pixelRatioCap (device pixel ratio cap; the renderer never draws more pixels than this), shadows (sun shadow map; the Soft shadows setting can still turn them off), shadowMapSize, softShadows (PCF soft filter instead of plain PCF), rimLight (a second, shadowless light from behind the play as seen from the camera: brighter player edges against the turf), glossyHelmets (Phong highlight on helmets), fabric (a fine knit texture on jerseys and pants). LOW is for older iPads. lighting: tone-mapping exposure, hemisphere (sky / ground colors, intensity), sun (color, intensity), rim (color, intensity), contactShadow (opacity of the blob under each player, grounds the silhouette). uniform: team colors are drawn slightly desaturated (saturation x) and darker (lightness x) so they read as dyed fabric under the filmic tone mapping, and white pants get a little warmth (pantsWarmth) instead of a flat paper white.",
+  "default": "medium",
+  "presets": {
+    "low": { "pixelRatioCap": 1.0, "shadows": false, "shadowMapSize": 1024, "softShadows": false, "rimLight": false, "glossyHelmets": false, "fabric": false },
+    "medium": { "pixelRatioCap": 1.5, "shadows": true, "shadowMapSize": 1024, "softShadows": false, "rimLight": true, "glossyHelmets": true, "fabric": true },
+    "high": { "pixelRatioCap": 2.0, "shadows": true, "shadowMapSize": 2048, "softShadows": true, "rimLight": true, "glossyHelmets": true, "fabric": true }
+  },
+  "lighting": {
+    "exposure": 1.0,
+    "hemiSky": "#dce8f5",
+    "hemiGround": "#4b5a3c",
+    "hemiIntensity": 1.0,
+    "sunColor": "#ffe8c8",
+    "sunIntensity": 2.5,
+    "rimColor": "#d6e4ff",
+    "rimIntensity": 0.85,
+    "contactShadow": 0.32
+  },
+  "uniform": {
+    "saturation": 0.82,
+    "lightness": 0.93,
+    "pantsWarmth": 0.035
+  }
+}

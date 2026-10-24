@@ -18,6 +18,7 @@ export class AudibleMenu<T extends { name: string } = PlayData> {
     private onPick: (p: T) => void,
     title = 'AUDIBLE',
     private tag: (p: T) => string = (p) => (p as unknown as PlayData).category.toUpperCase(),
+    id = 'audible',
   ) {
     this.list = h('div', { class: 'aud-list' });
     this.info = h('div', { class: 'aud-info' });
@@ -26,7 +27,7 @@ export class AudibleMenu<T extends { name: string } = PlayData> {
       e.preventDefault();
       this.hide();
     });
-    this.root = h('div', { id: 'audible', class: 'hidden' }, h('div', { class: 'aud-head' }, title, close), this.list, this.info);
+    this.root = h('div', { id, class: 'hidden' }, h('div', { class: 'aud-head' }, title, close), this.list, this.info);
   }
 
   show(options: T[], cost: number, left: number) {

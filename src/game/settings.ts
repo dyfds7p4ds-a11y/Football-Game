@@ -1,5 +1,6 @@
 import type { Difficulty } from '../data/types';
 import type { CameraMode, DefenseCameraMode } from '../render/view';
+import { GRAPHICS, type GraphicsQuality } from '../render/graphics';
 
 export interface Settings {
   difficulty: Difficulty;
@@ -25,6 +26,8 @@ export interface Settings {
   sound: boolean;
   /** Real-time soft shadows (turn off on older iPads). */
   shadows: boolean;
+  /** Phase 4: graphics quality preset (data/graphics.json): LOW for older iPads. */
+  graphics: GraphicsQuality;
   /** CPU possessions are simulated (Phase 2) instead of played on defense. */
   simCpuDrives: boolean;
 }
@@ -45,6 +48,7 @@ export const DEFAULT_SETTINGS: Settings = {
   intro: true,
   sound: true,
   shadows: true,
+  graphics: GRAPHICS.default,
   simCpuDrives: false,
 };
 
