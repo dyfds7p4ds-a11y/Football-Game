@@ -41,6 +41,14 @@ export function actionsRect(vw: number, vh: number, safeR = 0, safeB = 0, cfg: T
   return { left: right - a.size, top: bottom - a.size, right, bottom };
 }
 
+/** Phase 4: the SWITCH button at the right screen edge (`touch.json` `switchButton`). */
+export function switchButtonRect(vw: number, vh: number, safeR = 0, cfg: TouchConfig = TOUCH): Rect {
+  const sb = cfg.switchButton;
+  const right = vw - safeR - sb.right;
+  const top = (sb.topPct / 100) * vh;
+  return { left: right - sb.size, top, right, bottom: top + sb.size };
+}
+
 /** Horizontal gap between two rects that share vertical space (negative = overlap). */
 export function rectGap(a: Rect, b: Rect): number {
   const dx = Math.max(a.left - b.right, b.left - a.right);

@@ -33,6 +33,7 @@ export class TouchControls {
   /** Phase 3d: SWITCH at the screen edge and the PLAYERS menu that holds the defender strip. */
   readonly switchBtn: HTMLButtonElement;
   private playersBtn: HTMLButtonElement;
+  private adjustBtn: HTMLButtonElement;
   private stripOpen = false;
   private lookStart = { x: 0, y: 0, t: 0, moved: 0 };
   private joy = new VirtualJoystick();
@@ -124,7 +125,7 @@ export class TouchControls {
     this.defStrip = strip;
     const SB = TOUCH.switchButton;
     this.switchBtn = h('button', { id: 'btn-switch', class: 'hidden', style: {
-      left: `calc(${SB.left}px + var(--safe-l))`, top: `${SB.topPct}%`, width: `${SB.size}px`, height: `${SB.size}px`,
+      right: `calc(${SB.right}px + var(--safe-r))`, top: `${SB.topPct}%`, width: `${SB.size}px`, height: `${SB.size}px`,
     } }, 'SWITCH');
     this.switchBtn.addEventListener('pointerdown', (e) => {
       e.preventDefault();
@@ -135,7 +136,13 @@ export class TouchControls {
       e.preventDefault();
       this.setStripOpen(!this.stripOpen);
     });
-    this.root = h('div', { id: 'touch' }, joyzone, lookzone, actions, strip, this.switchBtn, this.playersBtn);
+    // Phase 4: ADJUST opens the defensive audible menu before the snap (under the PLAYERS menu).
+    this.adjustBtn = h('button', { id: 'btn-adjust', class: 'hidden' }, 'ADJUST');
+    this.adjustBtn.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      input.pressAdjust();
+    });
+    this.root = h('div', { id: 'touch' }, joyzone, lookzone, actions, strip, this.switchBtn, this.playersBtn, this.adjustBtn);
 
     // Primary button: hold state.
     this.primary.addEventListener('pointerdown', (e) => {
@@ -244,6 +251,13 @@ export class TouchControls {
     this.switchBtn.classList.toggle('hidden', !canSwitch);
     if (!selected) this.stripOpen = false;
     for (const [slot, btn] of this.defBtns) btn.classList.toggle('selected', slot === selected);
+  }
+
+  /** Phase 4: the ADJUST button (null hides it); `ready` false greys it out (no changes left / play clock too low). */
+  setAdjust(label: string | null, ready = true) {
+    this.adjustBtn.classList.toggle('hidden', !label);
+    if (label && this.adjustBtn.textContent !== label) this.adjustBtn.textContent = label;
+    this.adjustBtn.classList.toggle('disabled', !ready);
   }
 
   /** Phase 3d: the SWITCH edge button on its own (kick coverage). */

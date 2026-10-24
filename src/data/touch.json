@@ -27,9 +27,10 @@
     "aimHeight": 1.0
   },
   "switchButton": {
-    "left": 12,
+    "right": 12,
     "topPct": 42,
-    "size": 64
+    "size": 64,
+    "edgeZonePct": 10
   },
-  "_docPhase3d": "Phase 3d defense controls (ui/touch.ts, ui/tapSelect.ts). tapSelect: a tap on the field (shorter than maxMs ms, moving less than maxMove px) takes over the defender whose body (aimHeight yd above the turf, projected through the camera) is nearest the tap, within radius px. switchButton: SWITCH moved out of the action cluster (it sat in the defender's view) to the left screen edge: left px from the safe area, top at topPct % of the screen height, size px. The defender strip is folded into a PLAYERS menu (top right) and closes after a pick."
+  "_docPhase3d": "Phase 3d defense controls (ui/touch.ts, ui/tapSelect.ts). tapSelect: a tap on the field (shorter than maxMs ms, moving less than maxMove px) takes over the defender whose body (aimHeight yd above the turf, projected through the camera) is nearest the tap, within radius px. switchButton: SWITCH moved out of the action cluster (it sat in the defender's view) to the left screen edge (Phase 4: the right screen edge, outside the formation view): right px from the safe area, top at topPct % of the screen height, size px; edgeZonePct: the button must lie inside the outer edgeZonePct % of the screen width (tests/tapSelect.test.ts). The defender strip is folded into a PLAYERS menu (top right) and closes after a pick."
 }

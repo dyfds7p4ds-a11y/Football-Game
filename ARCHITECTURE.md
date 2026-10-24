@@ -12,7 +12,10 @@ penalties, pattern-match zones, surprise rushers and hot reads, audibles, NFL
 clock and game pace, returnable turnovers, down-and-distance CPU calls) and
 Phase 3d (receiver button states, kickoff touchback-or-return, sprint, toss
 balance, reach blocks and double teams, run fits, defense switch at the
-screen edge and tap-to-select, lineman body types, sideline down markers).
+screen edge and tap-to-select, lineman body types, sideline down markers) and
+Phase 4 (formation camera on defense, SWITCH at the right edge, defensive
+audibles, scramble balance, the green-window throw fix, graphics quality
+presets).
 
 ```
             ┌────────────┐   InputFrame    ┌──────────────────────────────────┐
@@ -38,6 +41,8 @@ screen edge and tap-to-select, lineman body types, sideline down markers).
                    │ 3c: audible, turnover returns   │     │
                    │ 3d: sprint, reach / combo, run  │     │
                    │ fits, toss edge, end-zone choice│     │
+                   │ 4: defAudible, scramble contain,│     │
+                   │ clean catch, incomplete reasons │     │
                    └───────────────┬─────────────────┘     │
                          read-only │                       │ read-only
                                    ▼                       ▼
@@ -47,6 +52,7 @@ screen edge and tap-to-select, lineman body types, sideline down markers).
                    │ Cutscene (Three.js)         │  │ 3d: slotState, tapSelect │
                    │ 3d: body builds, chain crew │  │ audio/ crowdMix (pure),  │
                    │                             │  │ CrowdAudio (Web Audio)   │
+                   │ 4: formation cam, graphics  │  │ 4: ADJUST menu, SWITCH R │
                    └─────────────────────────────┘  └──────────────────────────┘
 ```
 
@@ -58,8 +64,8 @@ screen edge and tap-to-select, lineman body types, sideline down markers).
 | `core/vec.ts` | 2D vector helpers | The sim works in the offense frame: x is lateral, y is yards from the offense's goal line. |
 | `data/` | Teams, rosters, ratings, depth charts, plays (route trees, screen designs), formations, difficulty presets, and every Phase 2 tunable | All JSON, typed in `data/types.ts` or next to the module that reads it. |
 | `play/routes.ts` | Route tree to waypoints | Named routes (`slant`, `post`, `wheel`, ...) plus depth and direction. "Outside" is worked out relative to the ball. **Phase 3a:** waypoints stay `sidelineMargin` inside the sideline; `boundRouteVelocity()` turns a receiver who keeps running past his last waypoint upfield near the sideline and never past the margin or the end line (`data/routes.json`). |
-| `play/throw.ts` | Throw timing math (pure) | Charge sets ball speed; distance from the sweet spot sets accuracy and a short/long bias; also handles lead targeting and the ballistic arc. Unchanged in Phase 2: the sweet spot is the Phase 1 one. |
-| `play/catch.ts` | Catch, drop, breakup and interception resolution (pure) | Phase 2 adds the in-phase defender bonus and screen-timing factors. Phase 3a: a candidate can carry a `timing` bonus (breakup, interception, reach) from the user's jump. **Phase 3b:** the pick share of a defender's hands-on plays (`intBase`, `noReceiverInt`; in-flight undercuts `undercutInt`) comes from `coverage.json`. |
+| `play/throw.ts` | Throw timing math (pure) | Charge sets ball speed; distance from the sweet spot sets accuracy and a short/long bias; also handles lead targeting and the ballistic arc. Unchanged in Phase 2: the sweet spot is the Phase 1 one. **Phase 4:** the solution says whether the release was `green`; inside the green the rating / distance scatter is scaled by `passing.json` `greenScatter`, and a clean green ball never scatters out of bounds. |
+| `play/catch.ts` | Catch, drop, breakup and interception resolution (pure) | Phase 2 adds the in-phase defender bonus and screen-timing factors. Phase 3a: a candidate can carry a `timing` bonus (breakup, interception, reach) from the user's jump. **Phase 3b:** the pick share of a defender's hands-on plays (`intBase`, `noReceiverInt`; in-flight undercuts `undercutInt`) comes from `coverage.json`. **Phase 4:** `isCleanBall()`: a green release with pressure at most `passing.json` `cleanCatch.maxPressure` and no defender within reach + contest of the landing is caught by a receiver in reach (no random drop); a drop reports whether it was contested. |
 | `play/interception.ts` | **Phase 3a.** Interception timing window (pure) | `jumpTiming(pressT, arriveT)` grades the user defender's JUMP by how close its peak is to the ball's arrival (perfect / good / mistimed / none); `timingEffect()` maps the grade to catch bonuses; `jumpHeight()` for the renderer. **Phase 3b:** `readGrade(margin)` grades the read (did the user's defender beat the receiver to the catch point?) and `combinedEffect()` adds it to the jump's effect. Tunables: `data/defenseControl.json` (also `rip`, the JUMP-while-blocked move). |
 | `play/blocking.ts` | **Phase 3b.** Offensive line (pure) | `assignProtection()` gives every pass blocker a responsibility: pass set (inside-out, a lineman slides at most `olReach` yd), double team (spare lineman), chip and release (a back on a `check` route chips the edge, then runs his route), and slide protection toward a recognized blitz. `planRunBlocks()` turns a run design's `scheme` (inside, zone, power, toss, draw) into run blocks with drive directions; gap schemes double the point of attack and climb to a linebacker. `blockQuality()` grades a matchup from ratings (-1..1) and `holdTime()` turns the grade into how long the block holds (no fixed roll; rep variance only around the matchup). `pickLane()` scores the design's gaps by how the blocks are going. Tunables: `data/blocking.json`. **Phase 3d:** `reachPenalty()` (zone / toss blocks on a man lined up playside: free up to `reach.easy` yd, linear to `reach.penalty` at `reach.max`, eased or worsened by the speed difference; beyond `max` the man is out of reach), scaled per scheme (`reach.schemeFactor`), `comboBonus()` (double team grade), `runBlockGrade()` (matchup - reach + combo). The planner never assigns a toss blocker to a man out of reach; toss blocks seal inside (drive -dir), zone still stretches playside. Tunables: `blocking.json` `reach`, `double`, `runFit`. |
 | `play/blitz.ts` | **Phase 3b.** Blitzes (pure) | Each blitz call gives its blitzers a path (edge, A gap, B gap, delayed) and a delay (`data/blitz.json`). `recognizeChance()` (path, line awareness): an unseen blitzer comes free. `arrivalTime()` for the path vs. the throw. `classifyBlitz()` turns what happened into sack / hurry / blocked / late. **Phase 3c:** `surpriseReaction()` (line and QB reaction to a rush nobody planned for: field of view, awareness; `blitz.json` `surprise`). |
@@ -74,7 +80,7 @@ screen edge and tap-to-select, lineman body types, sideline down markers).
 | `play/penalties.ts` | **Phase 2.** Foul definitions, flags and call-out text (pure) | `data/penalties.json`: false start, offside, holding (both sides), pass interference, roughing the passer, face mask. **Phase 3a:** every foul has a `severity`; `callFoul(current, candidate)` keeps the more severe one, so a play has at most one flag. Chances are scaled by difficulty `penaltyRate`. |
 | `play/officials.ts` | **Phase 2.** Five officials (R, U, H, L, B) | Line up behind the LOS / on the sidelines / deep, move with the play, keep clear of players, throw flags (the nearest official). |
 | `play/kicking.ts` | **Phase 2.** Kick meters and flights (pure) | Hold-to-fill power meter with a timing zone (difficulty `kickWindow`); ballistic flights; field goals judged against the uprights. **Phase 3b:** second layer `releaseKickAimed()`: after the power is locked, `aimNeedle()` sweeps and a tap locks it: sideways direction for kickoffs and field goals, launch angle for punts (`aimZone`, `aimToAngle`). `releaseKick()` (Phase 2, with the old punt angle sweep) stays for the CPU. **Phase 3c:** `timingPenalty()`, one curve for both layers: a bad power costs launch speed, a bad needle costs speed, flattens kickoffs / field goals and pushes them wide. Tunables: `data/specialTeams.json`. |
-| `play/sim.ts` | `PlaySim`: one play from snap to whistle | Fixed 60 Hz step: offense AI, defense AI (now with route reads, screen reads, rush lanes), blocking engagements, ball flight, tackles (short contact phase before the whistle), penalties (separate RNG stream), officials. Exposes `pocketCue`, `scrambling`, `flags`, `officials`. **Phase 3a:** the `userDefense` option, plus `userDefId` / `selectDefender()` / `userDefender`. `SimInput.defense` (stick + JUMP) moves the selected defender; every other defender stays on the CPU AI. The jump lunges toward the ball, the carrier or his man, is graded against the ball's arrival (`lastTiming`, `timing` event) and extends diving-tackle range. `keepInBounds()` holds every player without the ball inside the sideline. `addFoul()` applies the one-flag rule. A CPU QB's throw uses window scale 1 (the throw-window difficulty belongs to the user QB). **Phase 3b:** blocking uses `blocking.ts` (`blockStates()`, `blockRole()`; block variance on its own RNG stream), blitzers follow `blitz.ts` paths (`blitzReport()`, `hurry` / `pickup` events), run plays read lanes, `switchDefender()` and the rip move, `lastTiming.read`. **Phase 3c:** `zones` (`ZoneMatcher`) and `handoffs`; `surprise` / `surpriseReport()` / `qbAlert` / `hot` (rushers nobody planned for, spotted by behaviour); `audibleEdge`; turnover returns (`turnover`, `loose`, `returning`; `startReturn`, live fumbles with `fumbleRng` on its own seed, `controlPursuer`, `finishReturn`), result fields `fumble` / `returnYards`. **Phase 3d:** run fits (`runKeyAt`: box defenders key designed runs off the line's blocks, per scheme; a toss in the air is pursued at the back it goes to), reach blocks graded from the pre-snap alignment (`aligned`), combo push and drive in `updateEngagements`, toss contain man (`edgeSetter`, `edgePlan`), sideways tackle factor behind the line, toss open-field bend (`openFieldDirection`), user sprint (`sprint`, `SimInput.sprint`, fumble factor), `thrown` getter. Tunables: `data/runGame.json`, `blocking.json`, `sprint.json`. |
+| `play/sim.ts` | `PlaySim`: one play from snap to whistle | Fixed 60 Hz step: offense AI, defense AI (now with route reads, screen reads, rush lanes), blocking engagements, ball flight, tackles (short contact phase before the whistle), penalties (separate RNG stream), officials. Exposes `pocketCue`, `scrambling`, `flags`, `officials`. **Phase 3a:** the `userDefense` option, plus `userDefId` / `selectDefender()` / `userDefender`. `SimInput.defense` (stick + JUMP) moves the selected defender; every other defender stays on the CPU AI. The jump lunges toward the ball, the carrier or his man, is graded against the ball's arrival (`lastTiming`, `timing` event) and extends diving-tackle range. `keepInBounds()` holds every player without the ball inside the sideline. `addFoul()` applies the one-flag rule. A CPU QB's throw uses window scale 1 (the throw-window difficulty belongs to the user QB). **Phase 3b:** blocking uses `blocking.ts` (`blockStates()`, `blockRole()`; block variance on its own RNG stream), blitzers follow `blitz.ts` paths (`blitzReport()`, `hurry` / `pickup` events), run plays read lanes, `switchDefender()` and the rip move, `lastTiming.read`. **Phase 3c:** `zones` (`ZoneMatcher`) and `handoffs`; `surprise` / `surpriseReport()` / `qbAlert` / `hot` (rushers nobody planned for, spotted by behaviour); `audibleEdge`; turnover returns (`turnover`, `loose`, `returning`; `startReturn`, live fumbles with `fumbleRng` on its own seed, `controlPursuer`, `finishReturn`), result fields `fumble` / `returnYards`. **Phase 3d:** run fits (`runKeyAt`: box defenders key designed runs off the line's blocks, per scheme; a toss in the air is pursued at the back it goes to), reach blocks graded from the pre-snap alignment (`aligned`), combo push and drive in `updateEngagements`, toss contain man (`edgeSetter`, `edgePlan`), sideways tackle factor behind the line, toss open-field bend (`openFieldDirection`), user sprint (`sprint`, `SimInput.sprint`, fumble factor), `thrown` getter. Tunables: `data/runGame.json`, `blocking.json`, `sprint.json`. **Phase 4:** scramble containment (`scrambleAt`; rushers chase a scrambling QB with `pursuit()` and an edge rusher on his side keeps contain; `scrambleRead()`: spies, underneath and deep zones come up once he leaves the box or runs upfield; a QB running flat behind the line is slower; a throw while scrambling counts as extra pressure; `pocket.json` `scramble`), `incompleteReason` (why the last pass fell incomplete; logged with `PlaySim.debug`, on with `?debug`), the flight carries `green`, `pressure` and `aim`. |
 | `play/returnSim.ts` | **Phase 2.** `ReturnSim`: kickoff or punt from the kick to the whistle | Runs in the receiving team's frame. User or CPU returner (movement + dash), blockers vs. coverage lanes, touchbacks, downed punts, return TDs. Same read-only surface as `PlaySim` for the renderer. **Phase 3b:** `userCovers`: on his own kicks the user plays a cover man (`coverId`, `ReturnInput.cover`: stick, DIVE = tackle attempt with longer range, RIP when blocked, SWITCH = `switchCover()`); the CPU plays the other ten. **Phase 3d:** a kickoff the returner catches in the end zone is live: `endZoneDecision`, `canTouchback`, `ReturnInput.touchback` (take a knee), CPU kneels from `endZone.cpuKneelDepth`; a ball nobody touches there stays a touchback (`specialTeams.json` `endZone`). |
 | `game/state.ts` | `GameState`, plain serializable data | Phase 2 adds `pendingKickoff` and `crowd`. **Phase 3b:** `pendingConversion`, `conversionTry`, `overtime`. |
 | `game/rules.ts` | Downs, scoring, turnovers, Phase 1 instant punts/field goals, delay of game | Pure: `(GameState, play) → GameState`. Scores, safeties and the second half now set `pendingKickoff`. **Phase 3b:** `scoreTouchdown()` (6 points, then the try), `finishTry()`, two-point plays (`conversionTry`); `startPossession()` routes every possession change through overtime when it is on. |
@@ -88,18 +94,20 @@ screen edge and tap-to-select, lineman body types, sideline down markers).
 | `game/clock.ts`, `game/flow.ts` | Game clock, play clock, quarters, half time, game over. **Phase 3c:** NFL stop rules (`stopsClock(reason, clock)`), two-minute warning (`warned`), snap timing (`paceRunoff()`, `pacedSnap()`), tunables `PACE` from `data/pace.json` | **Phase 3b:** `checkQuarter()` sends a tie after four quarters to overtime (`brk: 'overtime'`), never ends a quarter before a pending try, and treats overtime as untimed. |
 | `game/cpuDrive.ts` | Simulated CPU possessions. **Phase 3c:** pace runoff between snaps, `callMix()` play mix, `onPlay` hook for the game-length probe | Phase 2: crowd edge (sacks, false starts), crowd meter updates, and `interactivePunts` stops the drive at a punt so the user can return it. **Phase 3b:** plays the try after a touchdown, no punts in overtime, CPU timeouts late in a half. |
 | `input/` | `InputManager` merges touch, keyboard and gamepad. **Phase 3c:** `joystick.ts` is a fixed stick (layout from `data/touch.json`: `joystickLayout`, `actionsRect`) | Phase 2: `slotHeld` (hold a receiver button = charge the throw), `secondaryPressed` (slide / dash), `anyPressed` (skip cutscenes). **Phase 3d:** `sprintHeld` (touch SPRINT, C, pad R3) and `tap` (a short tap on the field, screen px). |
-| `render/view.ts` | `SceneView`: renderer, lights, cameras | Draws a `PlaySim` or a `ReturnSim`, the kick setup and field goal flights, officials, flags, receiver marker rings; projects receivers to the screen for edge arrows. Sun with soft shadows follows the play. **Phase 3a:** the broadcast camera (default) sits higher and further back on a fixed field axis with a narrower FOV and never rotates during scrambles; officials right under it are hidden. The defense camera sits behind the user's cornerback (`updateDefenseCamera`). **Phase 3b:** per-unit presets (`camera.json` `defenseUnits`), the selected defender carries his label, and a coverage camera behind the user's cover man on kicks. CPU-offense sims are drawn frame-flipped, with CB labels, a ring under the controlled CB and jump height. Tunables: `data/camera.json`. |
+| `render/view.ts` | `SceneView`: renderer, lights, cameras | Draws a `PlaySim` or a `ReturnSim`, the kick setup and field goal flights, officials, flags, receiver marker rings; projects receivers to the screen for edge arrows. Sun with soft shadows follows the play. **Phase 3a:** the broadcast camera (default) sits higher and further back on a fixed field axis with a narrower FOV and never rotates during scrambles; officials right under it are hidden. The defense camera sits behind the user's cornerback (`updateDefenseCamera`). **Phase 4:** the default defense camera is the formation view (`updateFormationCamera`, `camera.json` `formation`): high behind the whole defense, follows the ball along the field axis; the Phase 3a player camera is the PLAYER setting. `setQuality()` applies a graphics preset; a rim light follows the camera. **Phase 3b:** per-unit presets (`camera.json` `defenseUnits`), the selected defender carries his label, and a coverage camera behind the user's cover man on kicks. CPU-offense sims are drawn frame-flipped, with CB labels, a ring under the controlled CB and jump height. Tunables: `data/camera.json`. |
 | `render/fieldMesh.ts` | Field texture, sidelines, goalposts, markers | Natural turf (mowing stripes, grain, wear), worn paint. **Phase 3d:** orange sideline chain crew: down box at the LOS showing the down, chain poles at the series start and the line to gain, the chain (`setMarkers(los, firstDown, down)`, `data/markers.json`). |
 | `render/stadium.ts` | **Phase 2.** Stadium bowl | Two tiers, roof, light rigs, podium wall with the players' tunnel, ~14k instanced spectators animated in the vertex shader from one `uEnergy` uniform. **Phase 3a:** the tunnel is built into the west stand: an open-mouthed passage with a portal and a lit door, and nothing closes the field end. Curved corner stands (tiers, spectators, concourse, facade, roof) close the bowl. |
 | `render/playerMesh.ts` | Player and official figure | Rounded rig with contact poses (shoulder hit, wrap, stumble, hip turn, slide). **Phase 3d:** `buildFor(position)` / `setBuild()`: per-position proportions (width, chest depth, gut, thighs, arms, leg length, height) from `data/bodies.json`; linemen are broad and heavy-legged. |
 | `render/cutscene.ts` | **Phase 2.** Intro director | Tunnel, team intro, coin toss / kickoff setup; only moves meshes and the camera, never game state. |
 | `render/coords.ts` | Sim frame ↔ world | Phase 2 adds a frame flip so sims in the CPU's frame (a CPU return) draw in the user's world. |
-| `ui/` | DOM overlays. **Phase 3d:** `TouchControls` gains SPRINT (hold, fill = stamina), the SWITCH edge button (`switchButton`), the PLAYERS menu around the defender strip and the tap pick in the look zone (now full width); TOUCH BACK uses the secondary button. **Phase 3c:** `audible.ts` (the AUDIBLE picker), HOT receiver button, turnover banners, two-minute warning | HUD gains the crowd meter, pocket cue, receiver edge arrows, penalty call-out and kick meter; `intro.ts` is the cutscene overlay. **Phase 3a:** `PlaycallScreen.showDefense()` (coverage cards plus the coordinator's call), the Sound ON / MUTE and CPU drives settings. **Phase 3b:** the defender strip (all eleven, DL · LB · DB) and SWITCH (secondary button) in `TouchControls`; the HUD's large aim bar and step indicator for the kick meter, both teams' timeouts as dots in the score bug, OT label and the untimed clock; punt / field goal disabled on tries, punts disabled in overtime. |
+| `ui/` | DOM overlays. **Phase 4:** SWITCH moved to the right screen edge (`switchButtonRect()` in `input/joystick.ts`, `touch.json` `switchButton.right`), the ADJUST button under the PLAYERS menu (Q on the keyboard) and the ADJUST menu (`AudibleMenu` is generic now; `#audible-def` sits left of the edge buttons); settings Defense camera (FORMATION / PLAYER) and Graphics quality (LOW / MEDIUM / HIGH). **Phase 3d:** `TouchControls` gains SPRINT (hold, fill = stamina), the SWITCH edge button (`switchButton`), the PLAYERS menu around the defender strip and the tap pick in the look zone (now full width); TOUCH BACK uses the secondary button. **Phase 3c:** `audible.ts` (the AUDIBLE picker), HOT receiver button, turnover banners, two-minute warning | HUD gains the crowd meter, pocket cue, receiver edge arrows, penalty call-out and kick meter; `intro.ts` is the cutscene overlay. **Phase 3a:** `PlaycallScreen.showDefense()` (coverage cards plus the coordinator's call), the Sound ON / MUTE and CPU drives settings. **Phase 3b:** the defender strip (all eleven, DL · LB · DB) and SWITCH (secondary button) in `TouchControls`; the HUD's large aim bar and step indicator for the kick meter, both teams' timeouts as dots in the score bug, OT label and the untimed clock; punt / field goal disabled on tries, punts disabled in overtime. |
 | `audio/crowdMix.ts` | **Phase 3a.** What the crowd sounds like (pure) | `layerGains(meter)` gives murmur, chatter and chant levels. `reactionTo(play)` / `reactionToFlag()` work from the home crowd's view: cheers on big plays and stops, boos on flags against the home team, a short roar on home touchdowns and takeaways, silence on home turnovers and opponent scores. Tunables: `data/audio.json`. |
 | `audio/crowdAudio.ts` | **Phase 2, rewritten in 3a.** Synthesized stadium sound | Web Audio, no files. A crowd bus carries murmur, formant chatter and a stomp-stomp-clap chant, with volume following the meter. Cheer, roar and boo voices sit on top; silence ducks the bus and cuts the voices. Whistle and kick thump bypass the bus. Unlocked by the first tap (iOS); mute = the Sound setting. |
 | `play/sprint.ts` | **Phase 3d.** Sprint (pure) | `stepSprint()` (stamina 0..1 per play: drain while sprinting, recover otherwise, restart threshold after running dry), `sprintSpeed()` (fraction of top speed), `sprintFumbleFactor()` (x`fumbleMin` fresh to x`fumbleMax` exhausted, plus a short afterglow). Tunables: `data/sprint.json`. |
 | `ui/slotState.ts` | **Phase 3d.** Receiver button looks (pure) | `slotDisplay()` gives neutral / selected / hot / blocking / invalid; `invalidReason()` (red only for: a blocker pressed, a press after the throw, an eligible receiver out of throwing range); `HotLatch` holds the hot read for `hotMinHold` s so it never flickers. Tunables: `touch.json` `slotState`. |
 | `ui/tapSelect.ts` | **Phase 3d.** Tap-to-select defenders (pure) | `pickAtTap()` (nearest on-screen projected defender within `radius` px), `isTap()` (short, small-movement touch vs a look drag). Tunables: `touch.json` `tapSelect`. |
+| `play/defAudible.ts` | **Phase 4.** Defensive audibles (pure) | `defensiveOptions()` (2-3 coverage shells and 2-3 blitz looks, never the current call; `data/defAudibles.json` `shells` / `blitzLooks`), `defAudibleCost(k)`, `lookClass()` (blitz / man / cover2 / cover3), `offenseCounter()` (the CPU offense's answer: its play if it already beats the look, else the first play of its same-formation audible list, `audibles.json` `options`, that is in `counters[look]`) and `DefAudibleSession` (count, play-clock spent, `canAdjust(clock)`, the offense's re-read after `cpuOffense[difficulty].react` with chance `read`). |
+| `render/graphics.ts` | **Phase 4.** Graphics settings (pure) | `qualityPreset()` (LOW / MEDIUM / HIGH from `data/graphics.json`: pixel-ratio cap, shadows, shadow map size, soft shadows, rim light, helmet gloss, fabric texture) and `naturalUniform()` (team colors as dyed fabric: less saturated, darker; white gets warm). |
 | `app.ts` | Glue: phase machine, fixed-step accumulator, input → sim mapping, gaze | Owns the only mutable `GameState` reference. **Phase 3b:** `startConversion()` (user choice modal / CPU chart; the kick uses the field goal meter, the two-point play is a normal snap or a defensive snap), the kick's `stage` (power, then aim), cover-man input on returns, SWITCH and the defender strip on defense, the overtime break, CPU timeouts before CPU snaps. **Phase 3a:** CPU possessions run `enterDefense()` (fourth-down call, defensive play call) → `callDefense()` (CPU play, `PlaySim` with `userDefense`, `CpuQB`) → `presnapDefense()` (auto snap) → `liveDefense()`; `whistle()` is shared with offense. No penalty chains: the first play-clock expiry after a flagged play only resets the clock. |
 
 ### Determinism
@@ -115,6 +123,11 @@ screen edge and tap-to-select, lineman body types, sideline down markers).
 - **Phase 3d:** run fits (key reads, misreads) and the toss contain man draw
   from the block RNG stream at the snap, on run plays only, so pass plays are
   unchanged; the sprint is deterministic (input only).
+- **Phase 4:** defensive audibles draw from their own RNG (seeded from the
+  snap's sim seed); a rebuilt snap (after a change or the offense's re-read)
+  reuses the same sim and CPU QB seeds, so the RNG order of `callDefense()` is
+  unchanged. A clean green catch skips the catch roll, so later rolls in that
+  play shift (results of non-clean plays are unchanged in distribution).
 - Rendering interpolates `prevPos`/`pos`, so frame rate never affects the
   simulation. After the whistle the sim clock keeps running for presentation
   only (flags landing, players getting up).
@@ -228,6 +241,33 @@ Phase 3d adds:
   viewports.
 - `tests/audible.test.ts`: the audible edge comparison now uses 30 seeds (was
   12): the toss has real variance now.
+
+Phase 4 adds:
+- `tests/tapSelect.test.ts`: **switch position**: the SWITCH button lies in
+  the right-edge zone (`switchButton.edgeZonePct`), above the action cluster,
+  below the PLAYERS menu, away from the stick, on four iPad viewports.
+- `tests/defAudible.test.ts`: **audible reaction**: options (2-3 shells, 2-3
+  blitz looks), Cover 1 -> Cover 3 changes the assignments in the sim, play-clock
+  costs and limits, offense counters, the CPU offense changes its play exactly
+  at its reaction time (never before), Hard recognizes more than Easy, a snap
+  before the re-read keeps the old play.
+- `tests/scrambleBalance.test.ts`: **scramble corridors** (`balance.json`
+  `scramble`): yards per scramble and TFL share at Normal over every scripted
+  style x every CPU coverage; a flat run gains at most `flatMaxAvg` and less
+  than a scramble through the lanes the line opens.
+- `tests/greenWindow.test.ts`: **green-window completion**: green releases
+  (offsets up to 0.9 half-widths) to an uncovered receiver complete in 100 %
+  of 288 seeded runs (8 concepts / targets x 12 seeds x 3 difficulties); a
+  timing miss, pressure or a defender in the contest radius can still make it
+  incomplete; incompletes carry a reason.
+- `tests/graphics.test.ts`: presets ordered by cost, fabric colors.
+- `tests/pocket.test.ts`: the slide test now takes the first seed where the
+  QB gets 2 yd past the line (the defense contains scrambles now).
+- `tests/screen.test.ts`: the late-vs-on-time pick comparison uses 160 snaps
+  (was 80; picks are rare and the clean-catch rule shifts the RNG order).
+
+`BALANCE=scramble npx vitest run --silent=false` prints yards per scramble,
+TFL and 15+ share per style and coverage.
 
 Stat probes: `JUMP_STATS=1`, `QB_STATS=1` or `BALANCE_STATS=1 npx vitest run
 tests/<file> --silent=false`. `BALANCE=gamelength npx vitest run
@@ -617,6 +657,81 @@ prints completion / interception / sack rates per concept and target.
   poles 2.3 yd tall at the series start (line to gain - 10) and the line to
   gain, the chain between them; goal to go shows only the down box.
 
+## Phase 4 defaults (decisions that were not specified)
+
+- **SWITCH at the right edge**: 12 px from the right safe-area edge, top at
+  42 % of the screen height, 64 px. It must lie inside the outer 10 % of the
+  width (`edgeZonePct`); on the four tested iPad viewports it sits between the
+  PLAYERS / ADJUST buttons and the action cluster. Phase 3d had it at the left
+  edge.
+- **Formation camera** (default on defense; setting Defense camera FORMATION /
+  PLAYER): 16 yd up, at max(ball + 26 yd, deepest defender + 16 yd) behind the
+  line on the defense's side, looking 4 yd past the ball; laterally 60 % of the
+  ball's offset from the middle of the field plus 15 % of the user defender's
+  offset from the ball; it never rotates. All eleven defenders, the line and
+  the receivers are in frame at 1180x820 (checked in headless Chromium). Tap
+  selection and the stick mapping are unchanged (the camera still looks at the
+  offense, stick up = toward the line).
+- **Defensive audibles.** ADJUST (button under PLAYERS, Q) before a CPU snap
+  opens a menu with the other coverage shells (Cover 1 / Cover 3 / Cover 2 /
+  2-Man, up to 3) and blitz looks (Fire Zone / Cover 1 LB Blitz / Cover 0, up
+  to 3); 1-5 or a tap picks. At most 2 changes per snap; play-clock cost 3 s,
+  then 5 s; a change is refused when the play clock would drop below 6 s. The
+  game-clock runoff at the snap is computed from the play clock before the
+  changes, so an adjustment never saves game time. While the menu is open the
+  auto-snap waits; after a change the offense needs at least 0.6 s to snap.
+  The CPU offense re-reads after 1.6 / 1.1 / 0.7 s (Easy / Normal / Hard) and
+  recognizes the look with chance 0.35 / 0.6 / 0.85; then it checks to the
+  first play of its same-formation audible list that beats the look (blitz:
+  quick game / screens / draw; man: mesh, slants, crossers; Cover 2: smash,
+  verticals, inside runs; Cover 3: curl-flat, levels, outs, outside runs), or
+  keeps a play that already beats it. A snap before the re-read catches the
+  offense in its old play. Allowed on two-point tries too.
+- **Scramble balance.** Rushers chase a scrambling QB with a pursuit angle
+  (before: straight at him); an edge rusher on the side he runs to aims 1.5 yd
+  outside him. Spies (after 0.3 s), underneath zones (0.5 s) and deep zones
+  (0.6 s), plus 0.6 x reaction, leave their zones once he is more than 4.5 yd
+  from the ball or runs upfield faster than 3 yd/s; man defenders stay on their
+  man until he crosses the line. A QB running straight across the field behind
+  the line loses 7 % of his speed; tackle factor on a scrambling QB 1.5 (was
+  1.3); a throw while scrambling adds 0.3 pressure. Measured at Normal
+  (`BALANCE=scramble`, four_verts, 7 coverages x 40 seeds, start time varied
+  per seed), before -> after:
+
+  | Style | yd / scramble | TFL | 15+ |
+  | --- | --- | --- | --- |
+  | Flat run to the sideline, then up | 15.8 -> 2.5 | 0 % -> 41 % | 50 % -> 8 % |
+  | Reads the lanes between unblocked rushers | 11.0 -> 7.9 | 5 % -> 14 % | 34 % -> 22 % |
+  | Straight up the middle | 6.9 -> 5.3 | 21 % -> 21 % | 24 % -> 15 % |
+  | All styles | about 12 -> 5.2 | about 5 % -> 26 % | |
+
+  Corridor (`balance.json` `scramble`): all styles 3-6 yd per scramble, TFL
+  15-35 %; flat runs at most 4 yd and 12 % of 15+. The TFL band is wider than
+  the 10-25 % first planned because a scramble starts 7-9 yd behind the line
+  and any tackle there counts as a loss (the NFL books most of those as sacks).
+- **Green-window throws (bug fix).** Two causes: (1) the catch roll
+  (`catchProbability`, 0.55 + 0.42 x catching, x 0.8-1 for quality, minus a
+  "hot ball" term) dropped many perfectly timed balls to receivers with nobody
+  within 36 yd (118 of 288 seeded green throws in the new test); (2) the
+  rating / distance scatter could carry a green ball out of bounds near the
+  sideline. Now a clean ball (green release, pressure <= 0.35, no defender
+  within 2.8 yd = reach + contest of the landing) is caught by a receiver in
+  reach, the green scatter from rating and distance is x0.35, and a clean
+  green ball stays 0.5 yd inside the sideline / end line. Screens thrown early
+  or late keep their timing factor. Side effect: CPU QB at Normal 48.7 % ->
+  50.2 % completions (sacks unchanged at 12 %). Debug mode (`?debug`) logs
+  every incomplete as `[incomplete] { reason, green, quality, pressure, miss,
+  targetDist, defenderDist }`; reasons: tipped, defended, drop, contestedDrop,
+  outOfReach, outOfBounds.
+- **Graphics.** Default MEDIUM: pixel ratio capped at 1.5 (as before), 1024
+  shadow map with PCF (was 2048), rim light, glossy helmets, knit fabric. HIGH:
+  ratio 2, 2048 soft shadows. LOW: ratio 1, no shadows, no rim light, matte
+  helmets, no fabric. Lighting: hemisphere 1.0 (was 1.25), sun 2.5 (was 2.1),
+  warmer sun, exposure 1.0 (was 1.05) for more modelling on the players;
+  contact shadow 0.32 (was 0.22). Team colors are drawn x0.82 saturation and
+  x0.93 lightness; white / cream gets a little warmth. The Soft shadows setting
+  still turns shadows off on any preset.
+
 ## Overtime rule (NCAA, 2021 book), as implemented
 
 1. A game tied after four quarters goes to overtime. There are no kickoffs,
@@ -693,6 +808,30 @@ Phase 3b hooks:
 - **HUD art.** The kick meter's second layer (`#aimbar`), the defender strip
   (`#defstrip`) and the timeout dots are plain DOM with CSS classes; they can
   be restyled or replaced by canvas art without changing `Hud`'s API.
+
+### Phase 4 extension points
+
+- **More defensive calls.** `defAudibles.json` `shells` / `blitzLooks` list
+  call ids; a new call in `DEFENSE_CALLS` shows up in ADJUST once it is listed.
+  Shading / press (moving the selected defender pre-snap) can hang off
+  `presnapDefense()` next to the ADJUST handling.
+- **Smarter CPU offense.** `offenseCounter()` takes the look class; per-team
+  counters (style) or a read of individual leverage would replace the
+  `counters` table. The CPU offense could also slide protection toward a
+  blitz look with `assignProtection()`.
+- **Hot routes against a look.** `DefAudibleSession.play` is the CPU's
+  current play; a hot-route variant (one receiver's route changes) would need
+  `PlaySim.routes` editable before the snap.
+- **Scramble.** `SCRAMBLE` (pocket.json) holds every scramble knob; a QB
+  scrambling rating can scale `flatSlow` and the tackle factor. The CPU QB
+  still never scrambles on purpose; `scrambleRead()` would work for it
+  unchanged.
+- **Incompletion analytics.** `PlaySim.incompleteReason` can drive a replay
+  caption ("overthrown", "broken up") or a coaching tip after a miss.
+- **Graphics.** `graphics.json` presets are plain data: crowd density
+  (`InstancedMesh.count`), antialias (needs a renderer rebuild) and a post
+  pass are the next knobs. `naturalUniform()` is the single place where team
+  colors become materials.
 
 ### Phase 3d extension points (gameplay)
 
@@ -781,6 +920,34 @@ Phase 3b hooks:
   any sim changes. Returns, coverage units, the CPU QB and every defender the
   user controls use the same lookup.
 
+## Known gaps (Phase 4)
+
+- **Not tested on a physical iPad.** Checked by unit tests, type check, build
+  and headless Chromium at 1180x820 (formation camera, ADJUST menu, a
+  defensive snap with an adjustment going live, all three graphics presets);
+  the software renderer runs at about 0.15x speed, so frame rate on iPad is
+  not measured. LOW is the fallback for older iPads.
+- **Formation camera**: a deep safety or a wide receiver near the bottom
+  corners can sit under the joystick or the READY button; while the ADJUST
+  menu is open it covers the right third of the field (the auto-snap waits
+  meanwhile). On a long run the camera follows the ball, so the far side of
+  the defense leaves the frame.
+- **Defensive audibles**: whole-call changes only (no individual shading,
+  press, or hot routes), the CPU offense never audibles on its own, and
+  counters are a fixed table per look class, not per team. The ADJUST menu
+  shows up to 6 options; keyboard 1-5 reaches the first five (touch reaches
+  all six).
+- **Scramble balance** is measured with scripted scramblers; a human who
+  mixes steps up, lanes and late escapes will land between the "lanes" and
+  "all styles" numbers. The TFL corridor is 15-35 % (wider than planned, see
+  defaults). The CPU QB still never scrambles.
+- **Clean-catch rule** is binary at the contest radius (2.8 yd): a defender at
+  2.9 yd does not affect the catch, at 2.7 yd the old contested model applies.
+  Pressure is the smoothed pocket pressure at the release (a hurry still
+  forces 0.85).
+- **Graphics**: first pass only: no new player models, no animation work, no
+  crowd density setting, antialias always on.
+
 ## Known gaps (Phase 3d)
 
 - **Run game is not balanced per play.** HB Dive still averages about 8 yd and
@@ -808,8 +975,8 @@ Phase 3b hooks:
   measure.
 - **Body builds are visual only**: collisions, block grades and speed do not
   use body size; the CPU-side builds are per position, not per player.
-- **Defense UI was checked by unit tests and type check, not in a played
-  defensive snap** in the headless browser (the software-rendered game was too
+- (Phase 4: SWITCH is at the right edge now.) **Defense UI was checked by
+  unit tests and type check, not in a played defensive snap** in the headless browser (the software-rendered game was too
   slow to reach a CPU possession); offense, kickoff return and the TOUCH BACK
   button were checked in headless Chromium (1180x820, 820x1180). Still not
   tested on a physical iPad.

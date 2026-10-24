@@ -63,6 +63,8 @@ button:disabled { opacity: 0.45; }
 /* Phase 3b: every defender selectable; grouped DL | LB | DB, top right under the score bug */
 /* Phase 3d: SWITCH at the left screen edge (out of the defender's view), PLAYERS menu top right */
 #btn-switch { position: fixed; z-index: 4; border-radius: 12px; padding: 0; font-size: 11px; background: rgba(233, 196, 106, 0.85); }
+#btn-adjust { position: fixed; z-index: 5; top: calc(132px + var(--safe-t)); right: calc(8px + var(--safe-r)); min-height: 40px; padding: 4px 10px; font-size: 12px; border-radius: 8px; background: rgba(233, 196, 106, 0.85); }
+#btn-adjust.disabled { opacity: 0.4; }
 #btn-players { position: fixed; z-index: 5; top: calc(84px + var(--safe-t)); right: calc(8px + var(--safe-r)); min-height: 40px; padding: 4px 10px; font-size: 12px; border-radius: 8px; }
 #defstrip { position: fixed; top: calc(132px + var(--safe-t)); right: calc(8px + var(--safe-r)); z-index: 5; display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; max-width: calc(100vw - 16px); }
 #defstrip .defgroup { display: flex; gap: 4px; }
@@ -202,14 +204,16 @@ button:disabled { opacity: 0.45; }
 #intro .bars { position: fixed; left: 0; right: 0; height: 7vh; background: #000; }
 #intro .bars.top { top: 0; } #intro .bars.bottom { bottom: 0; }
 
-/* ---------- Phase 3c: audible picker (above the action cluster) */
-#audible { position: fixed; right: calc(18px + var(--safe-r)); bottom: calc(330px + var(--safe-b)); z-index: 6; background: rgba(16, 20, 24, 0.92);
+/* ---------- Phase 3c: audible picker (above the action cluster). Phase 4: the defensive ADJUST menu sits left of the edge buttons. */
+#audible, #audible-def { position: fixed; right: calc(18px + var(--safe-r)); bottom: calc(330px + var(--safe-b)); z-index: 6; background: rgba(16, 20, 24, 0.92);
   border: 3px solid var(--ink); border-radius: 8px; padding: 8px; min-width: 240px; font-family: var(--font); }
-#audible .aud-head { display: flex; justify-content: space-between; align-items: center; font-size: 10px; color: var(--accent); margin-bottom: 6px; }
-#audible .aud-close { min-height: 36px; min-width: 36px; padding: 0; }
-#audible .aud-list { display: flex; flex-direction: column; gap: 6px; }
-#audible .aud-opt { display: flex; gap: 10px; align-items: center; text-align: left; font-size: 11px; min-height: 48px; }
-#audible .aud-key { color: var(--accent); }
-#audible .aud-cat { margin-left: auto; font-size: 8px; opacity: 0.7; }
-#audible .aud-info { font-size: 8px; margin-top: 6px; opacity: 0.8; }
-@media (max-height: 600px) { #audible { bottom: auto; top: calc(70px + var(--safe-t)); } }
+#audible .aud-head, #audible-def .aud-head { display: flex; justify-content: space-between; align-items: center; font-size: 10px; color: var(--accent); margin-bottom: 6px; }
+#audible .aud-close, #audible-def .aud-close { min-height: 36px; min-width: 36px; padding: 0; }
+#audible .aud-list, #audible-def .aud-list { display: flex; flex-direction: column; gap: 6px; }
+#audible .aud-opt, #audible-def .aud-opt { display: flex; gap: 10px; align-items: center; text-align: left; font-size: 11px; min-height: 48px; }
+#audible .aud-key, #audible-def .aud-key { color: var(--accent); }
+#audible .aud-cat, #audible-def .aud-cat { margin-left: auto; font-size: 8px; opacity: 0.7; }
+#audible .aud-info, #audible-def .aud-info { font-size: 8px; margin-top: 6px; opacity: 0.8; }
+@media (max-height: 600px) { #audible, #audible-def { bottom: auto; top: calc(70px + var(--safe-t)); } }
+
+#audible-def { right: calc(96px + var(--safe-r)); bottom: auto; top: calc(84px + var(--safe-t)); }

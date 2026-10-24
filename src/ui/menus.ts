@@ -73,6 +73,8 @@ export function settingsPanel(s: Settings, onChange: (s: Settings) => void, inGa
     row('Quarter length', segmented([3, 5, 8, 12, 15].map((m) => ({ value: m, label: `${m} MIN` })), s.quarterMinutes, (v) => set('quarterMinutes', v)),
       inGame ? 'Applies to the next game.' : ''),
     row('Camera', segmented([{ value: 'behindQB', label: 'BROADCAST' }, { value: 'firstPerson', label: 'QB EYES' }] as const, s.cameraMode, (v) => set('cameraMode', v))),
+    row('Defense camera', segmented([{ value: 'formation', label: 'FORMATION' }, { value: 'player', label: 'PLAYER' }] as const, s.defenseCamera, (v) => set('defenseCamera', v)),
+      'FORMATION: behind the whole defense; tap a defender to take him over. PLAYER: behind your defender.'),
     row('Show routes before snap', segmented([{ value: 1, label: 'ON' }, { value: 0, label: 'OFF' }], s.showRoutes ? 1 : 0, (v) => set('showRoutes', v === 1))),
     row('Retro pixels', segmented([{ value: 1, label: 'ON' }, { value: 0, label: 'OFF' }], s.retroPixels ? 1 : 0, (v) => set('retroPixels', v === 1)),
       'Chunky low-res rendering; also faster on older iPads.'),
@@ -85,6 +87,8 @@ export function settingsPanel(s: Settings, onChange: (s: Settings) => void, inGa
     row('Intro cutscenes', onOff('intro'), 'Tunnel, team intro and coin toss before the opening kickoff. Tap to skip.'),
     row('Sound', segmented([{ value: 1, label: 'ON' }, { value: 0, label: 'MUTE' }], s.sound ? 1 : 0, (v) => set('sound', v === 1)), 'Stadium atmosphere: volume follows the crowd meter; cheers, boos, roars.'),
     row('Soft shadows', onOff('shadows'), 'Turn off for more speed on older iPads.'),
+    row('Graphics quality', segmented([{ value: 'low', label: 'LOW' }, { value: 'medium', label: 'MEDIUM' }, { value: 'high', label: 'HIGH' }] as const, s.graphics, (v) => set('graphics', v)),
+      'LOW: no shadows, no rim light, plain materials, native resolution capped at 1x (older iPads). HIGH: sharper image and soft shadows (newest iPads).'),
   );
 }
 

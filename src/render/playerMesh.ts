@@ -8,6 +8,7 @@ import * as THREE from 'three';
 import BODIES from '../data/bodies.json';
 import type { TeamColors } from '../data/types';
 import type { ContactAnim } from '../play/sim';
+import { GRAPHICS, naturalUniform, type QualityPreset } from './graphics';
 
 const numberCache = new Map<string, THREE.CanvasTexture>();
 
@@ -108,7 +109,30 @@ export function buildFor(position: string): Build {
   const b = (BODIES as unknown as Record<string, Partial<Build>>)[position];
   return b && typeof b === 'object' ? { ...NEUTRAL, ...b } : NEUTRAL;
 }
-const shadowMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.22, depthWrite: false });
+const shadowMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: GRAPHICS.lighting.contactShadow, depthWrite: false });
+
+/** Phase 4: a fine knit pattern (white-ish, multiplied with the team color), shared by every jersey and pants. */
+let fabric: THREE.CanvasTexture | null = null;
+function fabricTexture(): THREE.CanvasTexture {
+  if (fabric) return fabric;
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const g = c.getContext('2d')!;
+  g.fillStyle = '#f4f4f4';
+  g.fillRect(0, 0, 64, 64);
+  for (let y = 0; y < 64; y += 2) {
+    for (let x = 0; x < 64; x += 2) {
+      const v = 228 + ((x * 7 + y * 13) % 5) * 5 + ((y >> 1) % 2) * 6;
+      g.fillStyle = `rgb(${v},${v},${v})`;
+      g.fillRect(x, y, 2, 1);
+    }
+  }
+  fabric = new THREE.CanvasTexture(c);
+  fabric.wrapS = fabric.wrapT = THREE.RepeatWrapping;
+  fabric.repeat.set(3, 3);
+  fabric.colorSpace = THREE.SRGBColorSpace;
+  return fabric;
+}
 const maskMat = new THREE.MeshLambertMaterial({ color: 0x8c9196 });
 const sockMat = new THREE.MeshLambertMaterial({ color: 0xf2f2f2 });
 const shoeMat = new THREE.MeshLambertMaterial({ color: 0x1c1c1c });
@@ -130,7 +154,9 @@ export class PlayerMesh {
   private armR: Limb;
   private jersey = new THREE.MeshLambertMaterial();
   private pants = new THREE.MeshLambertMaterial();
-  private helmetMat = new THREE.MeshLambertMaterial();
+  /** Phase 4: Phong so helmets can carry a highlight (matte on LOW: no specular). */
+  private helmetMat = new THREE.MeshPhongMaterial({ specular: 0x000000, shininess: 0 });
+  private official: boolean;
   private skin = new THREE.MeshLambertMaterial();
   private numBack = new THREE.MeshBasicMaterial();
   private numFront = new THREE.MeshBasicMaterial();
@@ -151,6 +177,7 @@ export class PlayerMesh {
 
   constructor(readonly kind: FigureKind = 'player') {
     const official = kind === 'official';
+    this.official = official;
     const hips = 0.98;
     this.body.position.y = hips;
     this.root.add(this.body);
@@ -270,6 +297,19 @@ export class PlayerMesh {
   }
 
   /** Real-time shadows on/off (set from the graphics setting). */
+  /** Phase 4: graphics quality: helmet gloss and the fabric texture (players only; officials keep their stripes). */
+  setQuality(q: QualityPreset) {
+    this.helmetMat.specular.setHex(q.glossyHelmets ? 0x3a3a3a : 0x000000);
+    this.helmetMat.shininess = q.glossyHelmets ? 55 : 0;
+    if (this.official) return;
+    const map = q.fabric ? fabricTexture() : null;
+    for (const m of [this.jersey, this.pants]) {
+      if (m.map === map) continue;
+      m.map = map;
+      m.needsUpdate = true;
+    }
+  }
+
   setCastShadow(on: boolean) {
     this.body.traverse((o) => {
       if ((o as THREE.Mesh).isMesh) o.castShadow = on;
@@ -299,8 +339,9 @@ export class PlayerMesh {
   }
 
   setLook(colors: TeamColors, number: number, skinTone: number) {
-    this.jersey.color.set(colors.primary);
-    this.pants.color.set(colors.pants);
+    // Phase 4: team colors read as dyed fabric (render/graphics.ts naturalUniform).
+    this.jersey.color.set(naturalUniform(colors.primary));
+    this.pants.color.set(naturalUniform(colors.pants));
     this.helmetMat.color.set(colors.helmet);
     this.skin.color.setHex(skinTone);
     const tex = numberTexture(number, colors.secondary, colors.primary);

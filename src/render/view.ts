@@ -20,12 +20,16 @@ import { PlayerMesh, buildFor } from './playerMesh';
 import { PALETTE } from './palette';
 import { headingToRotY, setFrameFlip, toWorld } from './coords';
 import cameraJson from '../data/camera.json';
+import { GRAPHICS, qualityPreset, type GraphicsQuality, type QualityPreset } from './graphics';
 
 type CamRig = { back: number; height: number; lookAhead: number; lookHeight: number };
 type DefRig = CamRig & { lookToBall: number; follow: number };
-export const CAMERA = cameraJson as { pocket: CamRig & { gazePan: number }; carrier: CamRig; followDepth: number; followLateral: number; lateralShare: number; fov: number; fovPortrait: number; hideOfficialsWithin: number; defense: DefRig; defenseUnits: Record<DefUnit, Partial<DefRig>> };
+type FormationRig = { behindBall: number; behindDeepest: number; height: number; lookAhead: number; lookHeight: number; lateralShare: number; userShare: number; follow: number };
+export const CAMERA = cameraJson as { pocket: CamRig & { gazePan: number }; carrier: CamRig; followDepth: number; followLateral: number; lateralShare: number; fov: number; fovPortrait: number; hideOfficialsWithin: number; defense: DefRig; formation: FormationRig; defenseUnits: Record<DefUnit, Partial<DefRig>> };
 
 export type CameraMode = 'firstPerson' | 'behindQB';
+/** Phase 4: defense camera. FORMATION (default) = behind the whole defense; PLAYER = behind the selected defender (Phase 3a). */
+export type DefenseCameraMode = 'formation' | 'player';
 /** Defense (user controls a cornerback): camera behind the selected defender, looking at the offense. */
 export const USER_DEF_LABELS: Partial<Record<string, string>> = { CB1: 'CB1', CB2: 'CB2', NB: 'NB' };
 
@@ -36,6 +40,8 @@ export interface ViewInput {
   cameraMode: CameraMode;
   /** Before the snap: players in stance. */
   presnap: boolean;
+  /** Phase 4: defense camera (default formation). */
+  defenseCamera?: DefenseCameraMode;
 }
 
 export interface ScreenPoint {
@@ -66,6 +72,10 @@ export class SceneView {
   readonly ball: THREE.Mesh;
   private heldBall: THREE.Mesh;
   private sun: THREE.DirectionalLight;
+  /** Phase 4: shadowless light from behind the play (as the camera sees it): brighter player edges. */
+  private rim: THREE.DirectionalLight;
+  private quality: QualityPreset = qualityPreset(GRAPHICS.default);
+  private shadowsWanted = true;
   private pixelScale = 1;
   private time = 0;
   private camPos = new THREE.Vector3();
@@ -83,7 +93,7 @@ export class SceneView {
     this.renderer.setClearColor(PALETTE.sky);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.05;
+    this.renderer.toneMappingExposure = GRAPHICS.lighting.exposure;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.scene.background = new THREE.Color(PALETTE.sky);
@@ -93,8 +103,9 @@ export class SceneView {
     this.scene.add(this.camera);
     this.scene.add(this.skyDome());
 
-    this.scene.add(new THREE.HemisphereLight(0xe3f0ff, 0x46603a, 1.25));
-    this.sun = new THREE.DirectionalLight(0xfff0d8, 2.1);
+    const L = GRAPHICS.lighting;
+    this.scene.add(new THREE.HemisphereLight(L.hemiSky, L.hemiGround, L.hemiIntensity));
+    this.sun = new THREE.DirectionalLight(L.sunColor, L.sunIntensity);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
     const sc = this.sun.shadow.camera;
@@ -108,6 +119,9 @@ export class SceneView {
     this.sun.shadow.normalBias = 0.03;
     this.sun.shadow.radius = 4;
     this.scene.add(this.sun, this.sun.target);
+    this.rim = new THREE.DirectionalLight(L.rimColor, L.rimIntensity);
+    this.rim.castShadow = false;
+    this.scene.add(this.rim, this.rim.target);
 
     this.field = new FieldView(this.renderer);
     this.scene.add(this.field.group);
@@ -162,9 +176,37 @@ export class SceneView {
   }
 
   setShadows(on: boolean) {
+    this.shadowsWanted = on;
+    on = on && this.quality.shadows;
     this.renderer.shadowMap.enabled = on;
     this.sun.castShadow = on;
     for (const p of [...this.players, ...this.officials]) p.setCastShadow(on);
+  }
+
+  /** Phase 4: graphics quality preset (data/graphics.json): pixel ratio, shadows, rim light, materials. */
+  setQuality(q: GraphicsQuality) {
+    const Q = (this.quality = qualityPreset(q));
+    this.renderer.shadowMap.type = Q.softShadows ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
+    if (this.sun.shadow.mapSize.x !== Q.shadowMapSize) {
+      this.sun.shadow.mapSize.set(Q.shadowMapSize, Q.shadowMapSize);
+      this.sun.shadow.map?.dispose();
+      this.sun.shadow.map = null as unknown as THREE.WebGLRenderTarget;
+    }
+    this.rim.visible = Q.rimLight;
+    for (const p of [...this.players, ...this.officials]) p.setQuality(Q);
+    this.setShadows(this.shadowsWanted);
+    this.resize();
+  }
+
+  /** The rim light sits behind the play as seen from the camera, high up, so it outlines the players. */
+  private placeRim() {
+    if (!this.rim.visible) return;
+    const dir = this.camera.getWorldDirection(this.tmp).setY(0);
+    if (dir.lengthSq() < 1e-6) dir.set(0, 0, -1);
+    dir.normalize();
+    const look = this.tmp2.copy(this.camera.position).addScaledVector(dir, 25).setY(0);
+    this.rim.target.position.copy(look);
+    this.rim.position.copy(look).addScaledVector(dir, 40).setY(look.y + 22);
   }
 
   setPixelScale(scale: number) {
@@ -176,7 +218,7 @@ export class SceneView {
   resize() {
     const w = window.innerWidth;
     const h = window.innerHeight;
-    const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+    const dpr = Math.min(window.devicePixelRatio || 1, this.quality.pixelRatioCap);
     this.renderer.setPixelRatio(dpr * this.pixelScale);
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
@@ -400,7 +442,8 @@ export class SceneView {
 
     const focus = carrier ?? qb;
     this.followSun(focus.pos.x, focus.pos.y + 8);
-    if (userDef) this.updateDefenseCamera(sim, userDef, alpha, dt);
+    if (userDef && inp.defenseCamera === 'player') this.updateDefenseCamera(sim, userDef, alpha, dt);
+    else if (userDef) this.updateFormationCamera(sim, userDef, alpha, dt);
     else this.updateCamera(sim, alpha, dt, inp, firstPerson);
   }
 
@@ -421,6 +464,35 @@ export class SceneView {
     const l = Math.hypot(dx, dy) || 1;
     const desiredPos = toWorld(dp.x - (dx / l) * C.back, dp.y - (dy / l) * C.back, C.height);
     const desiredLook = toWorld(look.x, look.y, C.lookHeight);
+    if (!this.camInit) {
+      this.camPos.copy(desiredPos);
+      this.camLook.copy(desiredLook);
+      this.camInit = true;
+    }
+    const k = Math.min(1, dt * C.follow);
+    this.camPos.lerp(desiredPos, k);
+    this.camLook.lerp(desiredLook, k);
+    this.applyFov(true);
+    this.camera.position.copy(this.camPos);
+    this.camera.lookAt(this.camLook);
+  }
+
+  /**
+   * Phase 4 default defense camera: behind the whole defense, high enough to
+   * see the formation, the line, the safeties and the receivers. Follows the
+   * ball along the field axis; it never rotates.
+   */
+  private updateFormationCamera(sim: PlaySim, d: Actor, alpha: number, dt: number) {
+    const C = CAMERA.formation;
+    const carrier = sim.carrier;
+    const bp = carrier ? lerp2(carrier.prevPos, carrier.pos, alpha) : lerp2(sim.ball.prevPos, sim.ball.pos, alpha);
+    const dp = lerp2(d.prevPos, d.pos, alpha);
+    let deepest = -Infinity;
+    for (const a of sim.actors) if (a.side === 'def' && !a.down) deepest = Math.max(deepest, a.pos.y);
+    const camY = Math.max(bp.y + C.behindBall, deepest + C.behindDeepest);
+    const camX = bp.x * C.lateralShare + (dp.x - bp.x) * C.userShare;
+    const desiredPos = toWorld(camX, camY, C.height);
+    const desiredLook = toWorld(camX + (bp.x - camX) * 0.5, bp.y - C.lookAhead, C.lookHeight);
     if (!this.camInit) {
       this.camPos.copy(desiredPos);
       this.camLook.copy(desiredLook);
@@ -632,6 +704,7 @@ export class SceneView {
   }
 
   render() {
+    this.placeRim();
     this.renderer.render(this.scene, this.camera);
   }
 }
