@@ -23,9 +23,12 @@ import cameraJson from '../data/camera.json';
 
 type CamRig = { back: number; height: number; lookAhead: number; lookHeight: number };
 type DefRig = CamRig & { lookToBall: number; follow: number };
-export const CAMERA = cameraJson as { pocket: CamRig & { gazePan: number }; carrier: CamRig; followDepth: number; followLateral: number; lateralShare: number; fov: number; fovPortrait: number; hideOfficialsWithin: number; defense: DefRig; defenseUnits: Record<DefUnit, Partial<DefRig>> };
+type FormationRig = { behindBall: number; behindDeepest: number; height: number; lookAhead: number; lookHeight: number; lateralShare: number; userShare: number; follow: number };
+export const CAMERA = cameraJson as { pocket: CamRig & { gazePan: number }; carrier: CamRig; followDepth: number; followLateral: number; lateralShare: number; fov: number; fovPortrait: number; hideOfficialsWithin: number; defense: DefRig; formation: FormationRig; defenseUnits: Record<DefUnit, Partial<DefRig>> };
 
 export type CameraMode = 'firstPerson' | 'behindQB';
+/** Phase 4: defense camera. FORMATION (default) = behind the whole defense; PLAYER = behind the selected defender (Phase 3a). */
+export type DefenseCameraMode = 'formation' | 'player';
 /** Defense (user controls a cornerback): camera behind the selected defender, looking at the offense. */
 export const USER_DEF_LABELS: Partial<Record<string, string>> = { CB1: 'CB1', CB2: 'CB2', NB: 'NB' };
 
@@ -36,6 +39,8 @@ export interface ViewInput {
   cameraMode: CameraMode;
   /** Before the snap: players in stance. */
   presnap: boolean;
+  /** Phase 4: defense camera (default formation). */
+  defenseCamera?: DefenseCameraMode;
 }
 
 export interface ScreenPoint {
@@ -400,7 +405,8 @@ export class SceneView {
 
     const focus = carrier ?? qb;
     this.followSun(focus.pos.x, focus.pos.y + 8);
-    if (userDef) this.updateDefenseCamera(sim, userDef, alpha, dt);
+    if (userDef && inp.defenseCamera === 'player') this.updateDefenseCamera(sim, userDef, alpha, dt);
+    else if (userDef) this.updateFormationCamera(sim, userDef, alpha, dt);
     else this.updateCamera(sim, alpha, dt, inp, firstPerson);
   }
 
@@ -421,6 +427,35 @@ export class SceneView {
     const l = Math.hypot(dx, dy) || 1;
     const desiredPos = toWorld(dp.x - (dx / l) * C.back, dp.y - (dy / l) * C.back, C.height);
     const desiredLook = toWorld(look.x, look.y, C.lookHeight);
+    if (!this.camInit) {
+      this.camPos.copy(desiredPos);
+      this.camLook.copy(desiredLook);
+      this.camInit = true;
+    }
+    const k = Math.min(1, dt * C.follow);
+    this.camPos.lerp(desiredPos, k);
+    this.camLook.lerp(desiredLook, k);
+    this.applyFov(true);
+    this.camera.position.copy(this.camPos);
+    this.camera.lookAt(this.camLook);
+  }
+
+  /**
+   * Phase 4 default defense camera: behind the whole defense, high enough to
+   * see the formation, the line, the safeties and the receivers. Follows the
+   * ball along the field axis; it never rotates.
+   */
+  private updateFormationCamera(sim: PlaySim, d: Actor, alpha: number, dt: number) {
+    const C = CAMERA.formation;
+    const carrier = sim.carrier;
+    const bp = carrier ? lerp2(carrier.prevPos, carrier.pos, alpha) : lerp2(sim.ball.prevPos, sim.ball.pos, alpha);
+    const dp = lerp2(d.prevPos, d.pos, alpha);
+    let deepest = -Infinity;
+    for (const a of sim.actors) if (a.side === 'def' && !a.down) deepest = Math.max(deepest, a.pos.y);
+    const camY = Math.max(bp.y + C.behindBall, deepest + C.behindDeepest);
+    const camX = bp.x * C.lateralShare + (dp.x - bp.x) * C.userShare;
+    const desiredPos = toWorld(camX, camY, C.height);
+    const desiredLook = toWorld(camX + (bp.x - camX) * 0.5, bp.y - C.lookAhead, C.lookHeight);
     if (!this.camInit) {
       this.camPos.copy(desiredPos);
       this.camLook.copy(desiredLook);

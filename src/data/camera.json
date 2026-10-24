@@ -27,6 +27,17 @@
     "lookToBall": 0.25,
     "follow": 4
   },
+  "formation": {
+    "behindBall": 24,
+    "behindDeepest": 9,
+    "height": 15,
+    "lookAhead": 4,
+    "lookHeight": 0,
+    "lateralShare": 0.6,
+    "userShare": 0.15,
+    "follow": 3
+  },
+  "_docFormation": "Phase 4 default defense camera (render/view.ts updateFormationCamera): Madden-style view from behind the defense, high enough to show the whole formation, the line, the safeties and the receivers. The camera sits at max(ball + behindBall, deepest defender + behindDeepest) yd on the defense's side, height yd up, looking lookAhead yd past the ball toward the offense. Laterally it follows lateralShare of the ball's offset from the middle of the field plus userShare of the user's defender's offset from the ball. It never rotates with the play. The old player-level camera (`defense`, `defenseUnits`) stays as the PLAYER setting.",
   "defenseUnits": {
     "DL": {
       "back": 7,

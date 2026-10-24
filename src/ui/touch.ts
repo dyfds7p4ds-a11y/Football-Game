@@ -124,7 +124,7 @@ export class TouchControls {
     this.defStrip = strip;
     const SB = TOUCH.switchButton;
     this.switchBtn = h('button', { id: 'btn-switch', class: 'hidden', style: {
-      left: `calc(${SB.left}px + var(--safe-l))`, top: `${SB.topPct}%`, width: `${SB.size}px`, height: `${SB.size}px`,
+      right: `calc(${SB.right}px + var(--safe-r))`, top: `${SB.topPct}%`, width: `${SB.size}px`, height: `${SB.size}px`,
     } }, 'SWITCH');
     this.switchBtn.addEventListener('pointerdown', (e) => {
       e.preventDefault();

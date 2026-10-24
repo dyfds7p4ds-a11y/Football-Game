@@ -1,11 +1,13 @@
 import type { Difficulty } from '../data/types';
-import type { CameraMode } from '../render/view';
+import type { CameraMode, DefenseCameraMode } from '../render/view';
 
 export interface Settings {
   difficulty: Difficulty;
   /** Minutes per quarter. */
   quarterMinutes: number;
   cameraMode: CameraMode;
+  /** Phase 4: defense camera, FORMATION (behind the whole defense, default) or PLAYER (behind the selected defender). */
+  defenseCamera: DefenseCameraMode;
   retroPixels: boolean;
   showRoutes: boolean;
   lookSensitivity: number;
@@ -31,6 +33,7 @@ export const DEFAULT_SETTINGS: Settings = {
   difficulty: 'normal',
   quarterMinutes: 5,
   cameraMode: 'behindQB',
+  defenseCamera: 'formation',
   retroPixels: false,
   showRoutes: true,
   lookSensitivity: 1,

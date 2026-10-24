@@ -1295,7 +1295,7 @@ export class App {
       });
     } else if (this.sim && (this.phase === 'presnap' || this.phase === 'live' || this.phase === 'postplay' || this.phase === 'playcall')) {
       this.view.update(this.sim, this.phase === 'live' || this.phase === 'postplay' ? this.acc / SIM_DT : 1, dtv, {
-        gazeYaw: this.gazeYaw, gazePitch: this.gazePitch, target: this.target, cameraMode: this.settings.cameraMode,
+        gazeYaw: this.gazeYaw, gazePitch: this.gazePitch, target: this.target, cameraMode: this.settings.cameraMode, defenseCamera: this.settings.defenseCamera,
         presnap: this.phase === 'presnap',
       });
       if (this.phase === 'playcall') this.view.field.setTargetRing(null, 0);

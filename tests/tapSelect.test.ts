@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import TOUCH from '../src/data/touch.json';
 import { TAP_SELECT, isTap, pickAtTap } from '../src/ui/tapSelect';
-import { actionsRect, joystickLayout } from '../src/input/joystick';
+import { actionsRect, joystickLayout, switchButtonRect } from '../src/input/joystick';
 
 describe('Phase 3d: defender selection in the camera view', () => {
   const cands = [
@@ -25,16 +25,17 @@ describe('Phase 3d: defender selection in the camera view', () => {
     expect(isTap(100, TAP_SELECT.maxMove + 10)).toBe(false);
   });
 
-  it('SWITCH sits at the left screen edge, clear of the joystick and the action cluster (iPad landscape / portrait)', () => {
+  it('Phase 4: SWITCH sits in the right-edge zone, clear of the action cluster and the PLAYERS menu (iPad landscape / portrait)', () => {
     const SB = TOUCH.switchButton;
     for (const [w, h] of [[1180, 820], [820, 1180], [1366, 1024], [1024, 768]]) {
-      const top = (SB.topPct / 100) * h;
-      const btn = { left: SB.left, right: SB.left + SB.size, top, bottom: top + SB.size };
-      const j = joystickLayout(w, h);
+      const btn = switchButtonRect(w, h);
       const a = actionsRect(w, h);
-      expect(btn.left).toBeLessThan(w * 0.1); // at the edge, not in the middle of the picture
-      expect(btn.bottom).toBeLessThan(j.cy - j.hitRadius); // above the stick
-      expect(btn.right).toBeLessThan(a.left);
+      const j = joystickLayout(w, h);
+      expect(btn.left).toBeGreaterThanOrEqual(w * (1 - SB.edgeZonePct / 100)); // right-edge zone
+      expect(btn.right).toBeLessThanOrEqual(w);
+      expect(btn.bottom).toBeLessThan(a.top); // above the action cluster
+      expect(btn.left).toBeGreaterThan(j.cx + j.hitRadius); // nowhere near the stick
+      expect(btn.top).toBeGreaterThan(84 + 40); // below the PLAYERS menu
     }
   });
 });
