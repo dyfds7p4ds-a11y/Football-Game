@@ -65,21 +65,29 @@ describe('pocket', () => {
 
 describe('scrambling', () => {
   it('a QB who runs out of the pocket is scrambling and can slide to end the play safely', () => {
-    let slid = false;
-    const r = runPlay('four_verts', 'cover2', 4, {
-      throwAt: null, target: null,
-      script: (sim, inp) => {
-        inp.move = { x: 1, y: sim.t < 0.5 ? -1 : 0.6 };
-        if (sim.pastLos(sim.get('QB')) && sim.get('QB').pos.y > sim.los + 2 && !slid) {
-          inp.slide = true;
-          slid = true;
-        }
-      },
-    });
-    expect(r.sim.scrambling).toBe(true);
-    expect(r.events.some((e) => e.type === 'slide')).toBe(true);
-    expect(r.result!.outcome).toBe('tackle');
-    expect(r.result!.yards).toBeGreaterThanOrEqual(2);
+    // Phase 4: the defense now contains scrambles, so not every seed gets the QB 2 yd past the line:
+    // take the first snap where he gets there (straight up, through the lanes) and slide.
+    let found = false;
+    for (let seed = 4; seed < 40 && !found; seed++) {
+      let slid = false;
+      const r = runPlay('four_verts', 'cover2', seed, {
+        throwAt: null, target: null,
+        script: (sim, inp) => {
+          inp.move = { x: 0.4, y: sim.t < 0.5 ? -1 : 1 };
+          if (sim.pastLos(sim.get('QB')) && sim.get('QB').pos.y > sim.los + 2 && !slid) {
+            inp.slide = true;
+            slid = true;
+          }
+        },
+      });
+      if (!slid) continue;
+      found = true;
+      expect(r.sim.scrambling).toBe(true);
+      expect(r.events.some((e) => e.type === 'slide')).toBe(true);
+      expect(r.result!.outcome).toBe('tackle');
+      expect(r.result!.yards).toBeGreaterThanOrEqual(2);
+    }
+    expect(found).toBe(true);
   });
 
   it('a scrambling QB past the line is easier to bring down than in the open field as a runner', () => {

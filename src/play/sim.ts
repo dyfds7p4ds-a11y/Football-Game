@@ -281,6 +281,8 @@ export class PlaySim {
   pocketCue: PocketCue | null = null;
   /** QB is running with the ball (out of the pocket or past the LOS). */
   scrambling = false;
+  /** Phase 4: when the QB left the pocket (Infinity = never). */
+  scrambleAt = Infinity;
   charge = 0;
   charging = false;
   readonly officials: Official[];
@@ -1005,6 +1007,8 @@ export class PlaySim {
     stepSprint(this.sprint, !!input.sprint && mayRun && len(move) > 0.15, this.t, SIM_DT);
     let v = scale(move, controlled.maxSpeed * sprintSpeed(this.sprint, controlled === qb));
     if (controlled === qb && v.y < 0) v = scale(v, 0.9); // backpedal / drop
+    // Phase 4: a QB running across the field behind the line (not downhill) is slower than a runner.
+    if (controlled === qb && this.scrambling && !this.pastLos(qb) && len(v) > 0) v = scale(v, 1 - SCRAMBLE.flatSlow * Math.abs(norm(v).x));
     if (input.juke && this.jukeCooldown <= 0 && (controlled !== qb || this.pastLos(qb))) {
       const side = Math.abs(move.x) > 0.2 ? Math.sign(move.x) : this.rng.chance(0.5) ? 1 : -1;
       controlled.vel = add(controlled.vel, v2(side * 4.5, 0));
@@ -1018,9 +1022,11 @@ export class PlaySim {
       const holds = this.ball.holder === qb.id && !this.handedOff && !this.passThrown;
       if (holds && !this.scrambling && this.t > SCRAMBLE.minTime && len(qb.vel) > SCRAMBLE.speedToScramble && qb.vel.y > -1) {
         this.scrambling = true; // out of the pocket: the head follows the running path
+        this.scrambleAt = this.t;
         this.markReaction();
       }
       if (holds && this.pastLos(qb) && this.runRecognizedAt === Infinity) {
+        if (!this.scrambling) this.scrambleAt = this.t;
         this.scrambling = true;
         this.runRecognizedAt = this.t;
         this.emit('scramble', qb.id);
@@ -1160,7 +1166,8 @@ export class PlaySim {
       target: tgtPos,
       targetVel: target ? target.vel : v2(),
       charge: Math.min(1, this.charge) - Math.max(0, this.charge - 1) * 2, // holding too long hurts
-      pressure: this.pressure,
+      // Phase 4: a throw on the run while scrambling counts as extra pressure.
+      pressure: Math.min(1, this.pressure + (this.scrambling ? SCRAMBLE.throwOnRunPressure : 0)),
       accuracy: qb.player.ratings.throwAccuracy,
       power: qb.player.ratings.throwPower,
       qbSpeed: len(qb.vel),
@@ -1522,7 +1529,13 @@ export class PlaySim {
     }
     const startX = d.history.length ? d.history[0].x : d.pos.x;
     const side = Math.sign(startX - this.ballX);
-    if (Math.abs(startX - this.ballX) < POCKET.edgeStartWidth || this.scrambling) return qb.pos;
+    // Phase 4: a scrambling QB is chased with a pursuit angle; edge rushers on his side keep contain (stay outside him).
+    if (this.scrambling) {
+      const p = this.pursuit(d, qb);
+      const toward = Math.sign(qb.vel.x) === side && Math.abs(qb.vel.x) > 1;
+      return toward && Math.abs(startX - this.ballX) >= POCKET.edgeStartWidth ? v2(p.x + side * SCRAMBLE.containOutside, p.y) : p;
+    }
+    if (Math.abs(startX - this.ballX) < POCKET.edgeStartWidth) return qb.pos;
     const beside = Math.abs(d.pos.x - qb.pos.x) < POCKET.edgeArcWidth + 0.6;
     if (d.pos.y <= qb.pos.y + POCKET.edgeArcDepth && beside) return qb.pos; // turned the corner
     return v2(qb.pos.x + side * POCKET.edgeArcWidth, qb.pos.y - POCKET.edgeArcDepth);
@@ -1547,6 +1560,20 @@ export class PlaySim {
     if (a?.kind !== 'man' || this.t <= 1.2) return false;
     const r = this.get(a.target).route;
     return !!r?.blocks && !(r.type === 'check' && this.t > 1.5);
+  }
+
+  /**
+   * Phase 4: does this coverage defender leave his assignment to play a scrambling QB?
+   * Spies and underneath zones (and deep zones later) react once the QB is out of the
+   * tackle box or heading upfield; man defenders stay on their man until he crosses the line.
+   */
+  private scrambleRead(d: Actor, asg: DefAssignment, isDeep: boolean, qb: Actor, flight: boolean): boolean {
+    if (!this.scrambling || flight || this.ball.holder !== qb.id || this.passThrown) return false;
+    if (asg.kind !== 'spy' && asg.kind !== 'zone') return false;
+    const out = Math.abs(qb.pos.x - this.ballX) > SCRAMBLE.boxWidth || qb.vel.y > SCRAMBLE.upfieldSpeed;
+    if (!out) return false;
+    const read = asg.kind === 'spy' ? SCRAMBLE.spyRead : isDeep ? SCRAMBLE.deepRead : SCRAMBLE.underneathRead;
+    return this.t > this.scrambleAt + read + d.reaction * SCRAMBLE.reactFactor;
   }
 
   /** Phase 3c: pressure comes from whoever is actually rushing, seen by the line or not. */
@@ -1611,6 +1638,9 @@ export class PlaySim {
         d.reaction * (runner === qb ? SCRAMBLE.reactFactor : 1) + (isDeep ? 0.35 : 0) +
         (this.audibleEdge && this.blitzers.has(d.id) ? AUDIBLES.edge.blitzRunRead : 0)) {
         goal = this.pursuit(d, runner!);
+      } else if (this.scrambleRead(d, asg, isDeep, qb, !!flight)) {
+        // Phase 4: underneath zones and spies come up on a scrambling QB once he leaves the box.
+        goal = this.pursuit(d, qb);
       } else if (flight && asg.kind === 'man' && this.get(asg.target).id === flight.targetId && this.trailing(d, this.get(asg.target))) {
         // Trailing man defender can't see the ball: play through the receiver's hands.
         const r = this.get(asg.target);
